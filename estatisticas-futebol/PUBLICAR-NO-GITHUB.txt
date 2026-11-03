@@ -1,0 +1,51 @@
+COMO COLOCAR O SITE NO AR DE GRAÇA (GitHub Pages)
+
+Resultado: um link tipo https://SEU-USUARIO.github.io/estatisticas-futebol/ que abre no
+celular e no PC, com os dados atualizando sozinhos a cada 30 minutos. Sem .bat e sem PC ligado.
+
+IMPORTANTE: o repositório é público (qualquer um pode ver o código e os dados). Suas chaves
+ficam guardadas como "segredos" do GitHub e NÃO aparecem para ninguém. Nunca envie os
+arquivos chave_api.txt ou chave_odds.txt.
+
+1) CRIAR A CONTA
+   - Entre em github.com e crie uma conta grátis.
+
+2) CRIAR O REPOSITÓRIO
+   - Clique no "+" (canto superior direito) > New repository.
+   - Repository name: estatisticas-futebol
+   - Marque "Public" e marque "Add a README file".
+   - Clique em "Create repository".
+
+3) GUARDAR SUA CHAVE COMO SEGREDO
+   - No repositório: Settings > Secrets and variables > Actions > New repository secret.
+   - Name: FOOTBALL_DATA_KEY     Secret: sua chave da football-data.org > Add secret.
+   - (Opcional, para as odds) repita com Name: ODDS_API_KEY e a chave da The Odds API.
+
+4) LIGAR O GITHUB PAGES
+   - Settings > Pages > em "Source" escolha "GitHub Actions".
+
+5) ENVIAR OS ARQUIVOS
+   - Volte para a página inicial do repositório (aba "Code") > Add file > Upload files.
+   - Abra a pasta que veio NO ZIP (não a sua pasta de uso, que tem as chaves) e arraste
+     para o navegador TODOS os arquivos e também a pasta ".github".
+   - Clique em "Commit changes".
+   - Se a pasta ".github" não subir: Add file > Create new file, digite no nome
+     .github/workflows/atualizar.yml , cole o conteúdo desse arquivo e clique em Commit.
+
+6) PRIMEIRA ATUALIZAÇÃO
+   - Aba "Actions": a tarefa "Atualizar dados e publicar" começa sozinha depois do envio.
+     Se não começar, clique nela > "Run workflow".
+   - Leva uns 4 minutos. Quando ficar verde, o link aparece dentro dela e em Settings > Pages.
+
+7) NO CELULAR
+   - Abra o link no Chrome > menu (3 pontinhos) > "Adicionar à tela inicial".
+     Fica com ícone, igual um app.
+
+BOM SABER
+- Para atualizar o site depois de uma versão nova, repita o passo 5 (Upload files) com os
+  arquivos novos. Os dados continuam atualizando sozinhos.
+- O GitHub pausa tarefas agendadas se o repositório ficar 60 dias sem nenhuma alteração.
+  Se isso acontecer, vá em Actions e clique em "Enable workflow".
+- Favoritos e filtros salvos ficam guardados em cada aparelho (celular e PC separados).
+- Odds: com a chave grátis da The Odds API (500 créditos/mês), o site busca as odds de cada
+  liga com jogo nos próximos 3 dias, no máximo a cada 12 horas (cerca de 1 crédito por liga).

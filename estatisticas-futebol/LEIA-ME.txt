@@ -1,0 +1,32 @@
+ESTATÍSTICAS DE FUTEBOL - BETA 2
+
+USAR NO PC (offline)
+1. Dê dois cliques em "atualizar.bat" (usa o PowerShell do Windows, não precisa instalar nada).
+   - Na primeira vez ele pede sua chave da football-data.org e salva em chave_api.txt.
+   - Leva uns 4 minutos por causa do limite de 10 chamadas/minuto do plano grátis.
+2. Depois é só abrir o index.html. Sem dados.js, o site mostra dados de demonstração.
+
+COLOCAR NA WEB (celular)
+- Siga o arquivo PUBLICAR-NO-GITHUB.txt. É grátis e atualiza sozinho a cada 30 minutos.
+
+ODDS DAS CASAS DE APOSTAS (opcional, grátis)
+1. Crie uma conta em the-odds-api.com e pegue a chave do plano grátis (500 créditos/mês).
+2. No PC: crie um arquivo chave_odds.txt nesta pasta com a chave dentro.
+   Na web: cadastre a chave como segredo ODDS_API_KEY (passo 3 do guia do GitHub).
+3. O atualizador busca as odds 1X2 só das ligas com jogo nos próximos 3 dias e no máximo
+   a cada 12 horas, gastando cerca de 1 crédito por liga. Para mudar, edite ODDS_HORAS no
+   atualizar_dados.py (web) ou no atualizar.ps1 (PC).
+
+ARQUIVOS
+- index.html, estilo.css, app.js ... o site
+- motor.js ......................... cálculos (estatísticas, Elo, projeção, filtros)
+- atualizar.bat / atualizar.ps1 .... atualizador para o PC
+- atualizar_dados.py ............... atualizador usado na web (GitHub Actions)
+- .github/workflows/atualizar.yml .. tarefa automática do GitHub
+- dados-demo.js .................... dados de demonstração
+- chave_api.txt / chave_odds.txt ... suas chaves (nunca envie para o GitHub)
+
+O QUE O PLANO GRÁTIS ENTREGA
+- football-data.org: jogos, placar final e do 1º tempo, classificação e artilharia.
+- O site calcula o resto: estatísticas, Power Ranking (Elo), projeções e odd justa.
+- Não existe no plano grátis: escanteios, chutes, cartões, escalações e minuto dos gols.
