@@ -539,6 +539,7 @@
     jogos: ["Total de partidas", (b) => b.j, null, 0, "num"],
     vit: ["Vitórias", (b) => b.v, (b) => b.j, 1], emp: ["Empates", (b) => b.e, (b) => b.j, 0],
     der: ["Derrotas", (b) => b.d, (b) => b.j, -1],
+    mp: ["Marcou primeiro", (b) => b.mp, (b) => b.j - b.pdes, 1], sp: ["Sofreu primeiro", (b) => b.sp, (b) => b.j - b.pdes, -1],
     marcou: ["Marcou em", (b) => b.j - b.sm, (b) => b.j, 1], sofreu: ["Sofreu em", (b) => b.j - b.cs, (b) => b.j, -1],
     btts: ["Ambas marcam", (b) => b.btts, (b) => b.j, 0], cs: ["Sem sofrer gol", (b) => b.cs, (b) => b.j, 1],
     sm: ["Sem marcar", (b) => b.sm, (b) => b.j, -1],
@@ -561,7 +562,7 @@
     btts25: ["Ambas marcam e mais de 2,5", (b) => b.btts25, (b) => b.j, 0],
   };
   const TABELAS_JOGO = {
-    inteiro: ["jogos", "vit", "emp", "der", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "pts"],
+    inteiro: ["jogos", "vit", "emp", "der", "mp", "sp", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "pts"],
     tempos: ["#1º tempo", "v1", "e1", "d1", "m1", "s1", "ht05", "ht15", "gm1", "gs1", "#2º tempo", "m2", "s2", "st05", "st15", "gm2", "gs2", "#Viradas", "vir", "ced"],
     overs: ["#Gols no jogo", "ov05", "ov15", "ov25", "ov35", "ov45", "|", "un15", "un25", "un35", "#Ambas marcam", "btts", "btts25", "#1º tempo", "ht05", "ht15"],
   };
@@ -603,6 +604,20 @@
     return estado.ultimos ? l.slice(-estado.ultimos) : l;
   }
 
+  // bolinha de quem marcou primeiro: bola de futebol = o time marcou primeiro, bola branca = sofreu primeiro
+    const BOLA_FUT = `<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><defs><clipPath id="cb"><circle cx="10" cy="10" r="8.6"/></clipPath></defs><circle cx="10" cy="10" r="8.6" fill="#fff"/><g clip-path="url(#cb)"><g fill="#15212B"><polygon points="10.00,6.70 13.14,8.98 11.94,12.67 8.06,12.67 6.86,8.98"/><polygon points="18.35,-1.49 19.65,2.54 16.23,5.02 12.81,2.54 14.11,-1.49"/><polygon points="23.51,14.39 20.08,16.88 16.66,14.39 17.97,10.36 22.20,10.36"/><polygon points="10.00,24.20 6.58,21.71 7.88,17.69 12.12,17.69 13.42,21.71"/><polygon points="-3.51,14.39 -2.20,10.36 2.03,10.36 3.34,14.39 -0.08,16.88"/><polygon points="1.65,-1.49 5.89,-1.49 7.19,2.54 3.77,5.02 0.35,2.54"/></g><g stroke="#15212B" stroke-width="0.8"><line x1="10.00" y1="6.70" x2="10.00" y2="2.60"/><line x1="13.14" y1="8.98" x2="17.04" y2="7.71"/><line x1="11.94" y1="12.67" x2="14.35" y2="15.99"/><line x1="8.06" y1="12.67" x2="5.65" y2="15.99"/><line x1="6.86" y1="8.98" x2="2.96" y2="7.71"/></g></g><circle cx="10" cy="10" r="8.6" fill="none" stroke="#15212B" stroke-width="1.1"/></svg>`;
+  const BOLA_BRANCA = `<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="8.6" fill="#fff" stroke="var(--tinta-3)" stroke-width="1.3"/></svg>`;
+  const BOLA_DUVIDA = `<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="8.6" fill="none" stroke="var(--tinta-3)" stroke-width="1.3" stroke-dasharray="2.5 2"/><text x="10" y="14" text-anchor="middle" font-size="11" font-weight="700" fill="var(--tinta-3)" font-family="sans-serif">?</text></svg>`;
+  function bolaPrimeiro(p, tid) {
+    if (!encerrada(p)) return `<span class="bola"></span>`;
+    const casa = String(p.h) === String(tid);
+    const pg = casa ? M.primeiroGol(p.fh, p.fa, p.hh, p.ha) : M.primeiroGol(p.fa, p.fh, p.ha, p.hh);
+    if (pg === "eu") return `<span class="bola" title="Marcou primeiro">${BOLA_FUT}</span>`;
+    if (pg === "eles") return `<span class="bola" title="Sofreu primeiro">${BOLA_BRANCA}</span>`;
+    if (pg === "?") return `<span class="bola" title="Não dá para saber quem marcou primeiro: os dois times marcaram no mesmo tempo">${BOLA_DUVIDA}</span>`;
+    return `<span class="bola"></span>`;
+  }
+
   function listaLateral(code, tid, jogos, lado) {
     const titulo = lado === "casa" ? "Jogos do mandante (casa)" : lado === "fora" ? "Jogos do visitante (fora)" : "Jogos de " + nomeTime(tid);
     const itens = jogos.slice().reverse().map((p) => {
@@ -612,14 +627,15 @@
       return `<li class="clicavel" data-ir="jogo/${code}/${p.i}" role="link" tabindex="0">
         <span class="data">${dataCurta(p.d)}</span>
         <span class="conf"><span class="${casa ? "eu" : ""}">${h(nomeTime(p.h))}</span> <b>${p.fh} x ${p.fa}</b> <span class="${!casa ? "eu" : ""}">${h(nomeTime(p.a))}</span></span>
-        <span class="r ${r}">${r}</span></li>`;
+        ${bolaPrimeiro(p, tid)}<span class="r ${r}">${r}</span></li>`;
     }).join("");
     return `<div class="lateral">
       <div class="lateral-cab"><h3>${h(titulo)}</h3>
         <div class="alternar" role="group" aria-label="Quantidade de jogos">
           <button type="button" data-ultimos="5" aria-pressed="${estado.ultimos === 5}">Últimos 5</button>
           <button type="button" data-ultimos="0" aria-pressed="${!estado.ultimos}">Todos</button></div></div>
-      ${itens ? `<ul class="lista-lateral">${itens}</ul>` : `<p class="sub">Sem jogos encerrados antes desta partida.</p>`}
+      ${itens ? `<ul class="lista-lateral">${itens}</ul>
+        <p class="legenda-bolas"><span>${BOLA_FUT} marcou primeiro</span><span>${BOLA_BRANCA} sofreu primeiro</span></p>` : `<p class="sub">Sem jogos encerrados antes desta partida.</p>`}
     </div>`;
   }
 
@@ -799,7 +815,7 @@
     if (fim) {
       const gm = casa ? p.fh : p.fa, gs = casa ? p.fa : p.fh;
       const r = gm > gs ? "V" : gm === gs ? "E" : "D";
-      res = `${p.fh}-${p.fa} ${forma([r])}`;
+      res = `${p.fh}-${p.fa} ${bolaPrimeiro(p, tid)}${forma([r])}`;
     } else res = `<span class="sub">${hora(p.d)}</span>`;
     return `<li><span class="data">${dataCurta(p.d)}</span>${escudo(adv)}
       <button type="button" data-ir="jogo/${code}/${p.i}">${casa ? "x" : "em"} ${h(nomeTime(adv))}</button>
