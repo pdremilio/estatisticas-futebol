@@ -22,12 +22,33 @@
       m1: 0, s1: 0, m2: 0, s2: 0,               // marcou/sofreu no 1º e no 2º tempo
       gm2: 0, gs2: 0,                           // gols marcados/sofridos no 2º tempo
       btts25: 0,                                // ambas marcam e mais de 2,5
+      mp: 0, sp: 0, pdes: 0,                    // marcou primeiro / sofreu primeiro / não dá para saber
       forma: [],                                // últimos resultados ("V","E","D"), mais recente no fim
     };
   }
 
+  // Quem marcou primeiro, do ponto de vista do time (gm = gols dele).
+  // O plano grátis não tem minuto dos gols, então deduz pelo placar do 1º tempo:
+  // "eu", "eles", null (0 x 0) ou "?" quando não dá para saber (ex.: 1 x 1 no intervalo).
+  function primeiroGol(gm, gs, gm1, gs1) {
+    if (gm + gs === 0) return null;
+    if (gs === 0) return "eu";
+    if (gm === 0) return "eles";
+    if (gm1 == null || gs1 == null) return "?";
+    if (gm1 > 0 && gs1 === 0) return "eu";
+    if (gs1 > 0 && gm1 === 0) return "eles";
+    if (gm1 === 0 && gs1 === 0) {
+      const m2 = gm - gm1, s2 = gs - gs1;
+      if (m2 > 0 && s2 === 0) return "eu";
+      if (s2 > 0 && m2 === 0) return "eles";
+    }
+    return "?";
+  }
+
   function somarNoBucket(b, gm, gs, gm1, gs1) {
     b.j++; b.gm += gm; b.gs += gs;
+    const pg = primeiroGol(gm, gs, gm1, gs1);
+    if (pg === "eu") b.mp++; else if (pg === "eles") b.sp++; else if (pg === "?") b.pdes++;
     const tot = gm + gs;
     for (let i = 0; i < LINHAS.length; i++) if (tot > LINHAS[i]) b.ov[i]++;
     if (gm > 0 && gs > 0) { b.btts++; if (tot > 2.5) b.btts25++; }
@@ -386,7 +407,7 @@
 
   const Motor = {
     LINHAS, MERCADOS, SUJEITOS, METRICAS_TIME, METRICAS_PROJ, METRICAS_CMP,
-    prepararCompeticao, metricas, bucketDeJogos, gols2T, projetar, fotoAtual, encerrada,
+    prepararCompeticao, metricas, bucketDeJogos, primeiroGol, gols2T, projetar, fotoAtual, encerrada,
     backtest, proximosNoFiltro, passa, valorMetrica, tabela, ranking,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Motor;
