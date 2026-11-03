@@ -1,0 +1,56 @@
+name: Atualizar dados e publicar
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.publicar.outputs.page_url }}
+    steps:
+      - name: Pegar os arquivos do site
+        uses: actions/checkout@v4
+
+      - name: Configurar o GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Baixar os dados já publicados
+        run: curl -sfL "${{ steps.pages.outputs.base_url }}/dados.js" -o dados.js || rm -f dados.js
+
+      - name: Atualizar dados
+        env:
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python3 atualizar_dados.py
+
+      - name: Montar a pasta do site
+        run: |
+          mkdir -p _site
+          cp index.html estilo.css app.js motor.js dados-demo.js _site/
+          if [ -f dados.js ]; then cp dados.js _site/; fi
+
+      - name: Enviar o site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Publicar
+        id: publicar
+        uses: actions/deploy-pages@v4
