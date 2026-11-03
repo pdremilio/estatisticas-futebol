@@ -453,7 +453,10 @@
     const l2 = document.getElementById("l-limpar2");
     if (l2) l2.addEventListener("click", () => { estado.filtro = copiaFiltro(FILTRO_VAZIO); salvarFiltro(); telaJogos(); });
     const dest = document.getElementById("destaques");
-    if (dest) dest.innerHTML = destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia));
+    if (dest) {
+      if (estado.sel) atualizarPainelJogo();
+      else dest.innerHTML = destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia));
+    }
   }
 
   function cabGrupo(code, n) {
@@ -648,10 +651,49 @@
     </div>`;
   }
 
+  // modo lado a lado: no PC o jogo abre à direita da lista
+  const LARGURA_LADO = 1200;
+  const ladoALado = () => window.innerWidth >= LARGURA_LADO;
+  estado.sel = null; // { code, id } do jogo aberto no painel
+
   function telaJogo(code, id) {
     const p = acharPartida(code, id);
-    if (!p) { telaJogos(); return; }
-    estado.dia = diaDe(p.d);
+    if (!p) { estado.sel = null; telaJogos(); return; }
+    const dia = diaDe(p.d);
+    if (ladoALado() && dia >= diaMin() && dia <= diaMax()) {
+      const mesmaTela = document.querySelector(".jogos-pagina") && estado.dia === dia;
+      estado.dia = dia; estado.sel = { code, id: String(id) };
+      if (mesmaTela) atualizarPainelJogo(); else telaJogos();
+      return;
+    }
+    estado.sel = null;
+    estado.dia = dia;
+    const r = htmlJogo(code, p);
+    const voltar = `<button class="botao-q texto voltar-v2" type="button" data-voltar>‹ Jogos de ${dataCurta(p.d)}</button>`;
+    app.innerHTML = `${voltar}<section class="painel jogo-pagina">${r}</section>`;
+  }
+
+  function atualizarPainelJogo() {
+    const pagina = document.querySelector(".jogos-pagina");
+    const aside = document.getElementById("destaques");
+    if (!pagina || !aside) return;
+    const sel = estado.sel && acharPartida(estado.sel.code, estado.sel.id);
+    pagina.classList.toggle("com-jogo", !!sel);
+    document.querySelectorAll(".jogo-v2[aria-current]").forEach((el) => el.removeAttribute("aria-current"));
+    if (sel) {
+      const linha = document.querySelector(`.jogo-v2[data-ir="jogo/${estado.sel.code}/${sel.i}"]`);
+      if (linha) linha.setAttribute("aria-current", "true");
+      aside.className = "painel jogo-pagina detalhe-lado";
+      aside.setAttribute("aria-label", "Jogo selecionado");
+      aside.innerHTML = `<button class="fechar-jogo" type="button" data-voltar title="Fechar o jogo e voltar aos destaques" aria-label="Fechar o jogo">✕</button>${htmlJogo(estado.sel.code, sel)}`;
+    } else {
+      aside.className = "destaques";
+      aside.setAttribute("aria-label", "Destaques do dia");
+      aside.innerHTML = destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia));
+    }
+  }
+
+  function htmlJogo(code, p) {
     const comp = DADOS.competicoes[code];
     const fim = encerrada(p), vivo = aoVivo(p), temTimes = p.h && p.a;
     const rodada = p.r ? `Rodada ${p.r}` : FASES[p.f] || "";
@@ -685,8 +727,7 @@
           ${ladoTime(p.a, posA, pj ? pj.proj.p2 : null, "f", oddsJ && oddsJ.f)}
         </div>
       </div>`;
-    const voltar = `<button class="botao-q texto voltar-v2" type="button" data-voltar>‹ Jogos de ${dataCurta(p.d)}</button>`;
-    if (!temTimes) { app.innerHTML = `${voltar}<section class="painel">${cab}</section>`; return; }
+    if (!temTimes) return cab;
 
     const aba = ABAS_JOGO.some((a) => a[0] === estado.abaJogo) ? estado.abaJogo : "inteiro";
     const abas = `<nav class="abas-jogo" aria-label="Seções do jogo">${ABAS_JOGO.map(([id, rot]) =>
@@ -719,7 +760,7 @@
     } else {
       conteudo = `<div class="painel-corpo">${confrontoDireto(p.h, p.a)}</div>`;
     }
-    app.innerHTML = `${voltar}<section class="painel jogo-pagina">${cab}${abas}<div class="aba-conteudo">${conteudo}</div></section>`;
+    return `${cab}${abas}<div class="aba-conteudo">${conteudo}</div>`;
   }
 
   function abaProjecoes(code, p, pj) {
@@ -1337,6 +1378,14 @@
       rodarBacktest();
     }
   });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && estado.sel && !document.querySelector("dialog[open]")) ir("jogos");
+  });
+  let eraLado = ladoALado();
+  window.addEventListener("resize", () => {
+    const agora = ladoALado();
+    if (agora !== eraLado) { eraLado = agora; if (/^#jogo\//.test(location.hash)) render(); }
+  });
   app.addEventListener("keydown", (ev) => {
     if ((ev.key === "Enter" || ev.key === " ") && ev.target.dataset && ev.target.dataset.ir && ev.target.tagName !== "BUTTON") { ev.preventDefault(); ir(ev.target.dataset.ir); }
   });
@@ -1361,6 +1410,7 @@
     }
     switch (aba) {
       case "jogo": telaJogo(partes[1], partes[2]); break;
+      case "jogos": case "": estado.sel = null; telaJogos(); break;
       case "classificacao": telaClassificacao(partes[1]); break;
       case "times": telaTimes(partes[1]); break;
       case "time": telaTime(partes[1], partes[2]); break;
@@ -1370,7 +1420,8 @@
       default: telaJogos();
     }
     const chave = aba + "/" + (partes[1] || "") + "/" + (partes[2] || "");
-    if (ultimaAba !== chave) window.scrollTo(0, 0);
+    const noPainel = aba === "jogo" && estado.sel;
+    if (ultimaAba !== chave && !noPainel && !(aba === "jogos" && /^jogo\//.test(ultimaAba || "") && ladoALado())) window.scrollTo(0, 0);
     ultimaAba = chave;
     document.querySelectorAll("tr[data-ir]").forEach((tr) => tr.setAttribute("tabindex", "0"));
   }
