@@ -20,6 +20,9 @@ jobs:
   atualizar:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: estatisticas-futebol
     environment:
       name: github-pages
       url: ${{ steps.publicar.outputs.page_url }}
@@ -49,7 +52,7 @@ jobs:
       - name: Enviar o site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: estatisticas-futebol/_site
 
       - name: Publicar
         id: publicar
