@@ -574,9 +574,9 @@
     btts25: ["Ambas marcam e mais de 2,5", (b) => b.btts25, (b) => b.j, 0],
   };
   const TABELAS_JOGO = {
-    inteiro: ["jogos", "vit", "emp", "der", "mp", "sp", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "pts"],
+    inteiro: ["jogos", "vit", "emp", "der", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "pts"],
     tempos: ["#1º tempo", "v1", "e1", "d1", "m1", "s1", "ht05", "ht15", "gm1", "gs1", "#2º tempo", "m2", "s2", "st05", "st15", "gm2", "gs2", "#Viradas", "vir", "ced"],
-    tempo: ["jogos", "vit", "emp", "der", "mp", "sp", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "#Gols no tempo", "ov05", "ov15", "ov25"],
+    tempo: ["jogos", "vit", "emp", "der", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "#Gols no tempo", "ov05", "ov15", "ov25"],
     overs: ["#Gols no jogo", "ov05", "ov15", "ov25", "ov35", "ov45", "|", "un15", "un25", "un35", "#Ambas marcam", "btts", "btts25", "#1º tempo", "ht05", "ht15"],
   };
 
@@ -671,13 +671,12 @@
       return `<li class="clicavel" data-ir="jogo/${code}/${p.i}" role="link" tabindex="0">
         <span class="data">${dataCurta(p.d)}</span>
         <span class="conf"><span class="${casa ? "eu" : ""}">${h(nomeTime(p.h))}</span> <b>${p.fh} x ${p.fa}</b> <span class="${!casa ? "eu" : ""}">${h(nomeTime(p.a))}</span></span>
-        ${bolaPrimeiro(p, tid)}<span class="r ${r}">${r}</span></li>`;
+        <span class="r ${r}">${r}</span></li>`;
     }).join("");
     return `<div class="lateral">
       <div class="lateral-cab"><h3>${h(titulo)}</h3>
         ${controleUltimos()}</div>
-      ${itens ? `<ul class="lista-lateral">${itens}</ul>
-        <p class="legenda-bolas"><span>${BOLA_FUT} marcou primeiro</span><span>${BOLA_BRANCA} sofreu primeiro</span></p>` : `<p class="sub">Sem jogos encerrados antes desta partida.</p>`}
+      ${itens ? `<ul class="lista-lateral">${itens}</ul>` : `<p class="sub">Sem jogos encerrados antes desta partida.</p>`}
     </div>`;
   }
 
@@ -814,12 +813,13 @@
       <div class="sub-abas"><span class="sub">Power Ranking · ${h(DADOS.competicoes[code].nome || nomeComp(code))}</span>
         <button class="link" type="button" data-ir="ranking/${code}">Abrir o ranking completo</button></div>
       <div class="tabela-rolagem"><table class="dados rk">
-        <thead><tr><th class="esq">#</th><th class="esq">Time</th><th>Elo</th><th>Últimos 5</th><th class="ocultar-celular">Evolução</th>
+        <thead><tr><th class="esq">#</th><th class="esq">Time</th><th title="Posição na classificação do campeonato">Tabela</th><th>Elo</th><th>Últimos 5</th><th class="ocultar-celular">Evolução</th>
           <th class="ocultar-celular" title="Gols marcados por jogo em relação à média da liga">Ataque</th>
           <th class="ocultar-celular" title="Gols sofridos por jogo em relação à média da liga (menor é melhor)">Defesa</th><th class="esq ocultar-celular">Forma</th></tr></thead>
         <tbody>${r.map((x) => `<tr class="clicavel ${cls(x.t)}" data-ir="time/${code}/${x.t}">
           <td class="esq"><span class="pos">${x.pos}</span></td>
           <td class="esq"><span class="time-celula">${escudo(x.t)}<span>${h(nomeTime(x.t))}</span></span></td>
+          <td>${(() => { const pt = posicaoNaTabela(code, x.t); return pt ? pt.pos + "º" : "–"; })()}</td>
           <td class="forte">${Math.round(x.elo)}</td>
           <td class="${x.var5 >= 0 ? "var-mais" : "var-menos"}">${x.var5 >= 0 ? "+" : "−"}${Math.abs(Math.round(x.var5))}</td>
           <td class="ocultar-celular">${sparkline(x.hist)}</td>
@@ -930,7 +930,7 @@
     if (fim) {
       const gm = casa ? p.fh : p.fa, gs = casa ? p.fa : p.fh;
       const r = gm > gs ? "V" : gm === gs ? "E" : "D";
-      res = `${p.fh}-${p.fa} ${bolaPrimeiro(p, tid)}${forma([r])}`;
+      res = `${p.fh}-${p.fa} ${forma([r])}`;
     } else res = `<span class="sub">${hora(p.d)}</span>`;
     return `<li><span class="data">${dataCurta(p.d)}</span>${escudo(adv)}
       <button type="button" data-ir="jogo/${code}/${p.i}">${casa ? "x" : "em"} ${h(nomeTime(adv))}</button>
@@ -1117,6 +1117,7 @@
     ["ataque", "Melhor ataque", (x) => x.ataque, -1],
     ["defesa", "Melhor defesa", (x) => x.defesa, 1],
     ["ppj", "Pontos por jogo", (x) => x.ppj, -1],
+    ["tabela", "Classificação do campeonato", (x) => (x.posTab == null ? 999 : x.posTab), 1],
   ];
   function telaRanking(code) {
     const todas = code === "todas";
@@ -1124,7 +1125,10 @@
     const n = estado.rkN, ordem = ORDENS_RK.find((o) => o[0] === estado.rkOrdem) || ORDENS_RK[0];
     let r = [];
     for (const c of todas ? compsOrd() : [code]) {
-      for (const x of M.ranking(preps[c], n)) r.push({ ...x, code: c });
+      for (const x of M.ranking(preps[c], n)) {
+        const pt = posicaoNaTabela(c, x.t);
+        r.push({ ...x, code: c, posTab: pt ? pt.pos : null, ptsTab: pt ? pt.pts : null });
+      }
     }
     const totalTimes = r.length;
     if (estado.rkFiltro === "alta") r = r.filter((x) => x.varN > 0);
@@ -1151,6 +1155,7 @@
         </div>
         <div class="painel-corpo tabela-rolagem">${r.length ? `<table class="dados rk">
           <thead><tr><th class="esq">#</th><th class="esq">Time</th>
+            ${th("tabela", "Tabela", "", "Posição na classificação do campeonato")}
             ${th("elo", "Elo")}${th("evol", `Últimos ${n} jogos`, "", "Quanto o Elo subiu ou caiu nos últimos jogos")}
             <th class="ocultar-celular">Evolução</th>
             ${th("ataque", "Ataque", "ocultar-celular", "Gols marcados por jogo em relação à média da liga")}
@@ -1160,6 +1165,7 @@
           <tbody>${r.map((x, i) => `<tr class="clicavel" data-ir="time/${x.code}/${x.t}">
             <td class="esq"><span class="pos">${i + 1}</span></td>
             <td class="esq"><span class="time-celula">${todas ? seloComp(x.code) : ""}${escudo(x.t)}<span>${h(nomeTime(x.t))}</span>${favTimes.has(String(x.t)) ? `<i class="fav-time">${ESTRELA_SVG(12)}</i>` : ""}</span></td>
+            <td class="${ordem[0] === "tabela" ? "forte" : ""}">${x.posTab != null ? x.posTab + "º" : "–"}${x.ptsTab != null ? ` <span class="sub">${x.ptsTab} pts</span>` : ""}</td>
             <td class="forte">${Math.round(x.elo)}${ordem[0] !== "elo" || todas ? ` <span class="sub">${x.pos}º</span>` : ""}</td>
             <td class="${x.varN >= 0 ? "var-mais" : "var-menos"}">${x.varN >= 0 ? "+" : "−"}${Math.abs(Math.round(x.varN))}</td>
             <td class="ocultar-celular">${sparkline(x.hist)}</td>
