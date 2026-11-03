@@ -681,3 +681,44 @@ table.odds-tabela { margin-top: 14px; }
   .jogo-v2.cab-colunas .chance { font-size: 0; }
   .jogo-v2.cab-colunas .chance::after { content: "Chance"; font-size: 11px; }
 }
+
+/* ================================================================ jogo aberto ao lado da lista (PC) */
+@media (min-width: 1200px) {
+  .jogos-pagina.com-jogo { grid-template-columns: minmax(470px, 560px) minmax(0, 1fr); max-width: none; }
+  .jogos-pagina.com-jogo .lista-v2 { position: sticky; top: 104px; max-height: calc(100vh - 116px); display: flex; flex-direction: column; overflow: hidden; }
+  .jogos-pagina.com-jogo #lista-jogos-corpo { overflow-y: auto; min-height: 0; }
+  .jogos-pagina.com-jogo .jogo-v2 .situacao { display: none; }
+  .jogos-pagina.com-jogo .tabela-jogos .jogo-v2 { grid-template-columns: 28px 52px minmax(0, 1fr) 92px 50px 48px; gap: 6px; }
+  .jogos-pagina.com-jogo .tabela-jogos.com-odds .jogo-v2 { grid-template-columns: 28px 52px minmax(0, 1fr) 88px 46px 46px 44px; gap: 6px; }
+  .jogos-pagina.com-jogo .quando span { display: none; }
+  .jogos-pagina.com-jogo .nota-odd { font-size: 12px; }
+  .jogos-pagina.com-jogo .sel-mini > span:not(.sr) { display: none; }
+}
+.jogo-v2[aria-current="true"] { background: var(--superficie-2); box-shadow: inset 3px 0 0 var(--cartao); }
+.detalhe-lado { position: relative; overflow: hidden; container-type: inline-size; min-width: 0; }
+.fechar-jogo { position: absolute; top: 10px; right: 10px; z-index: 2; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--linha); background: var(--superficie-2); color: var(--tinta-2); cursor: pointer; font-size: 14px; }
+.fechar-jogo:hover { color: var(--tinta); border-color: var(--tinta-3); }
+@container (max-width: 1000px) {
+  .tres-colunas { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .tres-colunas .centro-stats { grid-column: 1 / -1; grid-row: 1; }
+  .cab-time h2 { font-size: 21px; }
+}
+@container (max-width: 620px) {
+  .tres-colunas { grid-template-columns: minmax(0, 1fr); }
+}
+@media (min-width: 1200px) {
+  main:has(.jogos-pagina.com-jogo) { max-width: 1800px; }
+  .jogos-pagina.com-jogo .compacta .sel-mini select { max-width: 132px; }
+  .jogos-pagina.com-jogo .compacta .data-atual { padding: 0 8px; font-size: 15.5px; }
+  .jogos-pagina.com-jogo .cab-colunas .chance,
+  .jogos-pagina.com-jogo .cab-colunas .odds { font-size: 0; }
+  .jogos-pagina.com-jogo .cab-colunas .chance::after { content: "Chance"; font-size: 11.5px; }
+  .jogos-pagina.com-jogo .cab-colunas .odds:nth-child(6)::after { content: "Justa*"; font-size: 11.5px; }
+  .jogos-pagina.com-jogo .cab-colunas .odds:nth-child(7)::after { content: "Casas**"; font-size: 11.5px; }
+}
+@media (min-width: 1200px) {
+  body:has(.jogos-pagina.com-jogo) .topo-linha,
+  body:has(.jogos-pagina.com-jogo) .abas,
+  body:has(.jogos-pagina.com-jogo) .aviso,
+  body:has(.jogos-pagina.com-jogo) .rodape { max-width: 1800px; }
+}
