@@ -1,8 +1,10 @@
 name: Atualizar dados e publicar
 
+# O agendamento do GitHub atrasa horas no plano grátis. Por isso cada execução,
+# ao terminar, espera ~25 min e chama a próxima (job "proxima"). O cron fica de reserva.
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "17,47 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -11,15 +13,15 @@ permissions:
   contents: read
   pages: write
   id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
+  actions: write
 
 jobs:
   atualizar:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: estatisticas-futebol
@@ -57,3 +59,23 @@ jobs:
       - name: Publicar
         id: publicar
         uses: actions/deploy-pages@v4
+
+  proxima:
+    needs: atualizar
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Esperar 25 minutos e chamar a próxima atualização
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 1500
+          mais_novas=$(gh run list --repo "${{ github.repository }}" --workflow atualizar.yml --limit 20 \
+            --json databaseId,status -q "[.[] | select(.status != \"completed\" and .databaseId > ${{ github.run_id }})] | length")
+          if [ "$mais_novas" = "0" ]; then
+            gh workflow run atualizar.yml --repo "${{ github.repository }}" --ref main
+            echo "Próxima atualização chamada."
+          else
+            echo "Já existe uma atualização mais nova em andamento; não chamo outra."
+          fi
