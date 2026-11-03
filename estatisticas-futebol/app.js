@@ -309,10 +309,16 @@
     </div>`;
   }
 
+  function iconeRecolher() {
+    return recolhidas.size
+      ? `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M7 9l5-5 5 5M7 15l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+      : `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M7 4l5 5 5-5M7 20l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+
   function botaoFiltros() {
     const n = nFiltros(estado.filtro);
     return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z" fill="${n ? "var(--cartao)" : "none"}" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
-      Filtros${n ? ` <span class="badge">${n}</span>` : ""}`;
+      <span class="sr">Filtros</span>${n ? `<span class="badge">${n}</span>` : ""}`;
   }
 
   function telaJogos() {
@@ -324,30 +330,31 @@
     app.innerHTML = `
       <div class="jogos-pagina">
         <section class="painel lista-v2" aria-label="Lista de jogos">
-          <div class="barra-ferramentas">
-            <div class="nav-data">
-              <button class="botao-q" type="button" data-passo="-1" aria-label="Dia anterior" ${estado.dia <= diaMin() ? "disabled" : ""}>‹</button>
-              <label class="data-atual"><span>${rotDia ? rotDia + ", " : ""}${SEMANA[dt.getDay()]} ${pad(d)}/${pad(m)}/${a}</span>
-                <input type="date" id="escolher-dia" value="${estado.dia}" min="${diaMin()}" max="${diaMax()}" aria-label="Escolher data"></label>
-              <button class="botao-q" type="button" data-passo="1" aria-label="Próximo dia" ${estado.dia >= diaMax() ? "disabled" : ""}>›</button>
-              ${estado.dia !== base ? `<button class="botao-q texto" type="button" data-passo="0">Hoje</button>` : ""}
-            </div>
-            <div class="ferramentas">
+          <div class="barra-ferramentas compacta">
+            <div class="tb-linha">
+              <div class="nav-data">
+                <button class="botao-q seta" type="button" data-passo="-1" aria-label="Dia anterior" title="Dia anterior" ${estado.dia <= diaMin() ? "disabled" : ""}>‹</button>
+                <label class="data-atual" title="Escolher data"><span>${rotDia ? `<b>${rotDia}</b> · ` : ""}${SEMANA[dt.getDay()]} ${pad(d)}/${pad(m)}</span>
+                  <input type="date" id="escolher-dia" value="${estado.dia}" min="${diaMin()}" max="${diaMax()}" aria-label="Escolher data"></label>
+                <button class="botao-q seta" type="button" data-passo="1" aria-label="Próximo dia" title="Próximo dia" ${estado.dia >= diaMax() ? "disabled" : ""}>›</button>
+                ${estado.dia !== base ? `<button class="botao-q texto" type="button" data-passo="0">Hoje</button>` : ""}
+              </div>
               <label class="sel-mini"><span>Ordenar por</span>
-                <select id="ordenar">${[["hora", "Hora de início"], ["comp", "Campeonato"], ["chance", "Maior chance de vitória"]].map(([k, r]) => `<option value="${k}" ${estado.ordem === k ? "selected" : ""}>${r}</option>`).join("")}</select></label>
-              <label class="sel-mini"><span>Competição</span>
-                <select id="comp-jogos"><option value="todas">Todas</option>${compsOrd().map((c) => `<option value="${c}" ${estado.compJogos === c ? "selected" : ""}>${h(nomeComp(c))}</option>`).join("")}</select></label>
-              <button class="botao-q" type="button" id="ocultar" aria-pressed="${!!estado.ocultarEncerrados}" title="${estado.ocultarEncerrados ? "Mostrar jogos encerrados" : "Esconder jogos encerrados"}">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>${estado.ocultarEncerrados ? '<path d="M3 3l18 18" stroke="currentColor" stroke-width="2"/>' : ""}</svg>
-                <span class="ocultar-celular">${estado.ocultarEncerrados ? "Encerrados ocultos" : "Ocultar encerrados"}</span></button>
+                <select id="ordenar">${[["hora", "Hora de início"], ["comp", "Campeonato"], ["chance", "Maior chance"]].map(([k, r]) => `<option value="${k}" ${estado.ordem === k ? "selected" : ""}>${r}</option>`).join("")}</select></label>
+              <label class="sel-mini"><span class="sr">Competição</span>
+                <select id="comp-jogos"><option value="todas">Todas as competições</option>${compsOrd().map((c) => `<option value="${c}" ${estado.compJogos === c ? "selected" : ""}>${h(nomeComp(c))}</option>`).join("")}</select></label>
+              <button class="botao-q icone" type="button" id="ocultar" aria-pressed="${!!estado.ocultarEncerrados}" title="${estado.ocultarEncerrados ? "Mostrar jogos encerrados" : "Esconder jogos encerrados"}" aria-label="${estado.ocultarEncerrados ? "Mostrar jogos encerrados" : "Esconder jogos encerrados"}">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>${estado.ocultarEncerrados ? '<path d="M3 3l18 18" stroke="currentColor" stroke-width="2"/>' : ""}</svg></button>
             </div>
-            <div class="ferramentas">
-              <button class="botao-q" type="button" id="abrir-filtros" aria-expanded="${!!estado.painelFiltro}" aria-pressed="${nFiltros(estado.filtro) > 0}">${botaoFiltros()}</button>
-              <button class="botao-q" type="button" id="so-fav" aria-pressed="${!!estado.soFavoritos}">
+            <div class="tb-linha">
+              <button class="botao-q" type="button" id="so-fav" aria-pressed="${!!estado.soFavoritos}" title="Mostrar só jogos, times e ligas favoritos">
                 <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" fill="${estado.soFavoritos ? "var(--cartao)" : "none"}" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
                 Favoritos</button>
-              <button class="botao-q" type="button" id="recolher">${recolhidas.size ? "Expandir jogos" : "Recolher jogos"}</button>
-              <input class="busca" id="busca" type="search" placeholder="Buscar confronto ou campeonato" value="${h(estado.busca || "")}" aria-label="Buscar confronto ou campeonato">
+              <button class="botao-q icone" type="button" id="recolher" title="${recolhidas.size ? "Expandir jogos" : "Recolher jogos"}" aria-label="${recolhidas.size ? "Expandir jogos" : "Recolher jogos"}">${iconeRecolher()}</button>
+              <button class="botao-q icone" type="button" id="abrir-filtros" aria-expanded="${!!estado.painelFiltro}" aria-pressed="${nFiltros(estado.filtro) > 0}" title="Filtros">${botaoFiltros()}</button>
+              <label class="busca-caixa"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <input class="busca" id="busca" type="search" placeholder="Buscar confronto ou campeonato" value="${h(estado.busca || "")}" aria-label="Buscar confronto ou campeonato"></label>
+              <span class="tb-contagem" id="tb-contagem" aria-live="polite"></span>
             </div>
             <div id="painel-filtros" ${estado.painelFiltro ? "" : "hidden"}>${estado.painelFiltro ? painelFiltros() : ""}</div>
           </div>
@@ -410,9 +417,11 @@
     const lista = jogosVisiveis();
     const totalDia = todasPartidas().filter((x) => x.dia === estado.dia).length;
     const rec = document.getElementById("recolher");
-    if (rec) rec.textContent = recolhidas.size ? "Expandir jogos" : "Recolher jogos";
+    if (rec) { const t = recolhidas.size ? "Expandir jogos" : "Recolher jogos"; rec.title = t; rec.setAttribute("aria-label", t); rec.innerHTML = iconeRecolher(); }
     const filtrando = lista.length !== totalDia;
-    const contagem = totalDia ? `<div class="contagem">${filtrando ? `${lista.length} de ${totalDia} jogos do dia` : `${totalDia} jogo${totalDia > 1 ? "s" : ""} no dia`}${nFiltros(estado.filtro) ? ` · <button class="link" type="button" id="l-limpar2">limpar filtros</button>` : ""}</div>` : "";
+    const tbc = document.getElementById("tb-contagem");
+    if (tbc) tbc.innerHTML = totalDia ? `${filtrando ? `${lista.length} de ${totalDia} jogos` : `${totalDia} jogo${totalDia > 1 ? "s" : ""}`}${nFiltros(estado.filtro) ? ` · <button class="link" type="button" id="l-limpar2">limpar filtros</button>` : ""}` : "";
+    const contagem = "";
     if (!lista.length) {
       let dica = "";
       if (!totalDia) {
