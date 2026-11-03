@@ -646,3 +646,38 @@ table.odds-tabela { margin-top: 14px; }
 .lista-mini .res .bola { margin-right: 2px; }
 .legenda-bolas { display: flex; gap: 14px; justify-content: center; margin: 8px 0 0; font-size: 12px; color: var(--tinta-3); }
 .legenda-bolas span { display: inline-flex; align-items: center; gap: 5px; }
+
+/* ================================================================ barra compacta da lista (estilo Futats) */
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.barra-ferramentas.compacta { gap: 8px; padding: 10px 12px; }
+.tb-linha { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.compacta .nav-data { gap: 4px; flex-wrap: nowrap; }
+.compacta .botao-q { height: 32px; min-width: 32px; padding: 0 10px; font-size: 13.5px; }
+.compacta .botao-q.icone { width: 32px; padding: 0; }
+.compacta .botao-q.seta { width: 30px; min-width: 30px; padding: 0 0 2px; font-size: 20px; }
+.compacta .botao-q.icone .badge { position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; font-size: 10.5px; padding: 0 4px; }
+.compacta .botao-q.icone { position: relative; }
+.compacta .data-atual { height: 32px; padding: 0 10px; font-size: 16.5px; white-space: nowrap; }
+.compacta .data-atual b { font-weight: 700; }
+.compacta .sel-mini { gap: 5px; font-size: 12.5px; }
+.compacta .sel-mini select { height: 32px; font-size: 13.5px; padding: 0 6px; max-width: 190px; }
+.busca-caixa { flex: 1; min-width: 160px; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--linha); background: var(--superficie-2); border-radius: var(--raio-p); color: var(--tinta-3); }
+.busca-caixa:focus-within { border-color: var(--tinta-3); }
+.busca-caixa .busca { border: 0; background: none; height: 30px; padding: 0; min-width: 0; flex: 1; outline: none; font-size: 13.5px; color: var(--tinta); }
+.tb-contagem { font-size: 12.5px; color: var(--tinta-3); white-space: nowrap; }
+.tb-contagem:empty { display: none; }
+.compacta #painel-filtros { margin-top: 2px; }
+.contagem { display: none; }
+@media (max-width: 640px) {
+  .compacta .nav-data { flex: 1 1 100%; }
+  .compacta .data-atual { flex: 1; justify-content: center; }
+  .compacta .sel-mini { flex: 1; }
+  .compacta .sel-mini select { width: 100%; max-width: none; }
+  .compacta .sel-mini > span:not(.sr) { display: none; }
+  .busca-caixa { min-width: 0; }
+  .tb-contagem { flex-basis: 100%; }
+}
+@media (max-width: 640px) {
+  .jogo-v2.cab-colunas .chance { font-size: 0; }
+  .jogo-v2.cab-colunas .chance::after { content: "Chance"; font-size: 11px; }
+}
