@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="estilo.css">
+<script>window.VER = Math.floor(Date.now() / 120000); document.write('<link rel="stylesheet" href="estilo.css?v=' + VER + '">');</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230F6E5A'/%3E%3Crect x='7' y='16' width='4' height='9' fill='%23fff'/%3E%3Crect x='14' y='10' width='4' height='15' fill='%23fff'/%3E%3Crect x='21' y='6' width='4' height='19' fill='%23F2C230'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -17,7 +17,7 @@
   <div class="topo-linha">
     <a class="marca" href="#jogos" aria-label="Estatísticas de Futebol, ir para Jogos">
       <svg class="marca-icone" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--casa)"/><rect x="7" y="16" width="4" height="9" fill="#fff"/><rect x="14" y="10" width="4" height="15" fill="#fff"/><rect x="21" y="6" width="4" height="19" fill="var(--cartao)"/></svg>
-      <span>Estatísticas de Futebol</span><small class="versao">beta 2</small>
+      <span>Estatísticas de Futebol</span><small class="versao">beta 3</small>
     </a>
     <div class="topo-meta" id="topo-meta"></div>
     <button class="botao-icone" id="tema" type="button" aria-label="Alternar tema claro e escuro" title="Tema">
@@ -37,8 +37,6 @@
 </footer>
 
 <script>document.write('<script src="dados.js?v=' + Date.now() + '"><\/script>');</script>
-<script src="dados-demo.js"></script>
-<script src="motor.js"></script>
-<script src="app.js"></script>
+<script>["dados-demo.js", "motor.js", "app.js"].forEach(function (f) { document.write('<script src="' + f + '?v=' + VER + '"><\/script>'); });</script>
 </body>
 </html>
