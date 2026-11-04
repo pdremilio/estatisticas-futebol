@@ -815,12 +815,28 @@ table.odds-tabela { margin-top: 14px; }
 .pressao { border: 1px solid var(--linha); border-radius: var(--raio-p); background: var(--superficie-2); padding: 10px 12px 8px; margin-bottom: 14px; }
 .pressao-cab { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
 .pressao-cab h3 { margin: 0; font: 700 16px var(--fonte-titulo); text-transform: uppercase; letter-spacing: .4px; color: var(--tinta-2); }
-.pressao svg { display: block; width: 100%; height: 130px; }
+.pressao-area { position: relative; height: 150px; }
+.pressao-area svg { position: absolute; left: 0; right: 0; top: 18px; bottom: 18px; width: 100%; height: calc(100% - 36px); display: block; }
+/* marcas de finalização: tamanho fixo, nunca esticam */
+.pressao .mk { position: absolute; width: 10px; height: 10px; padding: 0; border: 0; background: none; transform: translateX(-50%); cursor: pointer; font-size: 11px; line-height: 10px; }
+.pressao .mk.mk-c { top: 3px; } .pressao .mk.mk-f { bottom: 3px; }
+.mk-alvo, .pressao .mk.mk-alvo { border-radius: 50%; background: currentColor; }
+.mk-fora, .pressao .mk.mk-fora { border-radius: 50%; border: 2px solid currentColor; box-sizing: border-box; }
+.mk-bloq, .pressao .mk.mk-bloq { border-radius: 50%; border: 2px dotted currentColor; box-sizing: border-box; opacity: .8; }
+.mk-trave, .pressao .mk.mk-trave { background: var(--cartao); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.pressao .mk.mk-c { color: var(--casa); } .pressao .mk.mk-f { color: var(--fora); }
+.pressao .mk.mk-gol { width: 14px; height: 14px; font-size: 12px; line-height: 14px; }
+.pressao .mk.mk-c.mk-gol { top: 1px; } .pressao .mk.mk-f.mk-gol { bottom: 1px; }
+.pressao .mk:hover, .pressao .mk:focus-visible { outline: 2px solid var(--tinta); outline-offset: 1px; z-index: 2; }
+.pressao-simb { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--tinta-2); margin-top: 6px; }
+.pressao-simb span { display: inline-flex; align-items: center; gap: 5px; }
+.mk-ex { display: inline-block; width: 10px; height: 10px; color: var(--tinta-2); font-style: normal; font-size: 11px; line-height: 10px; }
+.mk-ex.mk-gol { width: auto; height: auto; }
+.pressao-info { margin: 6px 0 0; font-size: 13px; color: var(--tinta-2); min-height: 1.3em; }
 .pressao .p-c { fill: var(--casa); } .pressao .p-f { fill: var(--fora); }
 .pressao .p-eixo { stroke: var(--linha); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .pressao .p-tempo { stroke: var(--tinta-3); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
 .pressao .p-agora { stroke: var(--derrota); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-.pressao .p-gol { font-size: 9px; }
 .pressao-eixo { position: relative; height: 15px; font-size: 11px; color: var(--tinta-3); }
 .pressao-eixo span { position: absolute; top: 0; transform: translateX(-50%); }
 .pressao-eixo span:first-child { transform: none; } .pressao-eixo span:last-child { transform: none; }
@@ -842,5 +858,5 @@ table.odds-tabela { margin-top: 14px; }
 .esc-ic .ic { display: inline-block; width: 9px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-left: 3px; }
 .esc-ic .ic.amarelo { background: var(--cartao); } .esc-ic .ic.vermelho { background: var(--derrota); }
 @container (max-width: 620px) { .esc-grade { grid-template-columns: 1fr; } }
-@media (max-width: 640px) { .esc-grade { grid-template-columns: 1fr; } .pressao svg { height: 110px; } }
+@media (max-width: 640px) { .esc-grade { grid-template-columns: 1fr; } .pressao-area { height: 130px; } .pressao-leg small { display: none; } }
 .abas-jogo .vivo-min::before { width: 6px; height: 6px; }
