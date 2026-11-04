@@ -395,6 +395,24 @@ def ler_dados_existentes():
         return None
 
 
+def gravar_agenda(competicoes):
+    """agenda.json: horários dos jogos de ontem a +3 dias. O modo ao vivo (Supabase) lê este arquivo
+    para só gastar requisições da API-Football quando há jogo rolando."""
+    agora = datetime.now(timezone.utc)
+    jogos = []
+    for code, comp in competicoes.items():
+        for p in comp.get("partidas", []):
+            try:
+                d = iso_para_dt(p["d"])
+            except Exception:
+                continue
+            if -1.5 <= (d - agora).total_seconds() / 86400 <= 3 and p.get("s") not in ("POSTPONED", "CANCELLED"):
+                jogos.append({"d": p["d"], "c": code})
+    jogos.sort(key=lambda j: j["d"])
+    with open(os.path.join(PASTA, "agenda.json"), "w", encoding="utf-8") as f:
+        json.dump({"gerado_em": agora.isoformat(timespec="seconds"), "jogos": jogos}, f, separators=(",", ":"))
+
+
 def main():
     pedidas = [a.upper() for a in sys.argv[1:]] or COMPETICOES
     chave = obter_chave()
@@ -442,6 +460,7 @@ def main():
         json.dump(saida, f, ensure_ascii=False, separators=(",", ":"))
         f.write(";\n")
 
+    gravar_agenda(competicoes)
     tamanho = os.path.getsize(ARQ_SAIDA) / 1024
     print(f"\nPronto: dados.js gravado ({tamanho:.0f} KB).")
     if falhas:
