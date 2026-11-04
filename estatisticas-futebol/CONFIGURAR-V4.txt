@@ -1,0 +1,50 @@
+SCANBALL · BETA 4 · O QUE VOCÊ PRECISA FAZER
+=============================================
+
+O site novo já funciona sozinho, sem nada disto (o botão "Entrar" só aparece depois da PARTE 1).
+Nenhuma senha ou chave secreta vai para o código: elas ficam só no GitHub ou no Supabase.
+
+
+PARTE 1 — CONTAS (grátis, uns 10 minutos)
+-----------------------------------------
+1. Entre em https://supabase.com → "Start your project" → entre com o GitHub.
+2. "New project":
+     Name: scanball
+     Database Password: clique em "Generate", copie e GUARDE COM VOCÊ (não mande para ninguém)
+     Region: South America (São Paulo)
+   → "Create new project" e espere 1 a 2 minutos.
+3. Menu da esquerda → "SQL Editor" → "New query".
+   Abra o arquivo supabase/1-contas.sql, copie TUDO, cole e clique "Run".
+   Tem que aparecer "Success. No rows returned".
+4. Menu → "Authentication" → "URL Configuration":
+     Site URL:       https://pdremilio.github.io/estatisticas-futebol/
+     Redirect URLs:  "Add URL" → https://pdremilio.github.io/estatisticas-futebol/**
+   → "Save".
+5. (Para testar mais rápido, opcional) "Authentication" → "Sign In / Providers" → "Email":
+   desligue "Confirm email". Assim a conta funciona na hora, sem precisar abrir o e-mail.
+   Atenção: o envio de e-mails grátis do Supabase é limitado a poucos por hora; para os testes chega.
+6. Menu → "Project Settings" → "API Keys" (ou "Data API"). Me mande DOIS valores:
+     - Project URL           (algo como https://abcdxyz.supabase.co)
+     - a chave pública: "anon public" OU "publishable" (começa com eyJ... ou sb_publishable_...)
+   Essas duas PODEM ser públicas. NUNCA me mande a "service_role", a "secret" nem a senha do banco.
+   (Se preferir, cole você mesmo em config.js, nos campos url e anonKey.)
+
+
+PARTE 2 — MODO AO VIVO (só quando assinar o plano Pro da API-Football)
+---------------------------------------------------------------------
+1. Supabase → "Edge Functions" → "Deploy a new function" → "Via Editor".
+   Nome: ao-vivo
+   Apague o exemplo, cole TODO o conteúdo de supabase/functions/ao-vivo/index.ts → "Deploy function".
+2. Na função "ao-vivo" → "Details"/"Settings": DESLIGUE "Verify JWT" (Enforce JWT verification) → Save.
+   (A proteção é o CRON_SEGREDO abaixo.)
+3. "Edge Functions" → "Secrets" → adicione três:
+     API_FOOTBALL_KEY = a sua chave da API-Football
+     CRON_SEGREDO     = um texto longo que você inventar (ex.: 30 letras e números aleatórios)
+     AGENDA_URL       = https://pdremilio.github.io/estatisticas-futebol/agenda.json
+4. "SQL Editor" → "New query" → cole supabase/2-ligar-ao-vivo.sql.
+   ANTES de rodar, troque SEU-PROJETO e SEGREDO-DO-CRON (o mesmo texto do passo 3) → "Run".
+5. Me avise: eu mudo aoVivo para true no config.js e confiro o primeiro jogo.
+
+Gasto: cerca de 6 requisições por minuto só enquanto há jogo rolando (nenhuma sem jogo).
+O plano Pro (7.500/dia) cobre uns 20 horas de jogos por dia.
+Para desligar: SQL Editor → select cron.unschedule('scanball-ao-vivo');
