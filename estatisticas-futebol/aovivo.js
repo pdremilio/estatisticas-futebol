@@ -1,16 +1,17 @@
-/* ScanBall — modo ao vivo.
- * Lê a tabela "ao_vivo" do Supabase (preenchida a cada 15 s pela função "ao-vivo" com dados da API-Football)
- * e sobrepõe minuto, placar, eventos e estatísticas nas partidas do site.
- * Só liga com SB_CONFIG.aoVivo = true. Sem jogo na janela, não faz nenhuma requisição.
+/* ScanBall — placar ao vivo com dados públicos da ESPN (sem chave, sem servidor).
+ * A lista de jogos, tabelas e projeções continuam vindo da football-data.org (atualizada a cada ~30 min);
+ * o placar, o minuto e a situação dos jogos do dia passam a vir da ESPN, buscados pelo navegador a cada 20 s.
+ * Só busca as ligas que têm jogo na janela (de 75 min antes do início até o jogo terminar).
+ * Para desligar: window.SB_CONFIG.espn = false (config.js).
+ * Atenção: a API da ESPN não é oficial nem documentada; pode mudar sem aviso.
  */
 (function () {
   "use strict";
   const C = window.SB_CONFIG || {};
-  const LIGADO = !!(C.url && C.anonKey && C.aoVivo);
-  const LIGAS = { 71: "BSA", 39: "PL", 140: "PD", 135: "SA", 78: "BL1", 61: "FL1", 94: "PPL", 88: "DED", 40: "ELC", 2: "CL" };
-  const STATUS = { "1H": "IN_PLAY", "2H": "IN_PLAY", ET: "IN_PLAY", P: "IN_PLAY", LIVE: "IN_PLAY", BT: "PAUSED", HT: "PAUSED",
-    FT: "FINISHED", AET: "FINISHED", PEN: "FINISHED", SUSP: "SUSPENDED", INT: "SUSPENDED", ABD: "SUSPENDED", PST: "POSTPONED", CANC: "CANCELLED" };
-  const INTERVALO_VIVO = 15000, INTERVALO_CALMO = 60000;
+  const LIGADO = C.espn !== false;
+  const BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer/";
+  const ESPN = { BSA: "bra.1", PL: "eng.1", PD: "esp.1", SA: "ita.1", BL1: "ger.1", FL1: "fra.1", PPL: "por.1", DED: "ned.1", ELC: "eng.2", CL: "uefa.champions" };
+  const CICLO_VIVO = 20000, CICLO_CALMO = 60000;
 
   // ---------- nomes parecidos (mesma regra do atualizador de odds)
   const GENERICOS = new Set(["fc", "afc", "cf", "sc", "ec", "ac", "as", "ss", "club", "clube", "de", "da", "do", "del", "futebol", "football", "calcio", "cd", "ud", "fk", "sv", "sad", "the", "and", "esporte"]);
@@ -23,96 +24,103 @@
     return hits / Math.min(a.size, b.size);
   }
 
-  let dados = null, ultimo = null, timer = null, buscando = false;
-  const casados = new Map(); // id da API-Football -> partida do site
-  const tocadas = new Set(); // partidas que receberam sobreposição
+  let dados = null, timer = null, rodando = false;
+  const casados = new Map(); // "code:idESPN" -> partida do site
 
-  function acharPartida(j) {
-    if (casados.has(j.id)) return casados.get(j.id);
-    const code = LIGAS[j.lg];
-    const comp = code && dados.competicoes[code];
-    if (!comp) return null;
-    const quando = Date.parse(j.d);
-    const th = tokens(j.h && j.h.n), ta = tokens(j.a && j.a.n);
+  // a ESPN organiza o placar pelo dia no horário dos EUA (Nova York): jogo às 21h30 de Brasília ainda é "hoje" lá
+  const diaESPN = (iso) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(new Date(iso)).replace(/-/g, "");
+
+  // jogo na janela: de 75 min antes até 3h30 depois do início; se a football-data ainda não deu o jogo como
+  // encerrado, continua acompanhando por até 12 h (até o placar final chegar)
+  function naJanela(p, agora) {
+    const t = Date.parse(p.d), s = p._orig ? p._orig.s : p.s;
+    if (["POSTPONED", "CANCELLED"].includes(s) || agora < t - 75 * 60e3) return false;
+    return agora <= t + 3.5 * 3600e3 || (s !== "FINISHED" && agora <= t + 12 * 3600e3);
+  }
+  function buscasAtivas() {
+    const agora = Date.now(), lista = new Map(); // "liga|dia" -> [code, dia]
+    for (const code in ESPN) {
+      const comp = dados.competicoes[code];
+      for (const p of (comp && comp.partidas) || []) {
+        if (!naJanela(p, agora)) continue;
+        const dia = diaESPN(p.d);
+        lista.set(code + "|" + dia, [code, dia]);
+      }
+    }
+    return [...lista.values()];
+  }
+
+  function acharPartida(code, ev) {
+    const chave = code + ":" + ev.id;
+    if (casados.has(chave)) return casados.get(chave);
+    const c = ev.competitions && ev.competitions[0];
+    if (!c) return null;
+    const casa = c.competitors.find((x) => x.homeAway === "home"), fora = c.competitors.find((x) => x.homeAway === "away");
+    if (!casa || !fora) return null;
+    const nomes = (t) => tokens([t.displayName, t.shortDisplayName, t.name, t.location].join(" "));
+    const th = nomes(casa.team), ta = nomes(fora.team), quando = Date.parse(ev.date);
+    const T = dados.times || {};
     let melhor = null, nota = 0;
-    for (const p of comp.partidas) {
+    for (const p of dados.competicoes[code].partidas) {
       if (!p.h || !p.a) continue;
       const dif = Math.abs(Date.parse(p.d) - quando);
       if (dif > 3 * 3600e3) continue;
-      const T = dados.times || {};
-      const nh = tokens((T[p.h] || {}).n + " " + (T[p.h] || {}).c), na = tokens((T[p.a] || {}).n + " " + (T[p.a] || {}).c);
-      const sh = parecido(th, nh), sa = parecido(ta, na);
+      const sh = parecido(th, tokens((T[p.h] || {}).n + " " + (T[p.h] || {}).c)), sa = parecido(ta, tokens((T[p.a] || {}).n + " " + (T[p.a] || {}).c));
       if (sh + sa === 0) continue;
       if ((sh === 0 || sa === 0) && dif > 20 * 60e3) continue; // só um nome bateu: exige horário quase igual
       const n = sh + sa - dif / 86400e3;
       if (n > nota) { melhor = p; nota = n; }
     }
-    if (melhor) casados.set(j.id, melhor);
+    if (melhor) casados.set(chave, melhor);
     return melhor;
   }
 
-  function minuto(j) {
-    if (j.st === "HT") return "Intervalo";
-    if (j.st === "BT") return "Pausa";
-    if (j.st === "P") return "Pênaltis";
-    if (j.el == null) return "";
-    return j.el + (j.ex ? "+" + j.ex : "") + "'";
+  // ---------- placar, minuto e situação
+  function aplicarPlacar(code, ev) {
+    const p = acharPartida(code, ev);
+    if (!p) return false;
+    const c = ev.competitions[0], st = ev.status || {}, tp = st.type || {};
+    const casa = c.competitors.find((x) => x.homeAway === "home"), fora = c.competitors.find((x) => x.homeAway === "away");
+    const antes = JSON.stringify([p.s, p.fh, p.fa, p.du, p.vv && p.vv.min]);
+    if (!p._orig) p._orig = { s: p.s, fh: p.fh, fa: p.fa, hh: p.hh, ha: p.ha };
+    const vv = (p.vv = p.vv || {});
+    vv.fonte = "ESPN";
+    vv.st = tp.state;
+    vv.em = new Date().toISOString();
+    if (tp.state === "in") {
+      p.s = /HALFTIME/.test(tp.name || "") ? "PAUSED" : "IN_PLAY";
+      p.fh = Number(casa.score); p.fa = Number(fora.score);
+      vv.min = p.s === "PAUSED" ? "Intervalo" : st.displayClock || tp.shortDetail || "";
+    } else if (tp.state === "post" && tp.completed && !/POSTPONED|CANCEL|ABANDON/.test(tp.name || "")) {
+      p.s = "FINISHED"; p.fh = Number(casa.score); p.fa = Number(fora.score); vv.min = "";
+      if (/AET|EXTRA/.test(tp.name || "")) p.du = "EXTRA_TIME";
+      if (/PEN/.test(tp.name || "")) p.du = "PENALTY_SHOOTOUT";
+    } else {
+      vv.min = "";
+    }
+    return antes !== JSON.stringify([p.s, p.fh, p.fa, p.du, vv.min]);
   }
 
-  function aplicar(snap) {
-    if (!snap || !Array.isArray(snap.jogos)) return false;
-    let mudou = false;
-    const vistas = new Set();
-    for (const j of snap.jogos) {
-      const p = acharPartida(j);
-      if (!p) continue;
-      const s = STATUS[j.st];
-      if (!s) continue;
-      vistas.add(p);
-      if (!p._orig) p._orig = { s: p.s, fh: p.fh, fa: p.fa, hh: p.hh, ha: p.ha };
-      const antes = JSON.stringify([p.s, p.fh, p.fa, p.hh, p.ha, p.vv && p.vv.min, p.vv && p.vv.ev && p.vv.ev.length, p.vv && p.vv.es]);
-      p.s = s;
-      if (j.g) { p.fh = j.g[0]; p.fa = j.g[1]; }
-      if (j.ht && j.ht[0] != null) { p.hh = j.ht[0]; p.ha = j.ht[1]; }
-      p.vv = { min: minuto(j), st: j.st, ev: j.ev || (p.vv && p.vv.ev) || [], es: j.es || (p.vv && p.vv.es) || null, em: snap.em };
-      tocadas.add(p);
-      if (JSON.stringify([p.s, p.fh, p.fa, p.hh, p.ha, p.vv.min, p.vv.ev.length, p.vv.es]) !== antes) mudou = true;
-    }
-    // partida que saiu do feed sem terminar: volta ao que o site tinha
-    for (const p of tocadas) {
-      if (vistas.has(p) || p.s === "FINISHED") continue;
-      Object.assign(p, p._orig); delete p.vv; delete p._orig; tocadas.delete(p); mudou = true;
-    }
-    return mudou;
-  }
+  const buscarJSON = (url) => fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 
-  function haJanela() {
-    const agora = Date.now();
-    if (ultimo && ultimo.jogos && ultimo.jogos.some((j) => STATUS[j.st] === "IN_PLAY" || STATUS[j.st] === "PAUSED")) return true;
-    for (const code in dados.competicoes) {
-      for (const p of dados.competicoes[code].partidas || []) {
-        const t = Date.parse(p.d);
-        if (agora >= t - 15 * 60e3 && agora <= t + 3 * 3600e3 && !["FINISHED", "POSTPONED", "CANCELLED"].includes(p.s)) return true;
-      }
-    }
-    return false;
-  }
-
-  async function buscar() {
-    if (buscando || document.hidden) return;
-    buscando = true;
-    try {
-      const r = await fetch(C.url.replace(/\/$/, "") + "/rest/v1/ao_vivo?id=eq.1&select=dados,atualizado_em", { headers: { apikey: C.anonKey }, cache: "no-store" });
-      if (r.ok) {
-        const linhas = await r.json();
-        const snap = linhas && linhas[0] && linhas[0].dados;
-        if (snap) {
-          ultimo = snap;
-          if (aplicar(snap)) redesenhar();
+  async function ciclo() {
+    clearTimeout(timer);
+    let proximo = CICLO_CALMO;
+    if (!document.hidden && !rodando) {
+      rodando = true;
+      try {
+        const buscas = buscasAtivas();
+        let mudou = false;
+        if (buscas.length) {
+          proximo = CICLO_VIVO;
+          const placares = await Promise.all(buscas.map(([code, dia]) => buscarJSON(`${BASE}${ESPN[code]}/scoreboard?dates=${dia}`).then((r) => [code, r])));
+          for (const [code, r] of placares) for (const ev of (r && r.events) || []) if (aplicarPlacar(code, ev)) mudou = true;
         }
-      }
-    } catch (e) { /* sem rede: tenta no próximo ciclo */ }
-    buscando = false;
+        if (mudou) redesenhar();
+      } finally { rodando = false; }
+    }
+    timer = setTimeout(ciclo, proximo);
   }
 
   let pendente = false;
@@ -125,13 +133,6 @@
   }
   document.addEventListener("focusout", () => { if (pendente) setTimeout(redesenhar, 300); });
 
-  function ciclo() {
-    clearTimeout(timer);
-    const vivo = haJanela();
-    if (vivo) buscar();
-    timer = setTimeout(ciclo, vivo ? INTERVALO_VIVO : INTERVALO_CALMO);
-  }
-
   function iniciar() {
     if (!LIGADO) return;
     dados = (window.App && window.App.dados) || window.DADOS;
@@ -140,5 +141,5 @@
     ciclo();
   }
 
-  window.AoVivo = { ligado: LIGADO, iniciar, _aplicar: (snap, d) => { dados = d || dados; return aplicar(snap); } };
+  window.AoVivo = { ligado: LIGADO, iniciar, _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); } };
 })();
