@@ -1,0 +1,40 @@
+name: Baixar prévia (API-Football)
+
+# Rodar à mão (Actions → "Baixar prévia (API-Football)" → Run workflow).
+# Baixa o Brasileirão 2024 com escanteios, cartões, xG e lances (~20 requisições do plano grátis),
+# guarda dados-2024.js no repositório e republica o site. Não altera nada do site principal.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  baixar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: estatisticas-futebol
+    steps:
+      - name: Pegar os arquivos
+        uses: actions/checkout@v4
+
+      - name: Baixar o Brasileirão 2024 da API-Football
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: python3 baixar_previa_2024.py 71 2024
+
+      - name: Guardar dados-2024.js no repositório
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dados-2024.js
+          git commit -m "Prévia: dados do Brasileirão 2024 (API-Football)" || echo "Sem mudanças nos dados."
+          git push
+
+      - name: Republicar o site com a prévia
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run atualizar.yml --ref main
