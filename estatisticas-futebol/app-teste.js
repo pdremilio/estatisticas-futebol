@@ -406,32 +406,63 @@
     return `<div class="campo-bloco">${cab("a", p.a)}<div class="campo">${metade("a")}<div class="campo-meio"></div>${metade("h")}</div>${cab("h", p.h)}
       <p class="sub nota">Números de cada jogador na temporada desta competição: <b>G</b> gols · <b>A</b> assistências · <b>J</b> jogos. <span class="cj-num art">dourado</span> = artilheiro do time, <span class="cj-num gar">azul</span> = líder de assistências.</p></div>`;
   }
+  // colunas da lista de jogadores (números na temporada); clicar no título ordena pela coluna
+  const COLS_ESC = [
+    ["jg", "J", "Jogos na temporada"], ["min", "Min", "Minutos jogados na temporada"], ["g", "G", "Gols"], ["a", "A", "Assistências"],
+    ["cg", "CG", "Chutes no gol"], ["cart", "Cart.", "Cartões amarelos / vermelhos"],
+  ];
+  const ORD_ESC = [["pos", "Posição"], ["jg", "Jogos"], ["min", "Minutos"], ["g", "Gols"], ["a", "Assistências"], ["cg", "Chutes no gol"], ["cart", "Cartões"]];
+  estado.escOrd = ler("esc_ord", "pos");
+  const valorEsc = (s, k) => (!s ? -1 : k === "cart" ? s.am * 1 + s.vm * 3 : k === "min" ? (s.min == null ? -1 : s.min) : s[k] || 0);
+  const fMin = (m) => (m == null ? "…" : m >= 1000 ? Math.floor(m / 1000) + "." + String(m % 1000).padStart(3, "0") : String(m));
   function tabelaJogadores(p, l, tid) {
     const e = p.vv.esc && p.vv.esc[l];
     const ele = p.vv.elenco && p.vv.elenco[l];
     const top = destaquesElenco(p, l);
+    const ord = estado.escOrd;
     const linha = (j, cls) => {
       const s = temporadaDe(p, l, j);
       const noJogo = `${"⚽".repeat(j.g || 0)}${j.a ? `<span class="esc-a" title="Assistências neste jogo">A${j.a > 1 ? j.a : ""}</span>` : ""}${j.am ? '<i class="ic amarelo" title="Cartão amarelo"></i>' : ""}${j.vm ? '<i class="ic vermelho" title="Cartão vermelho"></i>' : ""}${j.ent ? '<span class="esc-ent" title="Entrou">▲</span>' : ""}${j.sai ? '<span class="esc-sai" title="Saiu">▼</span>' : ""}`;
       const marca = (top.art === String(j.id) ? ' <span class="selo-art" title="Artilheiro do time na temporada">artilheiro</span>' : "") + (top.gar === String(j.id) ? ' <span class="selo-gar" title="Líder de assistências do time na temporada">garçom</span>' : "");
-      const c = (v) => `<td>${s ? v : "–"}</td>`;
-      return `<tr class="${cls}"><td>${h(j.num)}</td><td class="esq">${h(j.n)}${marca}<span class="esc-ic">${noJogo}</span></td><td class="esc-pos">${h(j.pos === "SUB" ? "" : j.pos)}</td>${c(s && s.jg)}${c(s && s.g)}${c(s && s.a)}${c(s && s.cg)}${c(s && (s.am + s.vm ? `${s.am}/${s.vm}` : "0"))}</tr>`;
+      const res = ord !== "pos" && e && !j.tit ? ' <span class="esc-res" title="Começou no banco">reserva</span>' : "";
+      const cel = (k) => {
+        const v = !s ? "–" : k === "cart" ? (s.am + s.vm ? `${s.am}/${s.vm}` : "0") : k === "min" ? fMin(s.min) : s[k];
+        return `<td class="${k === ord ? "ord" : ""}">${v}</td>`;
+      };
+      return `<tr class="${cls}"><td>${h(j.num)}</td><td class="esq">${h(j.n)}${marca}${res}<span class="esc-ic">${noJogo}</span></td><td class="esc-pos">${h(j.pos === "SUB" ? "" : j.pos)}</td>${COLS_ESC.map(([k]) => cel(k)).join("")}</tr>`;
     };
-    const cabT = (rot) => `<thead><tr><th>#</th><th class="esq">${rot}</th><th></th><th title="Jogos na temporada">J</th><th title="Gols">G</th><th title="Assistências">A</th><th title="Chutes no gol">CG</th><th title="Cartões amarelos / vermelhos">Cart.</th></tr></thead>`;
+    const cabT = (rot) => `<thead><tr><th>#</th><th class="esq">${rot}</th><th></th>${COLS_ESC.map(([k, r, t]) =>
+      `<th><button type="button" class="esc-ord" data-escord="${k}" aria-pressed="${ord === k}" title="${t}: ordenar">${r}${ord === k ? "▾" : ""}</button></th>`).join("")}</tr></thead>`;
+    const porValor = (lista) => lista.slice().sort((x, y) => valorEsc(temporadaDe(p, l, y), ord) - valorEsc(temporadaDe(p, l, x), ord) || PROF(x.pos) - PROF(y.pos));
     let corpo;
     if (e) {
-      const tit = e.jog.filter((j) => j.tit).sort((a, b) => PROF(a.pos) - PROF(b.pos) || LADO(a.pos) - LADO(b.pos));
-      const res = e.jog.filter((j) => !j.tit).sort((a, b) => (b.ent ? 1 : 0) - (a.ent ? 1 : 0));
-      corpo = `<table class="dados esc-tab">${cabT("Titulares")}<tbody>${tit.map((j) => linha(j, "")).join("")}</tbody></table>
-        ${res.length ? `<table class="dados esc-tab">${cabT("Reservas")}<tbody>${res.map((j) => linha(j, j.ent ? "" : "apagado")).join("")}</tbody></table>` : ""}`;
+      if (ord === "pos") {
+        const tit = e.jog.filter((j) => j.tit).sort((a, b) => PROF(a.pos) - PROF(b.pos) || LADO(a.pos) - LADO(b.pos));
+        const res = e.jog.filter((j) => !j.tit).sort((a, b) => (b.ent ? 1 : 0) - (a.ent ? 1 : 0));
+        corpo = `<table class="dados esc-tab">${cabT("Titulares")}<tbody>${tit.map((j) => linha(j, "")).join("")}</tbody></table>
+          ${res.length ? `<table class="dados esc-tab">${cabT("Reservas")}<tbody>${res.map((j) => linha(j, j.ent ? "" : "apagado")).join("")}</tbody></table>` : ""}`;
+      } else {
+        corpo = `<table class="dados esc-tab">${cabT("Relacionados")}<tbody>${porValor(e.jog).map((j) => linha(j, "")).join("")}</tbody></table>`;
+      }
     } else if (ele && Object.keys(ele.jog).length) {
-      // escalação ainda não saiu: mostra os destaques do elenco
-      const lista = Object.entries(ele.jog).map(([id, s]) => ({ id, n: s.n, num: s.num, pos: s.pos, g: 0, a: 0 }))
-        .sort((a, b) => { const sa = ele.jog[a.id], sb = ele.jog[b.id]; return sb.g + sb.a * 0.6 - (sa.g + sa.a * 0.6) || sb.jg - sa.jg; }).slice(0, 8);
-      corpo = `<table class="dados esc-tab">${cabT("Destaques do elenco")}<tbody>${lista.map((j) => linha(j, "")).join("")}</tbody></table>`;
+      // escalação ainda não saiu: mostra os destaques do elenco (ou o elenco inteiro ordenado pela coluna escolhida)
+      let lista = Object.entries(ele.jog).map(([id, s]) => ({ id, n: s.n, num: s.num, pos: s.pos, g: 0, a: 0 }));
+      lista = ord === "pos"
+        ? lista.sort((a, b) => { const sa = ele.jog[a.id], sb = ele.jog[b.id]; return sb.g + sb.a * 0.6 - (sa.g + sa.a * 0.6) || sb.jg - sa.jg; })
+        : porValor(lista);
+      corpo = `<table class="dados esc-tab">${cabT("Destaques do elenco")}<tbody>${lista.slice(0, 10).map((j) => linha(j, "")).join("")}</tbody></table>`;
     } else corpo = `<p class="sub">Sem escalação.</p>`;
     return `<div class="esc-lado"><div class="esc-cab ${l === "h" ? "c" : "f"}">${escudo(tid)}<b>${h(nomeTime(tid))}</b><span class="sub">${h((e && e.form) || "")}</span></div>${corpo}</div>`;
   }
+  const barraOrdemEsc = () => `<div class="esc-ordem" role="group" aria-label="Ordenar jogadores"><span class="sub">Ordenar por</span>${ORD_ESC.map(([k, r]) =>
+    `<button type="button" class="chip" data-escord="${k}" aria-pressed="${estado.escOrd === k}">${r}</button>`).join("")}</div>`;
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest && e.target.closest("[data-escord]");
+    if (!t) return;
+    estado.escOrd = t.dataset.escord;
+    guardar("esc_ord", estado.escOrd);
+    aoVivoAtualizado();
+  });
   function abaEscalacoes(p) {
     const e = p.vv && p.vv.esc;
     const ele = p.vv && p.vv.elenco;
@@ -439,11 +470,11 @@
     if (!e || (!e.h && !e.a)) {
       const temElenco = ele && ((ele.h && Object.keys(ele.h.jog).length) || (ele.a && Object.keys(ele.a.jog).length));
       return `<div class="painel-corpo"><div class="vazio vazio-curto"><strong>Escalações ainda não divulgadas</strong>Elas costumam sair cerca de 1 hora antes do jogo.${temElenco ? " Enquanto isso, veja os destaques de cada elenco." : ""}</div>
-        ${temElenco ? `<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div><p class="sub nota">Temporada: ${h(temporada || "")}. Fonte: ESPN.</p>` : ""}</div>`;
+        ${temElenco ? `${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div><p class="sub nota">Temporada: ${h(temporada || "")}. Fonte: ESPN.</p>` : ""}</div>`;
     }
     return `<div class="painel-corpo">${campinho(p, e)}
-      <div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div>
-      <p class="sub nota">J, G, A, CG e Cart.: números na temporada${temporada ? " (" + h(temporada) + ")" : ""}${ele ? "" : " (carregando…)"}. Ícones ao lado do nome: o que fez neste jogo (⚽ gol · A assistência · ▲ entrou · ▼ saiu). Fonte: ESPN.</p></div>`;
+      ${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div>
+      <p class="sub nota">J, Min, G, A, CG e Cart.: números na temporada${temporada ? " (" + h(temporada) + ")" : ""}${ele ? "" : " (carregando…)"}. Ícones ao lado do nome: o que fez neste jogo (⚽ gol · A assistência · ▲ entrou · ▼ saiu). Fonte: ESPN.</p></div>`;
   }
   function abaAoVivo(p) {
     return `<div class="painel-corpo">${graficoPressao(p)}${blocoAoVivo(p) || '<p class="sub">Estatísticas e lances aparecem quando o jogo começar.</p>'}</div>`;
@@ -1071,6 +1102,7 @@
     if (estado.abaDoJogo !== chaveJogo) { estado.abaDoJogo = chaveJogo; estado.abaManual = false; }
     let aba = listaAbas.some((a) => a[0] === estado.abaJogo) ? estado.abaJogo : "inteiro";
     if (!estado.abaManual && vivo && temAoVivo(p)) aba = "aovivo";
+    estado.abaVista = aba;
     const abas = `<nav class="abas-jogo" aria-label="Seções do jogo">${listaAbas.map(([id, rot]) =>
       `<button type="button" data-abajogo="${id}" aria-current="${id === aba}">${rot}</button>`).join("")}</nav>`;
 
@@ -1840,7 +1872,7 @@
     const t = ler("tema", null); if (t) document.documentElement.dataset.tema = t;
     render();
   }
-  window.App = { dados: DADOS, jogoAberto, recarregarPreferencias, render: () => render(), aoVivoAtualizado };
+  window.App = { dados: DADOS, jogoAberto, abaAberta: () => (jogoAberto() ? estado.abaVista : null), recarregarPreferencias, render: () => render(), aoVivoAtualizado };
   function jogoAberto() {
     if (estado.sel) return { code: estado.sel.code, id: estado.sel.id };
     const m = location.hash.match(/^#jogo\/([^/]+)\/([^/]+)/);

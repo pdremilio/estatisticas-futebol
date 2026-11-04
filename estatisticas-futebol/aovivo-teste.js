@@ -15,6 +15,7 @@
   const C = window.SB_CONFIG || {};
   const LIGADO = C.espn !== false;
   const BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer/";
+  const CORE = "https://sports.core.api.espn.com/v2/sports/soccer/leagues/"; // minutos jogados de cada atleta
   const ESPN = { BSA: "bra.1", PL: "eng.1", PD: "esp.1", SA: "ita.1", BL1: "ger.1", FL1: "fra.1", PPL: "por.1", DED: "ned.1", ELC: "eng.2", CL: "uefa.champions" };
   const CICLO_VIVO = 20000, CICLO_CALMO = 60000, DETALHE_PRE = 120000, ELENCO_VALIDADE = 6 * 3600e3;
 
@@ -300,7 +301,8 @@
         am: s.yellowCards || 0, vm: s.redCards || 0, df: s.saves || 0, gs: s.goalsConceded || 0,
       };
     }
-    return { em: Date.now(), jog, temporada: (j && j.season && j.season.displayName) || "" };
+    const se = (j && j.season) || {};
+    return { em: Date.now(), jog, temporada: se.displayName || "", ano: se.year, tipo: se.type };
   }
   async function atualizarElencos(p) {
     if (!p.vv || !p.vv.espn || !p.vv.tid) return false;
@@ -321,7 +323,53 @@
         if (!j && p.vv.elenco && p.vv.elenco[l] && Object.keys(p.vv.elenco[l].jog).length) continue;
       }
       p.vv.elenco = p.vv.elenco || {};
-      if (p.vv.elenco[l] !== e) { p.vv.elenco[l] = e; mudou = true; }
+      const atual = p.vv.elenco[l];
+      if (atual !== e && !(atual && Object.keys(atual.jog || {}).length && !Object.keys(e.jog || {}).length)) { p.vv.elenco[l] = e; mudou = true; }
+    }
+    return mudou;
+  }
+
+  // minutos jogados na temporada: a ESPN só dá por atleta (1 consulta cada), então só busca com a aba
+  // Escalações aberta, só para os relacionados do jogo (ou o elenco, antes de sair a escalação) e uma vez por sessão
+  const tiposCore = new Map(); // "liga:ano:tipo" -> número da fase na API "core" (1 = fase principal)
+  function faseCore(lg, ano, tipo) {
+    const k = lg + ":" + ano + ":" + tipo;
+    if (!tiposCore.has(k)) tiposCore.set(k, (async () => {
+      for (let n = 1; n <= 6; n++) {
+        const t = await buscarJSON(`${CORE}${lg}/seasons/${ano}/types/${n}`);
+        if (!t) break;
+        if (String(t.type) === String(tipo)) return n;
+      }
+      return 1;
+    })());
+    return tiposCore.get(k);
+  }
+  async function atualizarMinutos(p) {
+    const aba = window.App && window.App.abaAberta && window.App.abaAberta();
+    if (aba !== "escalacoes" || !p || !p.vv || !p.vv.elenco || !p.vv.espn) return false;
+    const lg = p.vv.espn.lg;
+    let mudou = false;
+    for (const l of ["h", "a"]) {
+      const e = p.vv.elenco[l];
+      if (!e || !e.ano || !e.jog) continue;
+      const esc = p.vv.esc && p.vv.esc[l];
+      const ids = (esc ? esc.jog.map((j) => String(j.id)) : Object.keys(e.jog)).filter((id) => e.jog[id] && e.jog[id].min === undefined);
+      if (!ids.length) continue;
+      for (const id of ids) e.jog[id].min = e.jog[id].jg ? null : 0; // null = carregando; quem não jogou fica com 0
+      const buscar = ids.filter((id) => e.jog[id].min === null);
+      if (buscar.length) {
+        const n = await faseCore(lg, e.ano, e.tipo);
+        for (let i = 0; i < buscar.length; i += 6) {
+          await Promise.all(buscar.slice(i, i + 6).map(async (id) => {
+            const j = await buscarJSON(`${CORE}${lg}/seasons/${e.ano}/types/${n}/athletes/${id}/statistics`);
+            let m = 0;
+            for (const c of (j && j.splits && j.splits.categories) || []) for (const x of c.stats || []) if (x.name === "minutes") m = Number(x.value) || 0;
+            e.jog[id].min = m;
+          }));
+        }
+      }
+      mudou = true;
+      redesenhar();
     }
     return mudou;
   }
@@ -379,6 +427,7 @@
         const p = jogoAberto();
         if (await atualizarDetalhe(p, false)) mudou = true;
         if (p && (await atualizarElencos(p))) mudou = true;
+        if (await atualizarMinutos(p)) mudou = true;
         if (await atualizarPainel(false)) mudou = true;
         if (mudou) redesenhar();
       } finally { rodando = false; }
@@ -402,6 +451,7 @@
       const p = jogoAberto();
       const a = await atualizarDetalhe(p, true);
       const b = p ? await atualizarElencos(p) : false;
+      if (p) await atualizarMinutos(p);
       const c = await atualizarPainel(true);
       if (a || b || c) redesenhar();
     }, 60);
@@ -413,7 +463,7 @@
     if (!dados || !dados.competicoes) return;
     document.addEventListener("visibilitychange", () => { if (!document.hidden) ciclo(); });
     window.addEventListener("hashchange", aoNavegar);
-    document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-ir^="jogo/"]')) aoNavegar(); });
+    document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-ir^="jogo/"], [data-abajogo="escalacoes"]')) aoNavegar(); });
     ciclo();
   }
 
