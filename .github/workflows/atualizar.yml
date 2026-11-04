@@ -1,10 +1,11 @@
 name: Atualizar dados e publicar
 
-# O agendamento do GitHub atrasa horas no plano grátis. Por isso cada execução,
-# ao terminar, espera ~25 min e chama a próxima (job "proxima"). O cron fica de reserva.
+# O agendamento do GitHub atrasa horas no plano grátis. Por isso cada execução, ao terminar,
+# chama a próxima (job "proxima"): a cada ~25 min quando há jogo rolando e, sem jogos,
+# só perto do próximo jogo. O cron (a cada 6 h) fica de reserva caso a corrente pare.
 on:
   schedule:
-    - cron: "17,47 * * * *"
+    - cron: "17 */6 * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -64,13 +65,57 @@ jobs:
     needs: atualizar
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 360
     steps:
-      - name: Esperar 25 minutos e chamar a próxima atualização
+      - name: Calcular quando será a próxima atualização (pausa quando não há jogos)
+        id: quando
+        run: |
+          cat > quando.py <<'PY'
+          import json, sys, urllib.request
+          from datetime import datetime, timezone, timedelta
+          agora = datetime.now(timezone.utc)
+          if len(sys.argv) > 2:
+              agora = datetime.fromisoformat(sys.argv[2])
+          BRT = timezone(timedelta(hours=-3))
+          NORMAL, MAXIMO = 25 * 60, int(5.5 * 3600)
+          try:
+              txt = urllib.request.urlopen(sys.argv[1], timeout=30).read().decode("utf-8")
+              dados = json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
+          except Exception as e:
+              print(f"Não consegui ler os dados ({e}); sigo o ritmo normal.", file=sys.stderr)
+              print(NORMAL); sys.exit()
+          ativos, proximo = 0, None
+          for comp in dados.get("competicoes", {}).values():
+              for p in comp.get("partidas", []):
+                  s, d = p.get("s"), p.get("d")
+                  if not d or s in ("FINISHED", "CANCELLED", "POSTPONED", "AWARDED", "SUSPENDED"):
+                      continue
+                  inicio = datetime.fromisoformat(d.replace("Z", "+00:00"))
+                  if s in ("IN_PLAY", "PAUSED", "LIVE") or inicio - timedelta(minutes=15) <= agora <= inicio + timedelta(hours=3):
+                      ativos += 1
+                  elif inicio > agora and (proximo is None or inicio < proximo):
+                      proximo = inicio
+          if ativos:
+              espera = NORMAL
+              print(f"{ativos} jogo(s) rolando ou começando agora: próxima atualização em 25 min.", file=sys.stderr)
+          elif proximo:
+              espera = max(NORMAL, min(MAXIMO, int((proximo - agora - timedelta(minutes=10)).total_seconds())))
+              print(f"Sem jogos agora. Próximo jogo às {proximo.astimezone(BRT):%d/%m %H:%M} (Brasília); espero {espera // 60} min.", file=sys.stderr)
+          else:
+              espera = MAXIMO
+              print("Nenhum jogo agendado encontrado; espero o máximo (5h30).", file=sys.stderr)
+          print(espera)
+          PY
+          segundos=$(python3 quando.py "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/dados.js")
+          echo "segundos=$segundos" >> "$GITHUB_OUTPUT"
+
+      - name: Esperar
+        run: sleep ${{ steps.quando.outputs.segundos }}
+
+      - name: Chamar a próxima atualização
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sleep 1500
           mais_novas=$(gh run list --repo "${{ github.repository }}" --workflow atualizar.yml --limit 20 \
             --json databaseId,status -q "[.[] | select(.status != \"completed\" and .databaseId > ${{ github.run_id }})] | length")
           if [ "$mais_novas" = "0" ]; then
