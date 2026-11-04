@@ -1097,7 +1097,7 @@
       </div>`;
     if (!temTimes) return cab;
 
-    const listaAbas = temAoVivo(p) ? [["aovivo", vivo ? '<span class="vivo-min">Ao vivo</span>' : "Ao vivo"], ["escalacoes", "Escalações"], ...ABAS_JOGO] : ABAS_JOGO;
+    const listaAbas = temAoVivo(p) ? [...ABAS_JOGO, ["escalacoes", "Escalações"], ["aovivo", vivo ? '<span class="vivo-min">Ao vivo</span>' : "Ao vivo"]] : ABAS_JOGO;
     const chaveJogo = code + ":" + p.i;
     if (estado.abaDoJogo !== chaveJogo) { estado.abaDoJogo = chaveJogo; estado.abaManual = false; }
     let aba = listaAbas.some((a) => a[0] === estado.abaJogo) ? estado.abaJogo : "inteiro";

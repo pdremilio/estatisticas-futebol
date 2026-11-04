@@ -263,6 +263,8 @@
     }
 
     // escalações
+    // a ESPN manda { didSub: false } para quem não foi substituído: só conta se didSub for verdadeiro
+    const trocou = (x) => x === true || !!(x && x.didSub === true);
     const est = (pl, n) => { const s = (pl.stats || []).find((x) => x.name === n); return s ? Number(s.value) || 0 : 0; };
     let esc = null;
     for (const t of r.rosters || []) {
@@ -275,7 +277,7 @@
           id: pl.athlete && pl.athlete.id,
           n: (pl.athlete && pl.athlete.displayName) || "?", nc: (pl.athlete && (pl.athlete.shortName || pl.athlete.lastName)) || "",
           num: pl.jersey || "", pos: (pl.position && pl.position.abbreviation) || "",
-          tit: !!pl.starter, ent: !!pl.subbedIn, sai: !!pl.subbedOut, ordem: Number(pl.formationPlace) || 99,
+          tit: !!pl.starter, ent: trocou(pl.subbedIn), sai: trocou(pl.subbedOut), ordem: Number(pl.formationPlace) || 99,
           g: est(pl, "totalGoals"), a: est(pl, "goalAssists"), am: est(pl, "yellowCards"), vm: est(pl, "redCards"), ch: est(pl, "totalShots"),
         })),
       };
