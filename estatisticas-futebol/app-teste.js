@@ -208,29 +208,59 @@
     ["esc", "Escanteios"], ["faltas", "Faltas"], ["amarelos", "Cartões amarelos"], ["vermelhos", "Cartões vermelhos"], ["imped", "Impedimentos"],
     ["defesas", "Defesas do goleiro"], ["passes", "Passes"]];
   const temAoVivo = (p) => !!(p.vv && p.vv.espn);
+  let infoPressao = "";
   function graficoPressao(p) {
     const pr = p.vv && p.vv.pr;
     if (!pr) return `<div class="pressao vazio-p"><p class="sub">${p.vv && p.vv.st === "pre" ? "O gráfico de pressão começa quando a bola rolar." : "Gráfico de pressão indisponível para este jogo."}</p></div>`;
-    const n = pr.n, L = 6, W = n * L, H = 120, meio = H / 2;
+    // barras: SVG que estica na largura (só retângulos, nada que distorça)
+    const n = pr.n, L = 6, W = n * L, H = 100, meio = H / 2;
     let max = 1;
     for (let m = 1; m <= n; m++) max = Math.max(max, pr.h[m] || 0, pr.a[m] || 0);
-    const esc = (v) => ((v || 0) / max) * (meio - 12);
+    const alt = (v) => ((v || 0) / max) * (meio - 2);
     let barras = "";
     for (let m = 1; m <= n; m++) {
       const x = (m - 1) * L + 0.5;
-      if (pr.h[m]) barras += `<rect class="p-c" x="${x}" y="${(meio - esc(pr.h[m])).toFixed(1)}" width="${L - 1}" height="${esc(pr.h[m]).toFixed(1)}"/>`;
-      if (pr.a[m]) barras += `<rect class="p-f" x="${x}" y="${meio}" width="${L - 1}" height="${esc(pr.a[m]).toFixed(1)}"/>`;
+      if (pr.h[m]) barras += `<rect class="p-c" x="${x}" y="${(meio - alt(pr.h[m])).toFixed(1)}" width="${L - 1}" height="${alt(pr.h[m]).toFixed(1)}"/>`;
+      if (pr.a[m]) barras += `<rect class="p-f" x="${x}" y="${meio}" width="${L - 1}" height="${alt(pr.a[m]).toFixed(1)}"/>`;
     }
-    const gols = (pr.gols || []).map((g) => `<text x="${(g.m - 0.5) * L}" y="${g.l === "h" ? 10 : H - 2}" class="p-gol" text-anchor="middle">⚽</text>`).join("");
-    const agora = pr.ate < n && p.s !== "FINISHED" ? `<line x1="${pr.ate * L}" x2="${pr.ate * L}" y1="2" y2="${H - 2}" class="p-agora"/>` : "";
+    const agora = pr.ate < n && p.s !== "FINISHED" ? `<line x1="${pr.ate * L}" x2="${pr.ate * L}" y1="0" y2="${H}" class="p-agora"/>` : "";
+    // marcas: tamanho fixo em pixels, posicionadas pelo minuto (não distorcem)
+    const PRIOR = { gol: 5, trave: 4, alvo: 3, fora: 2, bloq: 1 };
+    const NOME = { gol: "gol", trave: "bola na trave", alvo: "chute no gol", fora: "chute para fora", bloq: "chute bloqueado" };
+    // em tela estreita os minutos ficam colados: junta as marcas em blocos de 2 ou 3 minutos
+    const bloco = window.innerWidth < 560 ? 3 : window.innerWidth < 900 ? 2 : 1;
+    const grupos = {};
+    for (const mk of pr.marcas || (pr.gols || []).map((g) => ({ ...g, k: "gol", j: "", min: g.m + "'" }))) {
+      const chave = mk.l + Math.floor((mk.m - 1) / bloco);
+      (grupos[chave] = grupos[chave] || []).push(mk);
+    }
+    const marcas = Object.values(grupos).map((g) => {
+      const top = g.slice().sort((a, b) => PRIOR[b.k] - PRIOR[a.k])[0];
+      const info = g.map((x) => `${x.min} ${x.j ? x.j + " · " : ""}${NOME[x.k]}`).join(" | ") + ` (${nomeTime(top.l === "h" ? p.h : p.a)})`;
+      return `<button type="button" class="mk mk-${top.k} ${top.l === "h" ? "mk-c" : "mk-f"}${g.length > 1 ? " mk-mais" : ""}" style="left:${(((top.m - 0.5) / n) * 100).toFixed(2)}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${top.k === "gol" ? "⚽" : ""}</button>`;
+    }).join("");
+    const conta = (l, ks) => (pr.marcas || []).filter((x) => x.l === l && ks.includes(x.k)).length;
+    const resumo = (l) => `${conta(l, ["gol", "alvo", "trave"])} no gol/trave · ${conta(l, ["fora", "bloq"])} fora/bloq.`;
     return `<div class="pressao">
       <div class="pressao-cab"><h3>Pressão</h3><span class="sub">chutes, escanteios e gols por minuto</span></div>
-      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Gráfico de pressão minuto a minuto: ${h(nomeTime(p.h))} acima, ${h(nomeTime(p.a))} abaixo">
-        <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/><line x1="${45 * L}" x2="${45 * L}" y1="0" y2="${H}" class="p-tempo"/>${barras}${gols}${agora}</svg>
+      <div class="pressao-area">
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+          <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/><line x1="${45 * L}" x2="${45 * L}" y1="0" y2="${H}" class="p-tempo"/>${barras}${agora}</svg>
+        ${marcas}
+      </div>
       <div class="pressao-eixo" aria-hidden="true"><span style="left:0">0'</span><span style="left:${((45 / n) * 100).toFixed(1)}%">45'</span><span style="right:0">${n}'</span></div>
-      <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))}</span><span><i class="marcador f"></i>${h(nomeTime(p.a))}</span></div>
+      <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
+      <div class="pressao-simb"><span><i class="mk-ex mk-gol">⚽</i>gol</span><span><i class="mk-ex mk-trave"></i>trave</span><span><i class="mk-ex mk-alvo"></i>no gol</span><span><i class="mk-ex mk-fora"></i>para fora</span><span><i class="mk-ex mk-bloq"></i>bloqueado</span></div>
+      <p class="pressao-info" aria-live="polite">${infoPressao ? h(infoPressao) : "Toque numa marca para ver o lance."}</p>
     </div>`;
   }
+  document.addEventListener("click", (e) => {
+    const mk = e.target.closest && e.target.closest(".pressao .mk");
+    if (!mk) return;
+    infoPressao = mk.dataset.info || "";
+    const caixa = mk.closest(".pressao").querySelector(".pressao-info");
+    if (caixa) caixa.textContent = infoPressao;
+  });
   function abaEscalacoes(p) {
     const e = p.vv && p.vv.esc;
     if (!e || (!e.h && !e.a)) return `<div class="painel-corpo"><div class="vazio"><strong>Escalações ainda não divulgadas</strong>Elas costumam sair cerca de 1 hora antes do jogo.</div></div>`;
