@@ -1,8 +1,8 @@
 name: Atualizar dados e publicar
 
 # O agendamento do GitHub atrasa horas no plano grátis. Por isso cada execução, ao terminar,
-# chama a próxima (job "proxima"): a cada ~25 min quando há jogo rolando e, sem jogos,
-# só perto do próximo jogo. O cron (a cada 6 h) fica de reserva caso a corrente pare.
+# chama a próxima (job "proxima"): a cada ~60 min quando há jogo rolando (o placar ao vivo vem da ESPN,
+# no navegador; aqui é só para tabela, estatísticas e projeções) e, sem jogos, só perto do próximo jogo. O cron (a cada 6 h) fica de reserva caso a corrente pare.
 on:
   schedule:
     - cron: "17 */6 * * *"
@@ -84,7 +84,7 @@ jobs:
           if len(sys.argv) > 2:
               agora = datetime.fromisoformat(sys.argv[2])
           BRT = timezone(timedelta(hours=-3))
-          NORMAL, MAXIMO = 25 * 60, int(5.5 * 3600)
+          NORMAL, MAXIMO = 60 * 60, int(5.5 * 3600)
           try:
               txt = urllib.request.urlopen(sys.argv[1], timeout=30).read().decode("utf-8")
               dados = json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
@@ -104,7 +104,7 @@ jobs:
                       proximo = inicio
           if ativos:
               espera = NORMAL
-              print(f"{ativos} jogo(s) rolando ou começando agora: próxima atualização em 25 min.", file=sys.stderr)
+              print(f"{ativos} jogo(s) rolando ou começando agora: próxima atualização em 60 min.", file=sys.stderr)
           elif proximo:
               espera = max(NORMAL, min(MAXIMO, int((proximo - agora - timedelta(minutes=10)).total_seconds())))
               print(f"Sem jogos agora. Próximo jogo às {proximo.astimezone(BRT):%d/%m %H:%M} (Brasília); espero {espera // 60} min.", file=sys.stderr)
