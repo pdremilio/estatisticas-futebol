@@ -52,6 +52,7 @@ jobs:
           cp index.html estilo.css app.js motor.js dados-demo.js config.js contas.js aovivo.js _site/
           if [ -f dados.js ]; then cp dados.js _site/; fi
           if [ -f agenda.json ]; then cp agenda.json _site/; fi
+          for f in previa.html previa.js dados-2024.js; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
 
       - name: Enviar o site
         uses: actions/upload-pages-artifact@v3
