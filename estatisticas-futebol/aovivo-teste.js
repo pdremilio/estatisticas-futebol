@@ -95,6 +95,13 @@
   const MAPA_EST = { possessionPct: "posse", totalShots: "chutes", shotsOnTarget: "alvo", wonCorners: "esc", foulsCommitted: "faltas",
     yellowCards: "amarelos", redCards: "vermelhos", offsides: "imped", saves: "defesas", totalPasses: "passes" };
   const PESO = { "goal": 5, "shot-on-target": 3, "shot-off-target": 1.5, "shot-blocked": 1.5, "shot-hit-woodwork": 2.5, "corner-awarded": 1.5, "offside": 0.5, "penalty---scored": 5, "penalty---missed": 3, "penalty---saved": 3 };
+  // a ESPN separa os gols por tipo (goal---header, goal---free-kick, goal---volley...): todos contam como gol
+  const tipoBase = (t) => (/^goal(---|$)/.test(t) || t === "penalty---scored" ? "goal" : t);
+  // finalizações que viram marca no gráfico de pressão
+  const MARCA = { "goal": "gol", "shot-hit-woodwork": "trave", "shot-on-target": "alvo", "penalty---saved": "alvo", "shot-off-target": "fora", "shot-blocked": "bloq", "penalty---missed": "fora" };
+  const NOME_MARCA = { gol: "gol", trave: "bola na trave", alvo: "chute no gol", fora: "chute para fora", bloq: "chute bloqueado" };
+  // "Attempt saved. Éder Militão (Real Madrid) right footed shot..." -> "Éder Militão"
+  const jogadorDe = (txt) => { const m = String(txt || "").match(/(?:^|[.!]\s+)([^.!()]{2,40}?)\s+\([^)]+\)/); return m ? m[1].trim() : ""; };
   const minutoDe = (txt) => { const m = parseInt(String(txt || ""), 10); return isNaN(m) ? null : m; };
 
   function lerDetalhe(r, p) {
@@ -157,21 +164,25 @@
     }
 
     // pressão: chutes, escanteios e gols por minuto, suavizado
-    const bruto = { h: [], a: [] }, gols = [];
+    const bruto = { h: [], a: [] }, gols = [], marcas = [];
     let ate = 0;
     for (const c of r.commentary || []) {
-      const tipo = c.play && c.play.type && c.play.type.type, l = c.play && ladoDe(c.play.team);
+      const original = c.play && c.play.type && c.play.type.type, l = c.play && ladoDe(c.play.team);
       const m = minutoDe(c.time && c.time.displayValue);
       if (m == null) continue;
       ate = Math.max(ate, m);
-      if (!tipo || !l || !PESO[tipo]) continue;
-      bruto[l][m] = (bruto[l][m] || 0) + PESO[tipo];
-      if (tipo === "goal" || tipo === "penalty---scored") gols.push({ m, l });
+      if (!original || !l) continue;
+      const tipo = tipoBase(original);
+      if (!PESO[tipo] && !PESO[original]) continue;
+      bruto[l][m] = (bruto[l][m] || 0) + (PESO[tipo] || PESO[original]);
+      if (tipo === "goal") gols.push({ m, l });
+      const k = MARCA[tipo] || MARCA[original];
+      if (k) marcas.push({ m, l, k, j: jogadorDe(c.text), min: String((c.time && c.time.displayValue) || m + "'") });
     }
     let pr = null;
     if (ate > 0) {
       const n = Math.max(90, ate);
-      pr = { h: [], a: [], gols, n, ate };
+      pr = { h: [], a: [], gols, marcas, n, ate };
       let sh = 0, sa = 0;
       for (let m = 1; m <= n; m++) {
         sh = 0.55 * sh + (bruto.h[m] || 0); sa = 0.55 * sa + (bruto.a[m] || 0);
