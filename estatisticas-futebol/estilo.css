@@ -1,4 +1,4 @@
-/* Estatísticas de Futebol — identidade visual
+/* ScanBall — identidade visual
    Mandante = verde gramado, visitante = azul arquibancada, amarelo cartão só para o que está selecionado. */
 :root {
   --fundo: #E6EAEE;
@@ -749,3 +749,64 @@ table.odds-tabela { margin-top: 14px; }
 @container (max-width: 820px) {
   table.rk th:last-child, table.rk td:last-child { display: none; }
 }
+
+/* ===================== V4: marca, contas e ao vivo ===================== */
+.marca-nome { letter-spacing: .2px; }
+.botao-conta { display: inline-flex; align-items: center; gap: 7px; flex: none; border: 1px solid var(--linha); background: var(--superficie-2); color: var(--tinta);
+  border-radius: 999px; height: 34px; padding: 0 12px 0 9px; cursor: pointer; font: 600 14px var(--fonte); }
+.botao-conta:hover { border-color: var(--tinta-3); }
+.botao-conta[hidden] { display: none; }
+.botao-conta.logado { padding: 0 12px 0 3px; }
+.avatar { display: inline-grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; background: #0F6E5A; color: #fff; font: 700 14px var(--fonte-titulo); flex: none; }
+.avatar.grande { width: 46px; height: 46px; font-size: 22px; }
+@media (max-width: 640px) { .conta-rot { display: none; } .botao-conta { padding: 0 8px; } .botao-conta.logado { padding: 0 3px; } }
+@media (max-width: 420px) { #conta:not([hidden]) { margin-left: auto; } #conta:not([hidden]) + #tema { margin-left: 0; } }
+
+.modal-fundo { position: fixed; inset: 0; z-index: 100; background: rgba(8, 14, 19, .55); display: grid; place-items: center; padding: 16px; }
+.modal { position: relative; width: min(420px, 100%); max-height: calc(100dvh - 32px); overflow: auto; background: var(--superficie); color: var(--tinta);
+  border: 1px solid var(--linha); border-radius: var(--raio-g); box-shadow: 0 20px 50px -20px rgba(0,0,0,.6); padding: 22px 22px 18px; }
+.modal h2 { margin: 0 34px 4px 0; font: 700 26px var(--fonte-titulo); }
+.modal .sub { margin: 0 0 14px; color: var(--tinta-2); font-size: 14px; }
+.modal-fechar { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--linha); background: var(--superficie-2); color: var(--tinta); cursor: pointer; font-size: 14px; }
+.m-campo { display: grid; gap: 5px; margin-bottom: 12px; font-size: 13.5px; font-weight: 600; color: var(--tinta-2); }
+.m-campo input { font: 400 16px var(--fonte); color: var(--tinta); background: var(--superficie-2); border: 1px solid var(--linha); border-radius: var(--raio-p); padding: 10px 12px; }
+.m-campo input:focus { outline: 2px solid var(--casa); outline-offset: 1px; }
+.m-principal { width: 100%; padding: 11px 16px; font-size: 15px; margin-top: 2px; }
+.m-principal:disabled { opacity: .6; cursor: progress; }
+.m-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 14px; font-size: 14px; color: var(--tinta-2); }
+.m-aviso { margin: 0 0 14px; padding: 9px 12px; border-radius: var(--raio-p); font-size: 14px; background: var(--superficie-2); border: 1px solid var(--linha); }
+.m-aviso.ok { background: var(--casa-suave); border-color: color-mix(in srgb, var(--casa) 45%, transparent); }
+.m-aviso.erro { background: color-mix(in srgb, var(--derrota) 14%, var(--superficie)); border-color: color-mix(in srgb, var(--derrota) 50%, transparent); }
+.m-conta { display: flex; align-items: center; gap: 12px; margin: 6px 0 12px; word-break: break-all; }
+.m-conta .sub { margin: 2px 0 0; font-size: 13px; }
+.m-acoes { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; }
+#toast { position: fixed; left: 50%; bottom: 22px; z-index: 110; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; max-width: calc(100% - 32px);
+  background: var(--tinta); color: var(--superficie); padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 500; box-shadow: var(--sombra); transition: opacity .2s, transform .2s; }
+#toast.visivel { opacity: 1; transform: translate(-50%, 0); }
+
+/* ao vivo */
+.vivo-min { display: inline-flex; align-items: center; gap: 5px; color: var(--derrota); font-weight: 700; }
+.vivo-min::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+@media (prefers-reduced-motion: no-preference) { .vivo-min::before { animation: pisca 1.4s ease-in-out infinite; } }
+@keyframes pisca { 50% { opacity: .25; } }
+.vivo-painel { margin-top: 14px; border-top: 1px solid var(--linha); padding-top: 12px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+.vivo-painel h3 { margin: 0 0 8px; font: 700 16px var(--fonte-titulo); text-transform: uppercase; letter-spacing: .4px; color: var(--tinta-2); }
+.vivo-painel .atual { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; color: var(--tinta-3); }
+.ev-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; max-height: 260px; overflow: auto; }
+.ev-lista li { display: grid; grid-template-columns: 1fr 42px 1fr; align-items: center; gap: 8px; }
+.ev-lista .m { text-align: center; font-weight: 700; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+.ev-lista .c { text-align: right; }
+.ev-lista .ic { display: inline-block; width: 10px; height: 13px; border-radius: 2px; vertical-align: -2px; margin: 0 4px; }
+.ev-lista .ic.amarelo { background: var(--cartao); } .ev-lista .ic.vermelho { background: var(--derrota); }
+.ev-lista .gol { font-weight: 700; }
+.ev-lista small { color: var(--tinta-3); }
+.est-lista { display: grid; gap: 7px; font-size: 13.5px; }
+.est-linha { display: grid; grid-template-columns: 44px 1fr 44px; gap: 6px; align-items: center; }
+.est-linha .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.est-linha .v:last-child { text-align: right; }
+.est-linha .rot { text-align: center; color: var(--tinta-2); font-size: 12.5px; }
+.est-trilho { grid-column: 1 / -1; display: flex; gap: 2px; height: 6px; border-radius: 999px; overflow: hidden; background: var(--superficie-2); }
+.est-trilho span:first-child { background: var(--casa); } .est-trilho span:last-child { background: var(--fora); }
+@container (max-width: 620px) { .vivo-painel { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .vivo-painel { grid-template-columns: 1fr; } }
+.quando b.vivo-min { color: var(--derrota); }
