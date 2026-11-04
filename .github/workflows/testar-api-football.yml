@@ -1,0 +1,155 @@
+name: Testar API-Football
+
+# Teste manual: confere o que a chave da API-Football entrega (gasta ~10 consultas).
+# Rode em Actions > "Testar API-Football" > Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  testar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Testar a API-Football
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: |
+          cat > testar.py <<'PY'
+          # Testa o que o plano da API-Football entrega para o ScanBall (gasta ~9 consultas).
+          import json, os, sys, urllib.request, urllib.error
+          BASE = os.environ.get("APIF_BASE", "https://v3.football.api-sports.io")
+          CHAVE = os.environ.get("API_FOOTBALL_KEY", "").strip()
+          LIGAS = {71: "Brasileirão", 39: "Premier League", 140: "La Liga", 135: "Serie A", 78: "Bundesliga",
+                   61: "Ligue 1", 94: "Liga Portugal", 88: "Eredivisie", 40: "Championship", 2: "Champions League"}
+          CASAS_BR = ["betano", "superbet", "bet365", "betfair", "pinnacle", "sportingbet", "kto", "estrelabet", "novibet", "1xbet"]
+
+          def api(caminho):
+              req = urllib.request.Request(BASE + caminho, headers={"x-apisports-key": CHAVE})
+              try:
+                  with urllib.request.urlopen(req, timeout=40) as r:
+                      d = json.loads(r.read().decode("utf-8"))
+              except urllib.error.HTTPError as e:
+                  return {"_erro": f"HTTP {e.code}"}
+              except Exception as e:
+                  return {"_erro": str(e)}
+              if d.get("errors"):
+                  d["_erro"] = json.dumps(d["errors"], ensure_ascii=False)
+              return d
+
+          def titulo(t): print("\n" + "=" * 70 + "\n" + t + "\n" + "=" * 70)
+          def ok(cond): return "SIM" if cond else "NÃO"
+
+          if not CHAVE:
+              sys.exit("Falta o segredo API_FOOTBALL_KEY no repositório.")
+
+          titulo("1) Conta e limite de consultas")
+          s = api("/status")
+          r = s.get("response") or {}
+          if isinstance(r, dict) and r:
+              print("Plano:", (r.get("subscription") or {}).get("plan"), "| ativo até:", (r.get("subscription") or {}).get("end"))
+              print("Consultas hoje:", (r.get("requests") or {}).get("current"), "de", (r.get("requests") or {}).get("limit_day"))
+          else:
+              print("Não consegui ler o status:", s.get("_erro"))
+
+          titulo("2) Ligas: temporada atual e o que cada uma cobre")
+          lg = api("/leagues?current=true")
+          temporadas = {}
+          for item in lg.get("response", []):
+              lid = (item.get("league") or {}).get("id")
+              if lid not in LIGAS: continue
+              temp = (item.get("seasons") or [{}])[-1]
+              temporadas[lid] = temp.get("year")
+              cov = temp.get("coverage") or {}
+              fx = cov.get("fixtures") or {}
+              print(f"- {LIGAS[lid]:16} temporada {temp.get('year')} | eventos {ok(fx.get('events'))} | estatísticas {ok(fx.get('statistics_fixtures'))} "
+                    f"| escalações {ok(fx.get('lineups'))} | classificação {ok(cov.get('standings'))} | odds {ok(cov.get('odds'))} | previsões {ok(cov.get('predictions'))}")
+          faltando = [LIGAS[i] for i in LIGAS if i not in temporadas]
+          if lg.get("_erro"): print("Erro:", lg["_erro"])
+          if faltando: print("Não encontradas:", ", ".join(faltando))
+
+          ano = temporadas.get(71) or 2026
+          titulo(f"3) Acesso à temporada atual ({ano}) no plano: últimos jogos do Brasileirão")
+          fx = api(f"/fixtures?league=71&season={ano}&last=3")
+          jogo_id = None
+          if fx.get("_erro"):
+              print("ERRO (provável limite do plano grátis para a temporada atual):", fx["_erro"])
+          else:
+              for j in fx.get("response", []):
+                  f, t, g = j["fixture"], j["teams"], j["goals"]
+                  jogo_id = jogo_id or f["id"]
+                  print(f"- {f['date'][:10]} {t['home']['name']} {g['home']} x {g['away']} {t['away']['name']} (id {f['id']})")
+          if not jogo_id:
+              print("Plano B: testando um jogo do Brasileirão 2024 só para ver o formato dos dados...")
+              fb = api("/fixtures?league=71&season=2024&round=Regular%20Season%20-%2038")
+              if fb.get("_erro"): print("Erro no plano B:", fb["_erro"])
+              for j in (fb.get("response") or [])[:1]:
+                  jogo_id = j["fixture"]["id"]
+                  print(f"- {j['fixture']['date'][:10]} {j['teams']['home']['name']} {j['goals']['home']} x {j['goals']['away']} {j['teams']['away']['name']} (id {jogo_id})")
+
+          titulo("4) Detalhe de um jogo encerrado: eventos (minuto dos gols), estatísticas, escalações")
+          if jogo_id:
+              d = api(f"/fixtures?id={jogo_id}")
+              j = (d.get("response") or [{}])[0]
+              ev = j.get("events") or []
+              gols = [e for e in ev if e.get("type") == "Goal"]
+              print("Eventos:", len(ev), "| gols com minuto:", ", ".join(f"{e['time']['elapsed']}' {e['team']['name']}" for e in gols) or "nenhum")
+              est = j.get("statistics") or []
+              if est:
+                  tipos = [x["type"] for x in est[0].get("statistics", [])]
+                  print("Estatísticas disponíveis:", ", ".join(tipos))
+              else:
+                  print("Estatísticas: NÃO vieram")
+              print("Escalações:", ok(bool(j.get("lineups"))))
+              if d.get("_erro"): print("Erro:", d["_erro"])
+          else:
+              print("Pulado (sem jogo do passo 3).")
+
+          titulo("5) Jogos ao vivo agora (todas as ligas)")
+          lv = api("/fixtures?live=all")
+          if lv.get("_erro"): print("Erro:", lv["_erro"])
+          vivos = lv.get("response", [])
+          print("Jogos ao vivo agora:", len(vivos))
+          for j in vivos[:5]:
+              print(f"- {j['league']['name']}: {j['teams']['home']['name']} {j['goals']['home']} x {j['goals']['away']} {j['teams']['away']['name']} ({j['fixture']['status']['elapsed']}')")
+
+          titulo("6) Odds pré-jogo do próximo jogo do Brasileirão")
+          nx = api(f"/fixtures?league=71&season={ano}&next=1")
+          prox = (nx.get("response") or [{}])[0].get("fixture", {}).get("id")
+          if nx.get("_erro"): print("Erro:", nx["_erro"])
+          if prox:
+              od = api(f"/odds?fixture={prox}")
+              if od.get("_erro"): print("Erro:", od["_erro"])
+              casas = []
+              for item in od.get("response", []):
+                  casas += [b["name"] for b in item.get("bookmakers", [])]
+              print(f"Jogo {prox}: {len(casas)} casas com odds:", ", ".join(casas) or "nenhuma")
+          else:
+              print("Sem próximo jogo encontrado.")
+
+          titulo("7) Odds AO VIVO (endpoint /odds/live)")
+          ol = api("/odds/live")
+          if ol.get("_erro"):
+              print("ERRO:", ol["_erro"])
+          else:
+              print("Jogos com odds ao vivo agora:", len(ol.get("response", [])))
+              if ol.get("response"):
+                  x = ol["response"][0]
+                  print("Exemplo: jogo", (x.get("fixture") or {}).get("id"), "| mercados:", len(x.get("odds", [])))
+
+          titulo("8) Casas de apostas disponíveis (procurando as usadas no Brasil)")
+          bk = api("/odds/bookmakers")
+          nomes = [b.get("name", "") for b in bk.get("response", [])]
+          print("Total de casas:", len(nomes))
+          for c in CASAS_BR:
+              achou = [n for n in nomes if c in n.lower().replace(" ", "")]
+              print(f"- {c:12} {'SIM (' + ', '.join(achou) + ')' if achou else 'NÃO'}")
+
+          titulo("Fim do teste")
+          s = api("/status")
+          r = s.get("response") or {}
+          if isinstance(r, dict): print("Consultas usadas hoje:", (r.get("requests") or {}).get("current"), "de", (r.get("requests") or {}).get("limit_day"))
+          PY
+          python3 testar.py
