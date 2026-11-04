@@ -990,3 +990,5 @@ table.odds-tabela { margin-top: 14px; }
 .pv-lista .data { color: var(--tinta-3); font-variant-numeric: tabular-nums; min-width: 38px; font-weight: 600; }
 .pv-lista .comp-sigla { width: 16px; height: 16px; }
 @media (max-width: 640px) { .pv-grade { grid-template-columns: 1fr; } .pv-gols { font-size: 26px; } }
+.aviso-fonte { border: 1px solid var(--derrota); background: color-mix(in srgb, var(--derrota) 10%, var(--superficie)); color: var(--tinta); border-radius: var(--raio-p); padding: 9px 12px; margin: 0 0 12px; font-size: 13.5px; }
+.cab-jogo + .aviso-fonte { margin: 10px 0 12px; }

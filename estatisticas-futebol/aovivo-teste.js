@@ -30,7 +30,9 @@
     return hits / Math.min(a.size, b.size);
   }
 
-  let dados = null, timer = null, rodando = false;
+  let dados = null, timer = null, rodando = false, inicioCiclo = 0, geracao = 0;
+  let falhasSeguidas = 0, indisponivel = false; // ESPN fora do ar: 3 ciclos seguidos sem resposta
+  const LIMITE_BUSCA = 10000, CICLO_TRAVADO = 45000, FALHAS_AVISO = 3;
   const casados = new Map(); // "code:idESPN" -> partida do site
   const ultimoDetalhe = new Map(); // "code:idESPN" -> horário da última busca do detalhe
   const elencos = new Map(); // "liga:idTime" -> { em, jog: {idAtleta: números}, temporada }
@@ -66,7 +68,8 @@
     if (!c) return null;
     const casa = c.competitors.find((x) => x.homeAway === "home"), fora = c.competitors.find((x) => x.homeAway === "away");
     if (!casa || !fora) return null;
-    const nomes = (t) => tokens([t.displayName, t.shortDisplayName, t.name, t.location].join(" "));
+    // nomes + sigla (ex.: "CAP" do Athletico-PR), para casar times com nome bem diferente nas duas APIs
+    const nomes = (t) => tokens([t.displayName, t.shortDisplayName, t.name, t.location, t.abbreviation].join(" "));
     const th = nomes(casa.team), ta = nomes(fora.team), quando = Date.parse(ev.date);
     const T = dados.times || {};
     let melhor = null, nota = 0;
@@ -74,7 +77,7 @@
       if (!p.h || !p.a) continue;
       const dif = Math.abs(Date.parse(p.d) - quando);
       if (dif > 3 * 3600e3) continue;
-      const sh = parecido(th, tokens((T[p.h] || {}).n + " " + (T[p.h] || {}).c)), sa = parecido(ta, tokens((T[p.a] || {}).n + " " + (T[p.a] || {}).c));
+      const sh = parecido(th, tokens((T[p.h] || {}).n + " " + (T[p.h] || {}).c + " " + ((T[p.h] || {}).t || ""))), sa = parecido(ta, tokens((T[p.a] || {}).n + " " + (T[p.a] || {}).c + " " + ((T[p.a] || {}).t || "")));
       if (sh + sa === 0) continue;
       if ((sh === 0 || sa === 0) && dif > 20 * 60e3) continue; // só um nome bateu: exige horário quase igual
       const n = sh + sa - dif / 86400e3;
@@ -84,13 +87,48 @@
     return melhor;
   }
 
+  // ---------- placar do 1º tempo pelos gols do placar da ESPN (o da football-data chega atrasado)
+  function primeiroTempo(c, casa, fora) {
+    const gols = (c.details || []).filter((d) => d.scoringPlay);
+    const fh = Number(casa.score) || 0, fa = Number(fora.score) || 0;
+    const conta = (inverteContra) => {
+      const t = { h: 0, a: 0, ht: { h: 0, a: 0 } };
+      for (const d of gols) {
+        let l = d.team && String(d.team.id) === String(casa.team.id) ? "h" : "a";
+        if (inverteContra && d.ownGoal) l = l === "h" ? "a" : "h";
+        t[l]++;
+        const disp = String((d.clock && d.clock.displayValue) || "");
+        if (/^45'?\s*\+/.test(disp) || (parseInt(disp, 10) || 99) <= 45) t.ht[l]++;
+      }
+      return t;
+    };
+    // confere com o placar; se não bater, tenta o gol contra do outro lado; se ainda não bater, não arrisca
+    for (const inv of [false, true]) { const t = conta(inv); if (t.h === fh && t.a === fa) return [t.ht.h, t.ht.a]; }
+    return null;
+  }
+
+  // jogo nosso rolando (ou para começar) que não foi achado na ESPN: avisa na página do jogo
+  function marcarSemPar(placares) {
+    const agora = Date.now();
+    let mudou = false;
+    for (const [code, r] of placares) {
+      if (!r) continue;
+      for (const p of (dados.competicoes[code] || {}).partidas || []) {
+        if (p.vv && p.vv.espn) continue;
+        const sem = naJanela(p, agora) && agora >= Date.parse(p.d) - 30 * 60e3 && (p._orig ? p._orig.s : p.s) !== "FINISHED";
+        if (!!p.semEspn !== sem) { p.semEspn = sem; mudou = true; }
+      }
+    }
+    return mudou;
+  }
+
   // ---------- placar (lista de jogos)
   function aplicarPlacar(code, ev) {
     const p = acharPartida(code, ev);
     if (!p) return false;
     const c = ev.competitions[0], st = ev.status || {}, tp = st.type || {};
     const casa = c.competitors.find((x) => x.homeAway === "home"), fora = c.competitors.find((x) => x.homeAway === "away");
-    const antes = JSON.stringify([p.s, p.fh, p.fa, p.du, p.vv && p.vv.min]);
+    const antes = JSON.stringify([p.s, p.fh, p.fa, p.du, p.hh, p.ha, p.vv && p.vv.min]);
     if (!p._orig) p._orig = { s: p.s, fh: p.fh, fa: p.fa, hh: p.hh, ha: p.ha };
     const vv = (p.vv = p.vv || {});
     vv.espn = { lg: ESPN[code], id: ev.id, code };
@@ -99,6 +137,7 @@
     vv.clk = st.displayClock || ""; vv.per = st.period || 0;
     vv.fonte = "ESPN";
     vv.em = new Date().toISOString();
+    p.semEspn = false;
     if (tp.state === "in") {
       p.s = /HALFTIME/.test(tp.name || "") ? "PAUSED" : "IN_PLAY";
       p.fh = Number(casa.score); p.fa = Number(fora.score);
@@ -107,11 +146,22 @@
       p.s = "FINISHED"; p.fh = Number(casa.score); p.fa = Number(fora.score); vv.min = "";
       if (/AET|EXTRA/.test(tp.name || "")) p.du = "EXTRA_TIME";
       if (/PEN/.test(tp.name || "")) p.du = "PENALTY_SHOOTOUT";
+    } else if (/POSTPONED/.test(tp.name || "")) {
+      p.s = "POSTPONED"; vv.min = "";
+    } else if (/CANCEL/.test(tp.name || "")) {
+      p.s = "CANCELLED"; vv.min = "";
+    } else if (/SUSPENDED|ABANDON/.test(tp.name || "")) {
+      p.s = "SUSPENDED"; vv.min = "";
     } else {
       vv.min = "";
     }
+    // 1º tempo: no intervalo, no 2º tempo e no fim vem dos gols da ESPN; durante o 1º tempo fica vazio
+    if (tp.state === "in" || p.s === "FINISHED") {
+      if (p.s === "IN_PLAY" && (st.period || 1) < 2) { p.hh = null; p.ha = null; }
+      else { const ht = primeiroTempo(c, casa, fora); if (ht) { p.hh = ht[0]; p.ha = ht[1]; } }
+    }
     if (vv.pr) recalcularAtual(p);
-    return antes !== JSON.stringify([p.s, p.fh, p.fa, p.du, vv.min]);
+    return antes !== JSON.stringify([p.s, p.fh, p.fa, p.du, p.hh, p.ha, vv.min]);
   }
 
   // ---------- gráfico de pressão: uma barra por minuto (acréscimos ganham barras próprias: 45+1, 45+2...)
@@ -376,7 +426,15 @@
     return mudou;
   }
 
-  const buscarJSON = (url) => fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  // toda busca tem tempo limite: uma resposta que nunca chega não pode travar a atualização automática
+  function buscarJSON(url) {
+    const ctl = typeof AbortController === "function" ? new AbortController() : null;
+    const limite = setTimeout(() => ctl && ctl.abort(), LIMITE_BUSCA);
+    return fetch(url, { cache: "no-store", signal: ctl ? ctl.signal : undefined })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .finally(() => clearTimeout(limite));
+  }
 
   function partidaDe(code, id) {
     const comp = dados.competicoes[code];
@@ -394,12 +452,15 @@
     if (!p) return false;
     const chave = p.vv.espn.code + ":" + p.vv.espn.id;
     const ultimo = ultimoDetalhe.get(chave) || 0;
-    const intervalo = p.vv.st === "in" ? CICLO_VIVO - 1000 : p.vv.st === "pre" ? DETALHE_PRE : Infinity;
+    // jogo encerrado: busca mais uma vez para pegar os últimos lances e o resultado final
+    const intervalo = p.vv.st === "in" ? CICLO_VIVO - 1000 : p.vv.st === "pre" ? DETALHE_PRE : p.vv.st === "post" && !p.vv.detFinal ? 0 : Infinity;
     if (!forcar && Date.now() - ultimo < intervalo) return false;
     if (forcar && Date.now() - ultimo < 5000) return false;
     ultimoDetalhe.set(chave, Date.now());
     const r = await buscarJSON(`${BASE}${p.vv.espn.lg}/summary?event=${p.vv.espn.id}`);
-    return r ? lerDetalhe(r, p) : false;
+    if (!r) { ultimoDetalhe.set(chave, ultimo); return false; } // falhou: tenta de novo no próximo ciclo
+    if (p.vv.st === "post") p.vv.detFinal = true;
+    return lerDetalhe(r, p);
   }
   // painel ao vivo: detalhe de todos os jogos rolando (e dos que acabaram de terminar, uma vez)
   async function atualizarPainel(forcar) {
@@ -413,37 +474,69 @@
     return res.some(Boolean);
   }
 
+  function agendar(ms) { clearTimeout(timer); timer = setTimeout(ciclo, ms); }
   async function ciclo() {
+    // um ciclo ainda rodando: espera; se passou do limite, considera travado e começa outro
+    if (rodando && Date.now() - inicioCiclo < CICLO_TRAVADO) return;
     clearTimeout(timer);
+    if (document.hidden) { rodando = false; agendar(CICLO_CALMO); return; }
+    const meu = ++geracao;
+    rodando = true; inicioCiclo = Date.now();
     let proximo = CICLO_CALMO;
-    if (!document.hidden && !rodando) {
-      rodando = true;
-      try {
-        const buscas = buscasAtivas();
-        let mudou = false;
-        if (buscas.length) {
-          proximo = CICLO_VIVO;
-          const placares = await Promise.all(buscas.map(([code, dia]) => buscarJSON(`${BASE}${ESPN[code]}/scoreboard?dates=${dia}`).then((r) => [code, r])));
-          for (const [code, r] of placares) for (const ev of (r && r.events) || []) if (aplicarPlacar(code, ev)) mudou = true;
-        }
-        const p = jogoAberto();
-        if (await atualizarDetalhe(p, false)) mudou = true;
-        if (p && (await atualizarElencos(p))) mudou = true;
-        if (await atualizarMinutos(p)) mudou = true;
-        if (await atualizarPainel(false)) mudou = true;
-        if (mudou) redesenhar();
-      } finally { rodando = false; }
+    try {
+      const buscas = buscasAtivas();
+      let mudou = false;
+      if (buscas.length) {
+        proximo = CICLO_VIVO;
+        const placares = await Promise.all(buscas.map(([code, dia]) => buscarJSON(`${BASE}${ESPN[code]}/scoreboard?dates=${dia}`).then((r) => [code, r])));
+        if (meu !== geracao) return;
+        const ok = placares.some(([, r]) => r);
+        falhasSeguidas = ok ? 0 : falhasSeguidas + 1;
+        const agoraIndisp = falhasSeguidas >= FALHAS_AVISO;
+        if (agoraIndisp !== indisponivel) { indisponivel = agoraIndisp; mudou = true; }
+        for (const [code, r] of placares) for (const ev of (r && r.events) || []) if (aplicarPlacar(code, ev)) mudou = true;
+        if (marcarSemPar(placares)) mudou = true;
+      }
+      const p = jogoAberto();
+      if (await atualizarDetalhe(p, false)) mudou = true;
+      if (p && (await atualizarElencos(p))) mudou = true;
+      atualizarMinutos(p); // corre por fora (redesenha sozinho quando termina) para não segurar o ciclo
+      if (await atualizarPainel(false)) mudou = true;
+      if (meu === geracao && mudou) redesenhar();
+    } catch (e) {
+      // erro inesperado: não derruba a atualização automática
+    } finally {
+      if (meu === geracao) { rodando = false; agendar(proximo); }
     }
-    timer = setTimeout(ciclo, proximo);
   }
+  // vigia: se um ciclo travar ou o agendamento se perder, recomeça sozinho
+  function vigia() {
+    if (document.hidden) return;
+    const parado = Date.now() - inicioCiclo;
+    if ((rodando && parado > CICLO_TRAVADO) || (!rodando && parado > CICLO_CALMO + 15000)) ciclo();
+  }
+  // voltou para a aba, desbloqueou o celular ou a internet voltou: atualiza na hora
+  function acordar() { if (!document.hidden && Date.now() - inicioCiclo > 3000) ciclo(); }
 
   let pendente = false;
   function redesenhar() {
     const el = document.activeElement;
-    const ocupado = (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) || document.querySelector(".modal-fundo");
+    const campo = el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) ? el : null;
+    // só segura o redesenho em janelas abertas, no painel de filtros ou em campos sem id (seriam perdidos)
+    const ocupado = document.querySelector(".modal-fundo, dialog[open]") || (campo && (!campo.id || (campo.closest && campo.closest("#painel-filtros"))));
     if (ocupado) { pendente = true; return; }
     pendente = false;
+    // nos outros campos (busca, filtros da lista, data), redesenha e devolve o foco e o cursor
+    let ini = null, fim = null;
+    if (campo) try { ini = campo.selectionStart; fim = campo.selectionEnd; } catch (e) {}
     if (window.App && window.App.aoVivoAtualizado) window.App.aoVivoAtualizado();
+    if (campo) {
+      const novo = document.getElementById(campo.id);
+      if (novo && novo !== document.activeElement) {
+        try { novo.focus({ preventScroll: true }); } catch (e) { novo.focus(); }
+        try { if (ini != null) novo.setSelectionRange(ini, fim); } catch (e) {}
+      }
+    }
   }
   document.addEventListener("focusout", () => { if (pendente) setTimeout(redesenhar, 300); });
 
@@ -453,7 +546,7 @@
       const p = jogoAberto();
       const a = await atualizarDetalhe(p, true);
       const b = p ? await atualizarElencos(p) : false;
-      if (p) await atualizarMinutos(p);
+      if (p) atualizarMinutos(p);
       const c = await atualizarPainel(true);
       if (a || b || c) redesenhar();
     }, 60);
@@ -463,14 +556,18 @@
     if (!LIGADO) return;
     dados = (window.App && window.App.dados) || window.DADOS;
     if (!dados || !dados.competicoes) return;
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) ciclo(); });
+    document.addEventListener("visibilitychange", acordar);
+    window.addEventListener("pageshow", acordar);
+    window.addEventListener("online", acordar);
+    window.addEventListener("focus", acordar);
+    setInterval(vigia, 15000);
     window.addEventListener("hashchange", aoNavegar);
     document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-ir^="jogo/"], [data-abajogo="escalacoes"]')) aoNavegar(); });
     ciclo();
   }
 
   window.AoVivo = {
-    ligado: LIGADO, iniciar, _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe,
+    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe,
     _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); },
   };
 })();

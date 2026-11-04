@@ -208,6 +208,10 @@
     ["esc", "Escanteios"], ["faltas", "Faltas"], ["amarelos", "Cartões amarelos"], ["vermelhos", "Cartões vermelhos"], ["imped", "Impedimentos"],
     ["defesas", "Defesas do goleiro"], ["passes", "Passes"]];
   const temAoVivo = (p) => !!(p.vv && p.vv.espn);
+  // aviso quando a ESPN não responde há alguns ciclos (o placar volta a ser o da football-data)
+  const avisoFonte = () => (window.AoVivo && window.AoVivo.indisponivel && window.AoVivo.indisponivel()
+    ? `<div class="aviso-fonte" role="status"><b>Dados ao vivo temporariamente indisponíveis.</b> A ESPN não está respondendo; tentando de novo a cada 20 s. Enquanto isso, o placar vem da football-data, que atrasa alguns minutos.</div>` : "");
+  const horaAtualizacao = (p) => { const v = p.vv || {}, t = v.emDet || v.em; if (!t) return ""; const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 
   // ---------- gráfico de pressão: uma barra por minuto (para cima o mandante, para baixo o visitante)
   // a barra do minuto atual vai crescendo conforme os lances chegam; minuto sem lance fica sem barra
@@ -321,7 +325,7 @@
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
       <div class="pressao-simb">${simb}</div>
       <p class="pressao-info" aria-live="polite">${infoPressao ? h(infoPressao) : "Toque numa marca para ver o lance."}</p>
-      <p class="sub nota">Fonte: narração da ESPN, que chega 1 a 2 minutos depois do lance.</p>
+      <p class="sub nota">${horaAtualizacao(p) ? `Atualizado às ${horaAtualizacao(p)} · ` : ""}Fonte: narração da ESPN, que chega 1 a 2 minutos depois do lance.</p>
     </div>`;
   }
   document.addEventListener("click", (e) => {
@@ -469,15 +473,15 @@
     const temporada = ele && (ele.h || ele.a) && (ele.h || ele.a).temporada;
     if (!e || (!e.h && !e.a)) {
       const temElenco = ele && ((ele.h && Object.keys(ele.h.jog).length) || (ele.a && Object.keys(ele.a.jog).length));
-      return `<div class="painel-corpo"><div class="vazio vazio-curto"><strong>Escalações ainda não divulgadas</strong>Elas costumam sair cerca de 1 hora antes do jogo.${temElenco ? " Enquanto isso, veja os destaques de cada elenco." : ""}</div>
+      return `<div class="painel-corpo">${avisoFonte()}<div class="vazio vazio-curto"><strong>Escalações ainda não divulgadas</strong>Elas costumam sair cerca de 1 hora antes do jogo.${temElenco ? " Enquanto isso, veja os destaques de cada elenco." : ""}</div>
         ${temElenco ? `${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div><p class="sub nota">Temporada: ${h(temporada || "")}. Fonte: ESPN.</p>` : ""}</div>`;
     }
-    return `<div class="painel-corpo">${campinho(p, e)}
+    return `<div class="painel-corpo">${avisoFonte()}${campinho(p, e)}
       ${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div>
       <p class="sub nota">J, Min, G, A, CG e Cart.: números na temporada${temporada ? " (" + h(temporada) + ")" : ""}${ele ? "" : " (carregando…)"}. Ícones ao lado do nome: o que fez neste jogo (⚽ gol · A assistência · ▲ entrou · ▼ saiu). Fonte: ESPN.</p></div>`;
   }
   function abaAoVivo(p) {
-    return `<div class="painel-corpo">${graficoPressao(p)}${blocoAoVivo(p) || '<p class="sub">Estatísticas e lances aparecem quando o jogo começar.</p>'}</div>`;
+    return `<div class="painel-corpo">${avisoFonte()}${graficoPressao(p)}${blocoAoVivo(p) || '<p class="sub">Estatísticas e lances aparecem quando o jogo começar.</p>'}</div>`;
   }
 
   // ---------- aba "Ao vivo" do topo: todos os jogos rolando, para quem não consegue assistir
@@ -511,7 +515,7 @@
     const linhaProx = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">${hora(x.p.d)}</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button></li>`;
     const linhaFim = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">Fim</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} <b>${x.p.fh}×${x.p.fa}</b> ${h(nomeTime(x.p.a))}</button></li>`;
     app.innerHTML = `<section class="painel-vivo">
-      <div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${vivos.length ? `${vivos.length} ${vivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho a cada 20 s` : ""}</span></div>
+      ${avisoFonte()}<div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${vivos.length ? `${vivos.length} ${vivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho a cada 20 s` : ""}</span></div>
       ${vivos.length ? `<div class="pv-grade">${vivos.map(card).join("")}</div>` : `<div class="painel"><div class="vazio"><strong>Nenhum jogo rolando agora</strong>Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas.</div></div>`}
       ${proximos.length || encerradosHoje.length ? `<div class="pv-listas">
         ${proximos.length ? `<div class="painel"><div class="painel-cab"><h3>Próximos jogos</h3></div><ul class="lista-simples pv-lista">${proximos.map(linhaProx).join("")}</ul></div>` : ""}
@@ -1031,7 +1035,8 @@
     if (ladoALado() && dia >= diaMin() && dia <= diaMax()) {
       const mesmaTela = document.querySelector(".jogos-pagina") && estado.dia === dia;
       estado.dia = dia; estado.sel = { code, id: String(id) };
-      if (mesmaTela) atualizarPainelJogo(); else telaJogos();
+      // jogo aberto ao lado da lista: atualiza as duas partes (antes só o painel, e a lista ficava com placar velho)
+      if (mesmaTela) { renderListaJogos(); atualizarPainelJogo(); } else telaJogos();
       return;
     }
     estado.sel = null;
@@ -1096,6 +1101,7 @@
         </div>
       </div>`;
     if (!temTimes) return cab;
+    const semPar = p.semEspn && !temAoVivo(p) ? `<div class="aviso-fonte">Este jogo não foi encontrado na ESPN, então ele fica sem placar ao vivo, lances e escalações. O placar vem da football-data, que atrasa alguns minutos.</div>` : "";
 
     const listaAbas = temAoVivo(p) ? [...ABAS_JOGO, ["escalacoes", "Escalações"], ["aovivo", vivo ? '<span class="vivo-min">Ao vivo</span>' : "Ao vivo"]] : ABAS_JOGO;
     const chaveJogo = code + ":" + p.i;
@@ -1144,7 +1150,7 @@
     } else {
       conteudo = abaRanking(code, p);
     }
-    return `${cab}${abas}<div class="aba-conteudo">${conteudo}</div>`;
+    return `${cab}${semPar}${abas}<div class="aba-conteudo">${conteudo}</div>`;
   }
 
   function abaRanking(code, p) {
