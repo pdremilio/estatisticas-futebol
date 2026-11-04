@@ -16,7 +16,8 @@
   }
   document.getElementById("pv-aviso").textContent =
     `Prévia com dados do ${P.liga === "Serie A" ? "Brasileirão" : P.liga} ${P.temporada} (API-Football, plano grátis). ` +
-    `Mostra como ficariam as estatísticas novas no ScanBall; com o plano Pro, os mesmos números vêm dos jogos de agora.`;
+    `Mostra como ficariam as estatísticas novas no ScanBall; com o plano Pro, os mesmos números vêm dos jogos de agora.` +
+    (P.total && P.baixados < P.total ? ` Baixados ${P.baixados} de ${P.total} jogos até agora: o plano grátis libera ~85 por dia, o resto chega nos próximos dias.` : "");
 
   // ------------------------------------------------------------ dados por time
   const T = P.times;
@@ -34,7 +35,7 @@
     return t.l ? `<img class="pv-esc ${g ? "pv-esc-g" : ""}" src="${h(t.l)}" alt="" loading="lazy" onerror="this.outerHTML=this.dataset.f" data-f='${falso.replace(/'/g, "&#39;")}'>` : falso;
   };
   const encerrado = (j) => ["FT", "AET", "PEN"].includes(j.s) && j.gh != null;
-  const jogos = P.jogos.filter(encerrado);
+  const jogos = P.jogos.filter((j) => encerrado(j) && j.e); // médias só com jogos que têm estatísticas
   const val = (par, i) => (par && par[i] != null ? par[i] : null);
 
   // registros por time (um por jogo, já do ponto de vista do time)
@@ -146,7 +147,7 @@
       <span class="pv-equipes"><span>${escudo(j.h)}<span class="nome">${h(nome(j.h))}</span><b>${fim ? j.gh : ""}</b></span>
         <span>${escudo(j.a)}<span class="nome">${h(nome(j.a))}</span><b>${fim ? j.ga : ""}</b></span></span>
       <span class="pv-numeros">${fim ? `<span><small>Escant.</small><b>${tot("esc") ?? "–"}</b></span><span><small>Cartões</small><b>${cart ?? "–"}</b></span>
-        <span><small>xG</small><b>${num(val(e.xg, 0), 1)}–${num(val(e.xg, 1), 1)}</b></span>` : `<span><small>${h(j.s)}</small></span>`}</span></a>`;
+        <span><small>xG</small><b>${e.xg ? num(val(e.xg, 0), 1) + "–" + num(val(e.xg, 1), 1) : "–"}</b></span>` : `<span><small>${h(j.s)}</small></span>`}</span></a>`;
   };
   function telaJogos(r) {
     if (r == null || !rodadas.includes(r)) r = estado.rodada || rodadas[rodadas.length - 1];
