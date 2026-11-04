@@ -992,3 +992,52 @@ table.odds-tabela { margin-top: 14px; }
 @media (max-width: 640px) { .pv-grade { grid-template-columns: 1fr; } .pv-gols { font-size: 26px; } }
 .aviso-fonte { border: 1px solid var(--derrota); background: color-mix(in srgb, var(--derrota) 10%, var(--superficie)); color: var(--tinta); border-radius: var(--raio-p); padding: 9px 12px; margin: 0 0 12px; font-size: 13.5px; }
 .cab-jogo + .aviso-fonte { margin: 10px 0 12px; }
+
+/* radar: minicampo + faixa dos últimos lances (narração da ESPN) */
+.radar { border: 1px solid var(--linha); border-radius: var(--raio-p); background: var(--superficie-2); padding: 10px 12px 8px; margin-bottom: 14px; }
+.radar.vazio-p { padding: 14px; text-align: center; }
+.radar-grade { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.radar-campo svg { width: 100%; height: auto; display: block; border-radius: 6px; }
+.radar .r-gramado { fill: #2E7D4F; }
+.radar .r-linhas * { fill: none; stroke: rgba(255,255,255,.6); stroke-width: .5; }
+.radar .r-zona { opacity: .28; } .radar .r-zona.c { fill: var(--casa); } .radar .r-zona.f { fill: var(--fora); }
+@media (prefers-reduced-motion: no-preference) { .radar .r-zona { animation: pisca 1.6s ease-in-out infinite; } }
+.radar .r-ponto { stroke: #fff; stroke-width: .5; } .radar .r-ponto.c { fill: var(--casa); } .radar .r-ponto.f { fill: var(--fora); }
+.radar .r-onda { fill: none; stroke-width: .7; } .radar .r-onda.c { stroke: var(--casa); } .radar .r-onda.f { stroke: var(--fora); }
+@media (prefers-reduced-motion: no-preference) {
+  .radar .r-onda { transform-box: fill-box; transform-origin: center; animation: onda 1.8s ease-out infinite; }
+  .radar .r-onda.novo { animation: onda .9s ease-out 4, onda 1.8s ease-out 3.6s infinite; }
+}
+@keyframes onda { from { transform: scale(.6); opacity: 1; } to { transform: scale(2.4); opacity: 0; } }
+.radar .r-chute { stroke-width: .6; stroke-dasharray: 1.2 1; } .radar .r-chute.c { stroke: #fff; } .radar .r-chute.f { stroke: #fff; }
+.radar-times { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; margin-top: 4px; }
+.radar-times .c { color: var(--casa); } .radar-times .f { color: var(--fora); }
+.radar-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
+.radar-lista li { display: grid; grid-template-columns: 44px 18px minmax(0, 1fr); align-items: baseline; gap: 4px; padding: 3px 6px; border-radius: 6px; border-left: 3px solid transparent; color: var(--tinta-2); }
+.radar-lista li.c { border-left-color: var(--casa); } .radar-lista li.f { border-left-color: var(--fora); }
+.radar-lista li.marco { border-left-color: var(--tinta-3); font-style: italic; }
+.radar-lista li.atual { color: var(--tinta); background: var(--superficie); font-size: 14px; }
+.radar-lista .m, .radar-linha .m { font-weight: 700; color: var(--tinta-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.radar-lista .ic-l, .radar-linha .ic-l { text-align: center; font-style: normal; }
+.radar-lista .ic, .radar-linha .ic { display: inline-block; width: 8px; height: 11px; border-radius: 1.5px; vertical-align: -1px; }
+.radar-lista .ic.amarelo, .radar-linha .ic.amarelo { background: var(--cartao); } .radar-lista .ic.vermelho, .radar-linha .ic.vermelho { background: var(--derrota); }
+.radar-linha { display: grid; grid-template-columns: 40px 16px minmax(0, 1fr); gap: 4px; align-items: baseline; font-size: 13px; margin-top: 8px; padding: 5px 8px; border-radius: 6px; background: var(--superficie-2); border-left: 3px solid var(--tinta-3); }
+.radar-linha.c { border-left-color: var(--casa); } .radar-linha.f { border-left-color: var(--fora); }
+.radar-linha .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* lance que acabou de chegar: pisca algumas vezes */
+@media (prefers-reduced-motion: no-preference) { .radar-lista li.novo, .radar-linha.novo { animation: lance-novo .7s ease-in-out 4; } }
+@keyframes lance-novo { 50% { background: color-mix(in srgb, var(--cartao) 35%, var(--superficie)); } }
+@media (max-width: 640px) { .radar-grade { grid-template-columns: 1fr; } }
+
+/* botão e modo "janela pequena" */
+.vivo-acoes { display: flex; justify-content: flex-end; margin: -2px 0 8px; }
+.botao-janela { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--linha); background: var(--superficie); color: var(--tinta-2); border-radius: 999px; padding: 4px 10px; font: 600 13px var(--fonte); cursor: pointer; }
+.botao-janela:hover { color: var(--tinta); border-color: var(--tinta-3); }
+.botao-janela.so-icone { padding: 4px 6px; margin-left: 6px; }
+.modo-janela .topo, .modo-janela .rodape, .modo-janela #aviso, .modo-janela .aviso { display: none !important; }
+.modo-janela #app { padding: 8px; max-width: none; }
+.janela-jogo .pv-placar { margin: 6px 0 4px; }
+.janela-jogo .painel-corpo { padding: 8px 0 0; }
+.janela-jogo .radar-grade { grid-template-columns: 1fr; }
+.janela-1t { text-align: center; margin: 0 0 6px; }
+.janela-rodape { text-align: center; font-size: 13px; margin: 8px 0 4px; }

@@ -480,8 +480,120 @@
       ${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div>
       <p class="sub nota">J, Min, G, A, CG e Cart.: números na temporada${temporada ? " (" + h(temporada) + ")" : ""}${ele ? "" : " (carregando…)"}. Ícones ao lado do nome: o que fez neste jogo (⚽ gol · A assistência · ▲ entrou · ▼ saiu). Fonte: ESPN.</p></div>`;
   }
-  function abaAoVivo(p) {
-    return `<div class="painel-corpo">${avisoFonte()}${graficoPressao(p)}${blocoAoVivo(p) || '<p class="sub">Estatísticas e lances aparecem quando o jogo começar.</p>'}</div>`;
+  // ---------- radar: minicampo com onde foi o último lance + faixa dos últimos lances (narração da ESPN)
+  const vistoRadar = {}; // jogo -> maior lance já mostrado (pisca só o que chegou agora)
+  function textoLance(p, e) {
+    if (e.k === "marco") return h(e.txt);
+    const t = h(nomeTime(e.l === "h" ? p.h : p.a)), j = h(e.j || ""), quem = j ? `${j} (${t})` : t;
+    switch (e.k) {
+      case "gol": return `<b>GOL! ${t}</b>${j ? ` · ${j}` : ""}${e.own ? " (contra)" : e.pen ? " (pênalti)" : ""}`;
+      case "alvo": return `${e.pen ? "Pênalti defendido" : "Chute no gol, defendido"}: ${quem}`;
+      case "fora": return `${e.pen ? "Pênalti perdido" : "Chute para fora"}: ${quem}`;
+      case "bloq": return `Chute bloqueado: ${quem}`;
+      case "trave": return `<b>Na trave!</b> ${quem}`;
+      case "esc": return `Escanteio · ${t}`;
+      case "imped": return `Impedimento · ${t}`;
+      case "falta": return `${e.onde === "ataque" ? "Falta no ataque" : e.onde === "ponta" ? "Falta pela ponta" : e.onde === "defesa" ? "Falta na defesa" : "Falta"} · ${t}${j ? ` <span class="sub">(sofrida por ${j})</span>` : ""}`;
+      case "amarelo": return `Cartão amarelo: ${quem}`;
+      case "vermelho": return `<b>Cartão vermelho:</b> ${quem}`;
+      case "2amarelo": return `<b>Expulso (2º amarelo):</b> ${quem}`;
+      case "sub": return `Substituição · ${t}: entra ${j}${e.j2 ? `, sai ${h(e.j2)}` : ""}`;
+      default: return quem;
+    }
+  }
+  const ICONE_LANCE = { gol: "⚽", alvo: "◉", fora: "○", bloq: "◌", trave: "⊓", esc: "⚑", imped: "⚐", falta: "✕", amarelo: '<i class="ic amarelo"></i>', vermelho: '<i class="ic vermelho"></i>', "2amarelo": '<i class="ic vermelho"></i>', sub: "⇄", marco: "⏱" };
+  // novos desde a última vez: pisca; na primeira vez que abre o jogo, nada pisca
+  function novosDoRadar(p) {
+    const ch = p.vv.espn ? p.vv.espn.code + ":" + p.vv.espn.id : String(p.i);
+    const lista = p.vv.lances || [];
+    const maior = lista.length ? lista[lista.length - 1].seq : 0;
+    const antes = vistoRadar[ch];
+    setTimeout(() => { vistoRadar[ch] = Math.max(vistoRadar[ch] || 0, maior); }, 0);
+    return antes == null ? Infinity : antes;
+  }
+  function radarLances(p, compacto) {
+    const lista = (p.vv && p.vv.lances) || [];
+    if (!lista.length) return compacto ? "" : `<div class="radar vazio-p"><p class="sub">${p.vv && p.vv.st === "pre" ? "O radar começa quando a bola rolar." : "Ainda sem lances no radar."}</p></div>`;
+    const visto = novosDoRadar(p);
+    const ult = lista[lista.length - 1];
+    if (compacto) {
+      return `<div class="radar-linha ${ult.seq > visto ? "novo" : ""} ${ult.l === "a" ? "f" : "c"}"><span class="m">${h(ult.min)}</span><span class="ic-l">${ICONE_LANCE[ult.k] || ""}</span><span class="t">${textoLance(p, ult)}</span></div>`;
+    }
+    // posição na tela: mandante ataca para a direita; lances do visitante são espelhados
+    const W = 105, H = 68;
+    const pos = (e, x, y) => (e.ref === "h" ? [x * W / 100, y * H / 100] : [(100 - x) * W / 100, (100 - y) * H / 100]);
+    const comPos = lista.filter((e) => e.x != null && e.y != null).slice(-6);
+    const ultPos = comPos[comPos.length - 1];
+    let marcas = "";
+    comPos.forEach((e, i) => {
+      const [x, y] = pos(e, e.x, e.y), ultimo = e === ultPos, op = ultimo ? 1 : 0.25 + (i / comPos.length) * 0.45;
+      const cls = e.l === "h" ? "c" : "f";
+      if (ultimo && e.x2 != null && e.y2 != null && ["gol", "alvo", "fora", "bloq", "trave"].includes(e.k)) {
+        const [x2, y2] = pos(e, e.x2, e.y2);
+        marcas += `<line class="r-chute ${cls}" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;
+      }
+      marcas += ultimo
+        ? `<circle class="r-onda ${cls}${e.seq > visto ? " novo" : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2"/><circle class="r-ponto ${cls}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${e.k === "gol" ? 2.4 : 1.8}"/>`
+        : `<circle class="r-ponto ${cls}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="1.1" opacity="${op.toFixed(2)}"/>`;
+    });
+    // último lance no terço final: sombreia a área de ataque daquele time
+    let zona = "";
+    if (ultPos && ["gol", "alvo", "fora", "bloq", "trave", "esc", "falta", "imped"].includes(ultPos.k)) {
+      const ataque = ultPos.ref === ultPos.l ? ultPos.x : 100 - ultPos.x; // do ponto de vista de quem fez o lance
+      if (ataque >= 66) zona = ultPos.l === "h" ? `<rect class="r-zona c" x="${W * 0.66}" y="0" width="${W * 0.34}" height="${H}"/>` : `<rect class="r-zona f" x="0" y="0" width="${W * 0.34}" height="${H}"/>`;
+    }
+    const campo = `<rect class="r-gramado" x="0" y="0" width="${W}" height="${H}"/>${zona}
+      <g class="r-linhas"><rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}"/><line x1="${W / 2}" y1="0.5" x2="${W / 2}" y2="${H - 0.5}"/><circle cx="${W / 2}" cy="${H / 2}" r="9.15"/>
+      <rect x="0.5" y="${H / 2 - 20.15}" width="16.5" height="40.3"/><rect x="${W - 17}" y="${H / 2 - 20.15}" width="16.5" height="40.3"/>
+      <rect x="0.5" y="${H / 2 - 9.15}" width="5.5" height="18.3"/><rect x="${W - 6}" y="${H / 2 - 9.15}" width="5.5" height="18.3"/></g>`;
+    const itens = lista.slice(-7).reverse().map((e, i) => `<li class="${e.seq > visto ? "novo" : ""} ${e.k === "marco" ? "marco" : e.l === "a" ? "f" : "c"}${i === 0 ? " atual" : ""}">
+        <span class="m">${h(e.min)}</span><span class="ic-l">${ICONE_LANCE[e.k] || ""}</span><span class="t">${textoLance(p, e)}</span></li>`).join("");
+    return `<div class="radar">
+      <div class="pressao-cab"><h3>Radar</h3><span class="sub">onde foi o último lance</span></div>
+      <div class="radar-grade">
+        <div class="radar-campo"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Campo com a posição do último lance">${campo}${marcas}</svg>
+          <div class="radar-times"><span class="c">${h(nomeTime(p.h))} ➜</span><span class="f">⬅ ${h(nomeTime(p.a))}</span></div></div>
+        <ul class="radar-lista" aria-live="polite">${itens}</ul>
+      </div>
+      <p class="sub nota">Lances da narração da ESPN (chegam 1 a 2 min depois). Não inclui ataques perigosos, laterais e posse lance a lance.</p>
+    </div>`;
+  }
+  const botaoJanela = (code, p, cls = "") => `<button type="button" class="botao-janela ${cls}" data-janela="${h(code)}/${h(p.i)}" title="Abrir este jogo numa janela pequena" aria-label="Abrir este jogo numa janela pequena">
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>${cls === "so-icone" ? "" : "Janela"}</button>`;
+  function abrirJanela(rota) {
+    const url = location.pathname + "?janela=1#jogo/" + rota;
+    const w = window.open(url, "sb_" + rota.replace(/\W/g, "_"), "popup=yes,width=470,height=860");
+    if (!w) location.href = url; // bloqueador de pop-up: abre na mesma aba
+  }
+  // fase de captura: o botão dentro do cartão do painel não pode abrir o jogo por baixo
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest("[data-janela]");
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    abrirJanela(b.dataset.janela);
+  }, true);
+
+  function abaAoVivo(p, code) {
+    return `<div class="painel-corpo">${avisoFonte()}${code && !MODO_JANELA ? `<div class="vivo-acoes">${botaoJanela(code, p)}</div>` : ""}${graficoPressao(p)}${radarLances(p)}${blocoAoVivo(p) || '<p class="sub">Estatísticas e lances aparecem quando o jogo começar.</p>'}</div>`;
+  }
+
+  // ---------- janela pequena de um jogo (?janela=1#jogo/...): placar, gráfico, radar e estatísticas
+  const MODO_JANELA = /[?&]janela=1/.test(location.search);
+  if (MODO_JANELA) document.documentElement.classList.add("modo-janela");
+  function telaJanela(code, id) {
+    const p = acharPartida(code, id);
+    estado.sel = null; estado.abaVista = "aovivo";
+    if (!p) { app.innerHTML = `<div class="painel"><div class="vazio"><strong>Jogo não encontrado</strong></div></div>`; return; }
+    document.title = `${nomeTime(p.h)} × ${nomeTime(p.a)} · ScanBall`;
+    const vivo = aoVivo(p), fim = encerrada(p);
+    const situacao = vivo ? (p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : '<span class="vivo">Ao vivo</span>') : fim ? "Encerrado" : `${DIA_CURTO(p.d)} · ${hora(p.d)}`;
+    app.innerHTML = `<section class="janela-jogo">
+      <div class="pv-topo">${seloComp(code)}<span class="sub">${h(nomeComp(code))}</span><span class="pv-min">${situacao}</span></div>
+      <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span><span class="pv-gols">${vivo || fim ? `${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}` : "<i>×</i>"}</span><span class="pv-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
+      ${p.hh != null && (vivo || fim) ? `<p class="sub janela-1t">(${p.hh}x${p.ha}) no 1º tempo</p>` : ""}
+      ${temAoVivo(p) ? abaAoVivo(p) : `<div class="painel-corpo"><div class="vazio vazio-curto">${p.semEspn ? "Este jogo não foi encontrado na ESPN." : "Os dados ao vivo aparecem quando o jogo estiver perto de começar."}</div></div>`}
+      <p class="janela-rodape"><a href="${location.pathname}#jogo/${h(code)}/${h(p.i)}" target="_blank" rel="noopener">Abrir no ScanBall</a></p>
+    </section>`;
   }
 
   // ---------- aba "Ao vivo" do topo: todos os jogos rolando, para quem não consegue assistir
@@ -506,10 +618,10 @@
           <span><small>Posse</small>${num(es, "posse", 0)}<i>×</i>${num(es, "posse", 1)}</span></div>` : "";
       const fav = favoritos.has(chaveFav(x.code, p));
       return `<article class="painel painel-vivo-card" role="link" tabindex="0" data-ir="jogo/${x.code}/${p.i}">
-        <div class="pv-topo">${seloComp(x.code)}<span class="sub">${h(nomeComp(x.code))}</span>${fav ? `<i class="fav-time">${ESTRELA_SVG(12)}</i>` : ""}<span class="pv-min">${p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : v.min ? `<span class="vivo-min">${h(v.min)}</span>` : '<span class="vivo">Ao vivo</span>'}</span></div>
+        <div class="pv-topo">${seloComp(x.code)}<span class="sub">${h(nomeComp(x.code))}</span>${fav ? `<i class="fav-time">${ESTRELA_SVG(12)}</i>` : ""}<span class="pv-min">${p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : v.min ? `<span class="vivo-min">${h(v.min)}</span>` : '<span class="vivo">Ao vivo</span>'}</span>${botaoJanela(x.code, p, "so-icone")}</div>
         <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span><span class="pv-gols">${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}</span><span class="pv-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
         ${graficoPressao(p, true) || (temAoVivo(p) ? '<p class="sub pv-carregando">Carregando lances…</p>' : '<p class="sub pv-carregando">Sem dados ao vivo para este jogo.</p>')}
-        ${est}${ultimos ? `<ul class="pv-ev">${ultimos}</ul>` : ""}
+        ${est}${radarLances(p, true)}${ultimos ? `<ul class="pv-ev">${ultimos}</ul>` : ""}
       </article>`;
     };
     const linhaProx = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">${hora(x.p.d)}</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button></li>`;
@@ -1140,7 +1252,7 @@
         ${lateral(p.a, ja, ladoA, "f")}
       </div>`;
     } else if (aba === "aovivo") {
-      conteudo = abaAoVivo(p);
+      conteudo = abaAoVivo(p, code);
     } else if (aba === "escalacoes") {
       conteudo = abaEscalacoes(p);
     } else if (aba === "proj") {
@@ -1835,7 +1947,7 @@
       return;
     }
     switch (aba) {
-      case "jogo": telaJogo(partes[1], partes[2]); break;
+      case "jogo": if (MODO_JANELA) telaJanela(partes[1], partes[2]); else telaJogo(partes[1], partes[2]); break;
       case "jogos": case "": estado.sel = null; telaJogos(); break;
       case "aovivo": telaPainelVivo(); break;
       case "classificacao": telaClassificacao(partes[1]); break;
