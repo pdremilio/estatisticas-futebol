@@ -33,7 +33,7 @@
   };
 
   // ------------------------------------------------------------ armazenamento local (tolerante a falhas)
-  const guardar = (k, v) => { try { localStorage.setItem("ef_" + k, JSON.stringify(v)); } catch (e) {} };
+  const guardar = (k, v) => { try { localStorage.setItem("ef_" + k, JSON.stringify(v)); } catch (e) {} if (window.Contas) window.Contas.marcarAlteracao(k); };
   const ler = (k, padrao) => { try { const v = localStorage.getItem("ef_" + k); return v == null ? padrao : JSON.parse(v); } catch (e) { return padrao; } };
 
   // ------------------------------------------------------------ preparo
@@ -201,7 +201,32 @@
   const favoritos = new Set(ler("favoritos", []));
   const chaveFav = (code, p) => code + ":" + p.i;
   const recolhidas = new Set();
-  const ROT_STATUS = (p) => (aoVivo(p) ? `<span class="vivo">${STATUS[p.s]}</span>` : STATUS[p.s] || p.s);
+  const ROT_STATUS = (p) => (aoVivo(p) ? (p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : `<span class="vivo">${STATUS[p.s]}</span>`) : STATUS[p.s] || p.s);
+
+  // ---------- ao vivo (V4): eventos e estatísticas vindos da API-Football
+  const EST_VIVO = [["posse", "Posse de bola", "%"], ["xg", "Gols esperados (xG)"], ["chutes", "Finalizações"], ["alvo", "No alvo"],
+    ["esc", "Escanteios"], ["faltas", "Faltas"], ["amarelos", "Cartões amarelos"], ["vermelhos", "Cartões vermelhos"], ["imped", "Impedimentos"], ["defesas", "Defesas do goleiro"]];
+  function blocoAoVivo(p) {
+    const v = p.vv;
+    if (!v || (!(v.ev && v.ev.length) && !v.es)) return "";
+    const icone = (t) => (t === "gol" ? "⚽" : t === "amarelo" ? '<i class="ic amarelo"></i>' : t === "vermelho" ? '<i class="ic vermelho"></i>' : t === "sub" ? "⇄" : t === "var" ? "VAR" : "");
+    const txt = (e) => `<span class="${e.t === "gol" ? "gol" : ""}">${e.l === "h" ? "" : icone(e.t) + " "}${h(e.j || "")}${e.x ? ` <small>${h(e.x)}</small>` : ""}${e.l === "h" ? " " + icone(e.t) : ""}</span>`;
+    const minNum = (m) => { const [a, b] = String(m).split("+"); return Number(a) + (Number(b) || 0) / 100; };
+    const evs = (v.ev || []).slice().sort((a, b) => minNum(b.m) - minNum(a.m)).map((e) => `<li><span class="c">${e.l === "h" ? txt(e) : ""}</span><span class="m">${h(e.m)}'</span><span>${e.l === "a" ? txt(e) : ""}</span></li>`).join("");
+    const num = (x) => (x == null ? null : Number(String(x).replace("%", "")));
+    const est = v.es ? EST_VIVO.filter(([k]) => v.es[k] && (num(v.es[k][0]) != null || num(v.es[k][1]) != null)).map(([k, rot, suf = ""]) => {
+      const a = num(v.es[k][0]) || 0, b = num(v.es[k][1]) || 0, t = a + b || 1;
+      const f = (x) => (k === "xg" ? fNum(x, 2) : x) + suf;
+      return `<div class="est-linha"><span class="v">${f(a)}</span><span class="rot">${rot}</span><span class="v">${f(b)}</span>
+        <span class="est-trilho"><span style="width:${(a / t) * 100}%"></span><span style="width:${(b / t) * 100}%"></span></span></div>`;
+    }).join("") : "";
+    const em = v.em ? new Date(v.em) : null;
+    const atual = em ? `<span class="atual">· atualizado ${pad(em.getHours())}:${pad(em.getMinutes())}:${pad(em.getSeconds())}</span>` : "";
+    return `<div class="vivo-painel">
+      <div><h3>Lances ${atual}</h3>${evs ? `<ul class="ev-lista">${evs}</ul>` : '<p class="sub">Nenhum lance registrado ainda.</p>'}</div>
+      <div><h3>Estatísticas</h3>${est ? `<div class="est-lista">${est}</div>` : '<p class="sub">Estatísticas ainda não disponíveis.</p>'}</div>
+    </div>`;
+  }
   const DIA_CURTO = (iso) => { const d = new Date(iso); return SEMANA[d.getDay()] + " " + pad(d.getDate()) + "/" + pad(d.getMonth() + 1); };
 
   // ---------- janela de datas: no máximo 3 dias para trás e 3 para frente
@@ -494,7 +519,7 @@
     const marcaFav = (tid) => (favTimes.has(String(tid)) ? `<i class="fav-time" title="Time favorito">${ESTRELA_SVG(12)}</i>` : "");
     return `<div class="jogo-v2" role="link" tabindex="0" data-ir="jogo/${code}/${p.i}">
       ${botaoEstrela("data-fav", k, fav, "este jogo")}
-      <span class="quando"><span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b></span>
+      <span class="quando">${vivo && p.vv && p.vv.min ? `<span>${hora(p.d)}</span><b class="vivo-min">${h(p.vv.min)}</b>` : `<span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b>`}</span>
       <span class="situacao">${ROT_STATUS(p)}</span>
       <span class="equipes">
         <span class="${vH ? "venc" : perdeu(vH, vA)}">${escudo(p.h)}<span>${h(nomeTime(p.h))}</span>${marcaFav(p.h)}</span>
@@ -739,7 +764,7 @@
         ${prob != null ? `<span class="sub" title="1 ÷ chance calculada pela projeção. Não é a odd da casa de apostas."><span>chance ${fProb(prob)}</span><i class="ponto"> · </i><span>odd justa <b>${fOdd(prob)}</b></span></span>` : ""}</div>`;
     let centro;
     if (fim || vivo) {
-      centro = `<span class="situacao-g ${vivo ? "vivo" : ""}">${STATUS[p.s] || p.s}</span>
+      centro = `<span class="situacao-g ${vivo ? "vivo" : ""}">${vivo && p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : STATUS[p.s] || p.s}</span>
         <div class="placar-num">${p.fh ?? "–"}<span class="sep">x</span>${p.fa ?? "–"}</div>
         ${p.hh != null ? `<div class="sub">(${p.hh}x${p.ha}) no 1º tempo</div>` : ""}
         ${p.du && p.du !== "REGULAR" ? `<div class="sub">decidido na prorrogação/pênaltis</div>` : ""}`;
@@ -755,6 +780,7 @@
           <div class="cab-centro">${centro}${estrela("")}</div>
           ${ladoTime(p.a, posA, pj ? pj.proj.p2 : null, "f", oddsJ && oddsJ.f)}
         </div>
+        ${blocoAoVivo(p)}
       </div>`;
     if (!temTimes) return cab;
 
@@ -1499,6 +1525,33 @@
   }
   window.addEventListener("hashchange", render);
 
+  // V4: contas e ao vivo
+  function recarregarPreferencias() {
+    const encher = (set, arr, f) => { set.clear(); (arr || []).forEach((x) => set.add(f ? f(x) : x)); };
+    encher(favTimes, ler("fav_times", []), String);
+    encher(favLigas, ler("fav_ligas", []));
+    encher(favoritos, ler("favoritos", []));
+    estado.filtro = Object.assign(copiaFiltro(FILTRO_VAZIO), ler("filtro_lista", {}));
+    estado.ordem = ler("ordem", estado.ordem);
+    estado.ocultarEncerrados = ler("ocultar", estado.ocultarEncerrados);
+    estado.rkOrdem = ler("rk_ordem", estado.rkOrdem);
+    estado.rkN = ler("rk_n", estado.rkN);
+    const c = ler("comp", ""); if (comps.includes(c)) estado.comp = c;
+    const t = ler("tema", null); if (t) document.documentElement.dataset.tema = t;
+    render();
+  }
+  window.App = { dados: DADOS, recarregarPreferencias, render: () => render(), aoVivoAtualizado };
+  function aoVivoAtualizado() {
+    todasPartidas.cache = null;
+    const rolaveis = [...document.querySelectorAll(".detalhe-lado, .detalhe-lado *")].filter((el) => el.scrollTop > 0).map((el) => [el.className, el.scrollTop]);
+    const y = window.scrollY;
+    render();
+    for (const [cls, top] of rolaveis) { const el = cls && document.getElementsByClassName(cls)[0]; if (el) el.scrollTop = top; }
+    window.scrollTo(0, y);
+  }
+
   montarTopo();
   render();
+  if (window.Contas) window.Contas.iniciar();
+  if (window.AoVivo) window.AoVivo.iniciar();
 })();
