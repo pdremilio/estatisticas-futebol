@@ -52,7 +52,7 @@ jobs:
           cp index.html estilo.css app.js motor.js dados-demo.js config.js contas.js aovivo.js _site/
           if [ -f dados.js ]; then cp dados.js _site/; fi
           if [ -f agenda.json ]; then cp agenda.json _site/; fi
-          for f in previa.html previa.js dados-2024.js; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
+          for f in teste.html app-teste.js aovivo-teste.js estilo-teste.css; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
 
       - name: Enviar o site
         uses: actions/upload-pages-artifact@v3
@@ -68,6 +68,11 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    # Só uma espera por vez: quando começa uma execução nova, a espera da anterior é cancelada
+    # (antes elas se acumulavam e travavam a fila do GitHub).
+    concurrency:
+      group: espera-proxima
+      cancel-in-progress: true
     steps:
       - name: Calcular quando será a próxima atualização (pausa quando não há jogos)
         id: quando
@@ -112,7 +117,10 @@ jobs:
           echo "segundos=$segundos" >> "$GITHUB_OUTPUT"
 
       - name: Esperar
-        run: sleep ${{ steps.quando.outputs.segundos }}
+        # "& wait" deixa a espera ser interrompida quando o GitHub cancela o job
+        run: |
+          sleep ${{ steps.quando.outputs.segundos }} &
+          wait $!
 
       - name: Chamar a próxima atualização
         env:
