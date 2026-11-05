@@ -2,8 +2,11 @@
 (function () {
   "use strict";
 
-  const DADOS = window.DADOS || window.DADOS_DEMO || null;
-  const DEMO = !window.DADOS && !!window.DADOS_DEMO;
+  // beta 5: base nova (ESPN + FotMob) em dados5.js; se ela falhar, a página carrega a football-data (reserva)
+  const B5 = !!(window.DADOS5_OK && window.DADOS5);
+  const RESERVA = !B5 && !!window.DADOS5_TENTOU;
+  const DADOS = (B5 ? window.DADOS5 : window.DADOS) || window.DADOS_DEMO || null;
+  const DEMO = !B5 && !window.DADOS && !!window.DADOS_DEMO;
   const M = window.Motor;
 
   const COMP_INFO = {
@@ -17,10 +20,14 @@
     DED: { nome: "Eredivisie", pais: "Holanda" },
     ELC: { nome: "Championship", pais: "Inglaterra" },
     CL: { nome: "Champions League", pais: "Europa" },
+    BSB: { nome: "Brasileirão Série B", pais: "Brasil" }, LMX: { nome: "Liga MX", pais: "México" }, MLS: { nome: "MLS", pais: "Estados Unidos" },
+    ARG: { nome: "Liga Profesional", pais: "Argentina" }, CHI: { nome: "Primera División", pais: "Chile" }, COL: { nome: "Primera A", pais: "Colômbia" },
+    UEL: { nome: "Europa League", pais: "Europa" }, UECL: { nome: "Conference League", pais: "Europa" },
+    LIB: { nome: "Libertadores", pais: "América do Sul" }, SUL: { nome: "Sul-Americana", pais: "América do Sul" },
     WC: { nome: "Copa do Mundo", pais: "Mundo" },
     EC: { nome: "Eurocopa", pais: "Europa" },
   };
-  const ORDEM = ["BSA", "PL", "PD", "SA", "BL1", "FL1", "PPL", "DED", "ELC", "CL"];
+  const ORDEM = (DADOS && DADOS.ordem) || ["BSA", "PL", "PD", "SA", "BL1", "FL1", "PPL", "DED", "ELC", "CL"];
   const OCULTAS = new Set(["WC", "EC"]); // torneios que já acabaram
   const STATUS = {
     SCHEDULED: "Agendado", TIMED: "Agendado", IN_PLAY: "Ao vivo", PAUSED: "Intervalo", LIVE: "Ao vivo",
@@ -33,8 +40,10 @@
   };
 
   // ------------------------------------------------------------ armazenamento local (tolerante a falhas)
-  const guardar = (k, v) => { try { localStorage.setItem("ef_" + k, JSON.stringify(v)); } catch (e) {} if (window.Contas) window.Contas.marcarAlteracao(k); };
-  const ler = (k, padrao) => { try { const v = localStorage.getItem("ef_" + k); return v == null ? padrao : JSON.parse(v); } catch (e) { return padrao; } };
+  // na beta 5 os códigos de times e jogos são os da ESPN: as preferências ficam separadas ("ef5_") e não vão para a conta
+  const PREFIXO = B5 ? "ef5_" : "ef_";
+  const guardar = (k, v) => { try { localStorage.setItem(PREFIXO + k, JSON.stringify(v)); } catch (e) {} if (window.Contas && !B5) window.Contas.marcarAlteracao(k); };
+  const ler = (k, padrao) => { try { const v = localStorage.getItem(PREFIXO + k); return v == null ? padrao : JSON.parse(v); } catch (e) { return padrao; } };
 
   // ------------------------------------------------------------ preparo
   const app = document.getElementById("app");
@@ -176,11 +185,14 @@
   // ------------------------------------------------------------ topo e aviso
   function montarTopo() {
     const meta = document.getElementById("topo-meta");
-    if (DADOS && DADOS.gerado_em) {
-      const d = new Date(DADOS.gerado_em);
+    if (DADOS && (DADOS.ok_em || DADOS.gerado_em)) {
+      // beta 5: horário da última atualização que deu certo (se a ESPN falhar numa rodada, não finge que atualizou)
+      const d = new Date(DADOS.ok_em || DADOS.gerado_em);
       meta.innerHTML = DEMO ? "Dados de demonstração" : `Dados de ${pad(d.getDate())}/${pad(d.getMonth() + 1)} às ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
-    if (DEMO) {
+    if (RESERVA) {
+      document.getElementById("aviso").innerHTML = `<div class="aviso aviso-reserva"><div><b>Estamos com instabilidade na fonte principal de dados.</b> Por enquanto o site está usando a fonte reserva: jogos, tabelas e estatísticas básicas continuam funcionando, mas tipos de gol, períodos, escanteios, cartões e xG ficam indisponíveis até a fonte principal voltar.</div></div>`;
+    } else if (DEMO) {
       const naWeb = /^https?:$/.test(location.protocol);
       document.getElementById("aviso").innerHTML = `<div class="aviso"><div>Você está vendo dados de demonstração, com resultados inventados. ${naWeb ? "Os dados reais aparecem depois que a primeira atualização automática terminar (aba Actions do GitHub)." : "Rode o <b>atualizar.bat</b> para baixar os dados reais das competições."}</div></div>`;
     }
@@ -996,7 +1008,11 @@
   }
 
   // ------------------------------------------------------------ JOGO (página)
-  const ABAS_JOGO = [
+  // beta 5: abas com tipos de gol, períodos e extras (só quando a fonte tem minuto dos gols e estatísticas)
+  const ABAS_JOGO = B5 ? [
+    ["inteiro", "Jogo inteiro"], ["tempos", "1º/2º tempo"], ["gtipos", "Tipos de gols"], ["periodos", "Períodos"], ["overs", "Overs"],
+    ["extras", "Extras"], ["proj", "Projeções"], ["tabela", "Classificação e artilharia"], ["rank", "Power Ranking"],
+  ] : [
     ["inteiro", "Jogo inteiro"], ["tempos", "1º/2º tempo"], ["overs", "Overs"],
     ["proj", "Projeções"], ["tabela", "Classificação e artilharia"], ["rank", "Power Ranking"],
   ];
@@ -1027,9 +1043,49 @@
     un15: ["Menos de 1,5", (b) => b.j - b.ov[1], (b) => b.j, 0], un25: ["Menos de 2,5", (b) => b.j - b.ov[2], (b) => b.j, 0],
     un35: ["Menos de 3,5", (b) => b.j - b.ov[3], (b) => b.j, 0],
     btts25: ["Ambas marcam e mais de 2,5", (b) => b.btts25, (b) => b.j, 0],
+    // primeiro gol (exato com o minuto dos gols)
+    mpx: ["Marcou primeiro", (b) => b.mp, (b) => b.j - b.pdes, 1], spx: ["Sofreu primeiro", (b) => b.sp, (b) => b.j - b.pdes, -1],
+    mpV: ["Marcou 1º e venceu", (b) => b.mpV, (b) => b.mpV + b.mpE + b.mpD, 1],
+    mpNP: ["Marcou 1º e não perdeu", (b) => b.mpV + b.mpE, (b) => b.mpV + b.mpE + b.mpD, 1],
+    spNP: ["Sofreu 1º e não perdeu", (b) => b.spV + b.spE, (b) => b.spV + b.spE + b.spD, 1],
+    spV: ["Sofreu 1º e virou", (b) => b.spV, (b) => b.spV + b.spE + b.spD, 1],
+    pgMin: ["Minuto médio do 1º gol do jogo", (b) => b.pgMin, (b) => b.pgN, 0, "med"],
+    // extras (estatísticas de cada jogo)
+    jex: ["Jogos com estatísticas", (b) => b.je, null, 0, "num"],
+    escF: ["Escanteios a favor", (b) => b.escF, (b) => b.je, 1, "med"], escC: ["Escanteios contra", (b) => b.escC, (b) => b.je, -1, "med"],
+    escT: ["Escanteios no jogo", (b) => b.escF + b.escC, (b) => b.je, 0, "med"],
+    esc85: ["Mais de 8,5 escanteios", (b) => b.esc85, (b) => b.je, 0], esc95: ["Mais de 9,5 escanteios", (b) => b.esc95, (b) => b.je, 0],
+    esc105: ["Mais de 10,5 escanteios", (b) => b.esc105, (b) => b.je, 0], escMais: ["Teve mais escanteios", (b) => b.escMais, (b) => b.je, 1],
+    amF: ["Cartões amarelos", (b) => b.amF, (b) => b.je, -1, "med"], amC: ["Amarelos do adversário", (b) => b.amC, (b) => b.je, 0, "med"],
+    cartT: ["Cartões no jogo", (b) => b.amF + b.amC + b.vmF + b.vmC, (b) => b.je, 0, "med"],
+    cart35: ["Mais de 3,5 cartões", (b) => b.cart35, (b) => b.je, 0], cart45: ["Mais de 4,5 cartões", (b) => b.cart45, (b) => b.je, 0],
+    vmF: ["Cartões vermelhos", (b) => b.vmF, null, -1, "num"],
+    chF: ["Chutes", (b) => b.chF, (b) => b.je, 1, "med"], chC: ["Chutes sofridos", (b) => b.chC, (b) => b.je, -1, "med"],
+    cgF: ["Chutes no gol", (b) => b.cgF, (b) => b.je, 1, "med"], cgC: ["Chutes no gol sofridos", (b) => b.cgC, (b) => b.je, -1, "med"],
+    poF: ["Posse de bola (%)", (b) => b.poF, (b) => b.je, 0, "med"], faF: ["Faltas cometidas", (b) => b.faF, (b) => b.je, 0, "med"],
   };
+  // tipos de gol e períodos: % sobre os gols marcados (ou sofridos) nos jogos com a lista de gols
+  const TIPOS_GOL = [["c", "De cabeça"], ["e", "Após escanteio"], ["b", "Outras bolas paradas"], ["f", "De falta direta"], ["p", "De pênalti"],
+    ["k", "De contra-ataque"], ["x", "De fora da área"], ["r", "Após cruzamento"], ["o", "Gol contra (a favor)"]];
+  const PERIODOS = ["0–15'", "16–30'", "31–45+'", "46–60'", "61–75'", "76–90+'"];
+  for (const [k, rot] of TIPOS_GOL) {
+    L["tm" + k] = [rot, (b) => b.tm[k], (b) => b.tm.n, 0, "pgol"];
+    L["ts" + k] = [k === "o" ? "Gol contra (do próprio time)" : rot, (b) => b.ts[k], (b) => b.ts.n, 0, "pgol"];
+  }
+  PERIODOS.forEach((rot, i) => {
+    L["pm" + i] = [rot, (b) => b.pm[i], (b) => b.pm.reduce((s, x) => s + x, 0), 0, "pgol"];
+    L["ps" + i] = [rot, (b) => b.ps[i], (b) => b.ps.reduce((s, x) => s + x, 0), 0, "pgol"];
+  });
+  L.tmn = ["Gols marcados (com tipo)", (b) => b.tm.n, null, 0, "num"];
+  L.tsn = ["Gols sofridos (com tipo)", (b) => b.ts.n, null, 0, "num"];
   const TABELAS_JOGO = {
-    inteiro: ["jogos", "vit", "emp", "der", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "pts"],
+    inteiro: B5 ? ["jogos", "vit", "emp", "der", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "pts",
+      "#Primeiro gol", "mpx", "spx", "mpV", "mpNP", "spNP", "spV", "pgMin"]
+      : ["jogos", "vit", "emp", "der", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "pts"],
+    gtipos: ["#Gols marcados", "tmn", ...TIPOS_GOL.map(([k]) => "tm" + k), "#Gols sofridos", "tsn", ...TIPOS_GOL.map(([k]) => "ts" + k)],
+    periodos: ["#Gols marcados por período", ...PERIODOS.map((_, i) => "pm" + i), "#Gols sofridos por período", ...PERIODOS.map((_, i) => "ps" + i)],
+    extras: ["jex", "#Escanteios", "escF", "escC", "escT", "esc85", "esc95", "esc105", "escMais", "#Cartões", "amF", "amC", "cartT", "cart35", "cart45", "vmF",
+      "#Finalizações e posse", "chF", "chC", "cgF", "cgC", "poF", "faF"],
     tempos: ["#1º tempo", "v1", "e1", "d1", "m1", "s1", "ht05", "ht15", "gm1", "gs1", "#2º tempo", "m2", "s2", "st05", "st15", "gm2", "gs2", "#Viradas", "vir", "ced"],
     tempo: ["jogos", "vit", "emp", "der", "marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt", "#Gols no tempo", "ov05", "ov15", "ov25"],
     overs: ["#Gols no jogo", "ov05", "ov15", "ov25", "ov35", "ov45", "|", "un15", "un25", "un35", "#Ambas marcam", "btts", "btts25", "#1º tempo", "ht05", "ht15"],
@@ -1051,7 +1107,8 @@
       const cel = (b) => {
         const n = cont(b), d = base ? base(b) : null;
         if (tipo === "num") return [n, "–", ""];
-        if (tipo === "med") return [n, d ? fNum(n / d, 2) : "–", ""];
+        if (tipo === "med") return [k === "poF" || k === "pgMin" ? "–" : n, d ? fNum(n / d, k === "poF" || k === "pgMin" ? 1 : 2) : "–", ""];
+        if (tipo === "pgol") return [n, d ? fPct((100 * n) / d) : "–", ""];
         const pct = d ? (100 * n) / d : null;
         return [n, fPct(pct), corPct(pct, dir)];
       };
@@ -1079,7 +1136,7 @@
   function bolaPrimeiro(p, tid) {
     if (!encerrada(p)) return `<span class="bola"></span>`;
     const casa = String(p.h) === String(tid);
-    const pg = casa ? M.primeiroGol(p.fh, p.fa, p.hh, p.ha) : M.primeiroGol(p.fa, p.fh, p.ha, p.hh);
+    const pg = M.primeiroDoJogo ? M.primeiroDoJogo(p, casa) : casa ? M.primeiroGol(p.fh, p.fa, p.hh, p.ha) : M.primeiroGol(p.fa, p.fh, p.ha, p.hh);
     if (pg === "eu") return `<span class="bola" title="Marcou primeiro">${BOLA_FUT}</span>`;
     if (pg === "eles") return `<span class="bola" title="Sofreu primeiro">${BOLA_BRANCA}</span>`;
     if (pg === "?") return `<span class="bola" title="Não dá para saber quem marcou primeiro: os dois times marcaram no mesmo tempo">${BOLA_DUVIDA}</span>`;
@@ -1178,10 +1235,36 @@
     }
   }
 
+  // fase do jogo como a ESPN escreve ("Quarterfinals - Leg 1") em português
+  function traduzFase(t) {
+    if (!t) return "";
+    const D = [[/League Phase/i, "Fase de liga"], [/Group Stage|Group/i, "Fase de grupos"], [/Knockout Round Playoffs?|Play-?offs?/i, "Playoffs"],
+      [/Round of 32/i, "16 avos de final"], [/Round of 16/i, "Oitavas de final"], [/Quarter-?finals?/i, "Quartas de final"], [/Semi-?finals?/i, "Semifinal"],
+      [/Third Place/i, "Disputa de 3º"], [/Matchday\s*(\d+)/i, "Rodada $1"], [/1st Leg|Leg 1/i, "ida"], [/2nd Leg|Leg 2/i, "volta"]];
+    let r = t;
+    for (const [re, pt] of D) r = r.replace(re, pt);
+    return r.replace(/\s*-\s*/g, " · ");
+  }
+  // xG da temporada (FotMob): por jogo, feito e sofrido, e pontos esperados
+  function blocoXg(code, p) {
+    const xg = (DADOS.competicoes[code] || {}).xg;
+    if (!xg) return "";
+    const lin = (tid) => xg[tid] || xg[String(tid)];
+    const a = lin(p.h), b = lin(p.a);
+    if (!a && !b) return "";
+    const por = (x, i) => (x && x[2] ? fNum(x[i] / x[2], 2) : "–");
+    const linha = (rot, i, dir) => `<tr><td class="n"></td><td class="p">${por(a, i)}</td><td class="rot">${rot}</td><td class="p">${por(b, i)}</td><td class="n"></td></tr>`;
+    return `<table class="stats-central xg-tab"><tbody><tr class="secao"><td colspan="5">xG na temporada (FotMob)</td></tr>
+      ${linha("xG feito por jogo", 0)}${linha("xG sofrido por jogo", 1)}
+      <tr><td class="n"></td><td class="p">${a ? fNum(a[0] - a[1], 1) : "–"}</td><td class="rot">Saldo de xG na temporada</td><td class="p">${b ? fNum(b[0] - b[1], 1) : "–"}</td><td class="n"></td></tr>
+      <tr><td class="n"></td><td class="p">${a ? fNum(a[3], 1) : "–"}</td><td class="rot">Pontos esperados</td><td class="p">${b ? fNum(b[3], 1) : "–"}</td><td class="n"></td></tr>
+      </tbody></table><p class="sub nota">xG: gols esperados pela qualidade das chances. Temporada inteira na competição, sem separar casa e fora.</p>`;
+  }
+
   function htmlJogo(code, p) {
     const comp = DADOS.competicoes[code];
     const fim = encerrada(p), vivo = aoVivo(p), temTimes = p.h && p.a;
-    const rodada = p.r ? `Rodada ${p.r}` : FASES[p.f] || "";
+    const rodada = p.r ? `Rodada ${p.r}` : FASES[p.f] || traduzFase(p.fn) || "";
     const grupo = p.g ? " · " + p.g.replace("GROUP_", "Grupo ") : "";
     const pj = temTimes ? projecaoDo(code, p) : null;
     const posH = temTimes ? posicaoNaTabela(code, p.h) : null, posA = temTimes ? posicaoNaTabela(code, p.a) : null;
@@ -1232,7 +1315,8 @@
       const tempo = aba === "tempos" ? (estado.tempo === 2 ? 2 : 1) : 0;
       if (tempo) { jh = jogosDoTempo(jh, tempo); ja = jogosDoTempo(ja, tempo); }
       const bH = M.bucketDeJogos(jh, p.h), bA = M.bucketDeJogos(ja, p.a);
-      const titulos = { inteiro: "Jogo inteiro", tempos: `${tempo}º tempo`, overs: "Overs" };
+      const titulos = { inteiro: "Jogo inteiro", tempos: `${tempo}º tempo`, overs: "Overs", gtipos: "Tipos de gols", periodos: "Períodos dos gols", extras: "Extras" };
+      const semDetalhe = (aba === "gtipos" || aba === "periodos") ? !(bH.jg + bA.jg) : aba === "extras" ? !(bH.je + bA.je) : false;
       const lateral = (tid, jogos, ladoX, cls) => (aba === "overs" ? distribuicaoGols(jogos, tid, ladoX, cls) : listaLateral(code, tid, jogos, ladoX, tempo));
       const botoesTempo = tempo ? `<div class="tempo-botoes" role="group" aria-label="Tempo">
           <button type="button" data-tempo="1" aria-pressed="${tempo === 1}">1º tempo</button>
@@ -1245,9 +1329,10 @@
               <button type="button" data-recorte="lado" aria-pressed="${!lado}">Casa-Fora</button>
               <button type="button" data-recorte="total" aria-pressed="${lado}">Total</button></div></div>
           <div class="centro-nomes"><span class="c">${h(nomeTime(p.h))}</span><span class="f">${h(nomeTime(p.a))}</span></div>
-          ${tabelaCentral(tempo ? "tempo" : aba, bH, bA)}
+          ${semDetalhe ? `<div class="vazio vazio-curto">Ainda sem ${aba === "extras" ? "estatísticas" : "detalhe dos gols"} destes jogos. ${B5 ? "Elas vão sendo baixadas aos poucos nas atualizações." : "Disponível com a fonte principal de dados."}</div>` : tabelaCentral(tempo ? "tempo" : aba, bH, bA)}
+          ${aba === "extras" ? blocoXg(code, p) : ""}
           ${botoesTempo}
-          <p class="sub nota">${tempo ? `Cada jogo conta só pelo placar do ${tempo}º tempo. ` : ""}${fim ? "Números de antes desta partida. " : ""}${estado.ultimos ? "Considerando os últimos 5 jogos" : "Considerando todos os jogos"} ${lado ? "no total" : "do mandante em casa e do visitante fora"}.</p>
+          <p class="sub nota">${aba === "gtipos" ? "Porcentagem sobre os gols com a narração do lance; um gol pode ter mais de um tipo (ex.: de cabeça após escanteio). " : aba === "periodos" ? "Porcentagem sobre os gols de cada time; acréscimos contam no fim de cada tempo. " : ""}${tempo ? `Cada jogo conta só pelo placar do ${tempo}º tempo. ` : ""}${fim ? "Números de antes desta partida. " : ""}${estado.ultimos ? "Considerando os últimos 5 jogos" : "Considerando todos os jogos"} ${lado ? "no total" : "do mandante em casa e do visitante fora"}.</p>
         </div>
         ${lateral(p.a, ja, ladoA, "f")}
       </div>`;

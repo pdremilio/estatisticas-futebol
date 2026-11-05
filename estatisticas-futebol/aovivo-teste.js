@@ -17,6 +17,9 @@
   const BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer/";
   const CORE = "https://sports.core.api.espn.com/v2/sports/soccer/leagues/"; // minutos jogados de cada atleta
   const ESPN = { BSA: "bra.1", PL: "eng.1", PD: "esp.1", SA: "ita.1", BL1: "ger.1", FL1: "fra.1", PPL: "por.1", DED: "ned.1", ELC: "eng.2", CL: "uefa.champions" };
+  // liga da ESPN de cada competição: a beta 5 grava no próprio dado ("espn"); a football-data usa a tabela acima
+  const lgDe = (code) => ((dados && dados.competicoes[code]) || {}).espn || ESPN[code];
+  const codigos = () => Object.keys((dados && dados.competicoes) || {}).filter((c) => lgDe(c));
   const CICLO_VIVO = 20000, CICLO_CALMO = 60000, DETALHE_PRE = 120000, ELENCO_VALIDADE = 6 * 3600e3;
 
   // ---------- nomes parecidos (mesma regra do atualizador de odds)
@@ -50,7 +53,7 @@
   }
   function buscasAtivas() {
     const agora = Date.now(), lista = new Map(); // "liga|dia" -> [code, dia]
-    for (const code in ESPN) {
+    for (const code of codigos()) {
       const comp = dados.competicoes[code];
       for (const p of (comp && comp.partidas) || []) {
         if (!naJanela(p, agora)) continue;
@@ -64,6 +67,12 @@
   function acharPartida(code, ev) {
     const chave = code + ":" + ev.id;
     if (casados.has(chave)) return casados.get(chave);
+    if (dados.fonte === "espn") {
+      // beta 5: o jogo do site já é o jogo da ESPN (mesmo código)
+      const p = (dados.competicoes[code].partidas || []).find((x) => String(x.i) === String(ev.id)) || null;
+      if (p) casados.set(chave, p);
+      return p;
+    }
     const c = ev.competitions && ev.competitions[0];
     if (!c) return null;
     const casa = c.competitors.find((x) => x.homeAway === "home"), fora = c.competitors.find((x) => x.homeAway === "away");
@@ -131,7 +140,7 @@
     const antes = JSON.stringify([p.s, p.fh, p.fa, p.du, p.hh, p.ha, p.vv && p.vv.min]);
     if (!p._orig) p._orig = { s: p.s, fh: p.fh, fa: p.fa, hh: p.hh, ha: p.ha };
     const vv = (p.vv = p.vv || {});
-    vv.espn = { lg: ESPN[code], id: ev.id, code };
+    vv.espn = { lg: lgDe(code), id: ev.id, code };
     vv.tid = { h: casa.team && casa.team.id, a: fora.team && fora.team.id };
     vv.st = tp.state;
     vv.clk = st.displayClock || ""; vv.per = st.period || 0;
@@ -507,7 +516,7 @@
   async function atualizarPainel(forcar) {
     if (!painelAberto()) return false;
     const lista = [];
-    for (const code in ESPN) for (const p of ((dados.competicoes[code] || {}).partidas || [])) {
+    for (const code of codigos()) for (const p of ((dados.competicoes[code] || {}).partidas || [])) {
       if (!p.vv || !p.vv.espn) continue;
       if (p.vv.st === "in" || (p.vv.st === "post" && !p.vv.pr && naJanela(p, Date.now()))) lista.push(p);
     }
@@ -529,7 +538,7 @@
       let mudou = false;
       if (buscas.length) {
         proximo = CICLO_VIVO;
-        const placares = await Promise.all(buscas.map(([code, dia]) => buscarJSON(`${BASE}${ESPN[code]}/scoreboard?dates=${dia}`).then((r) => [code, r])));
+        const placares = await Promise.all(buscas.map(([code, dia]) => buscarJSON(`${BASE}${lgDe(code)}/scoreboard?dates=${dia}`).then((r) => [code, r])));
         if (meu !== geracao) return;
         const ok = placares.some(([, r]) => r);
         falhasSeguidas = ok ? 0 : falhasSeguidas + 1;
