@@ -586,7 +586,7 @@
   }, true);
 
   function abaAoVivo(p, code) {
-    return `<div class="painel-corpo">${avisoFonte()}${code && !MODO_JANELA ? `<div class="vivo-acoes">${botaoJanela(code, p)}</div>` : ""}${graficoPressao(p)}${radarLances(p)}${blocoAoVivo(p) || '<p class="sub">Estatísticas e lances aparecem quando o jogo começar.</p>'}</div>`;
+    return `<div class="painel-corpo">${avisoFonte()}${code && !MODO_JANELA ? `<div class="vivo-acoes">${botaoJanela(code, p)}</div>` : ""}${graficoPressao(p)}${blocoAoVivo(p) || '<p class="sub">Estatísticas e lances aparecem quando o jogo começar.</p>'}</div>`;
   }
 
   // ---------- janela pequena de um jogo (?janela=1#jogo/...): placar, gráfico, radar e estatísticas
@@ -650,7 +650,7 @@
   }
   function blocoAoVivo(p) {
     const v = p.vv;
-    if (!v || (!(v.ev && v.ev.length) && !v.es)) return "";
+    if (!v || (!(v.ev && v.ev.length) && !v.es && !(v.lances && v.lances.length))) return "";
     const icone = (t) => (t === "gol" ? "⚽" : t === "amarelo" ? '<i class="ic amarelo"></i>' : t === "vermelho" ? '<i class="ic vermelho"></i>' : t === "sub" ? "⇄" : t === "var" ? "VAR" : "");
     const txt = (e) => `<span class="${e.t === "gol" ? "gol" : ""}">${e.l === "h" ? "" : icone(e.t) + " "}${h(e.j || "")}${e.x ? ` <small>${h(e.x)}</small>` : ""}${e.l === "h" ? " " + icone(e.t) : ""}</span>`;
     const minNum = (m) => { const [a, b] = String(m).split("+"); return Number(a) + (Number(b) || 0) / 100; };
@@ -664,8 +664,14 @@
     }).join("") : "";
     const em = v.emDet || v.em ? new Date(v.emDet || v.em) : null;
     const atual = em ? `<span class="atual">· atualizado ${pad(em.getHours())}:${pad(em.getMinutes())}:${pad(em.getSeconds())}</span>` : "";
+    // lance a lance (narração da ESPN) ao lado das estatísticas; sem narração, ficam os lances principais
+    const narr = v.lances && v.lances.length ? (() => {
+      const visto = novosDoRadar(p);
+      return `<ul class="radar-lista narracao" aria-live="polite">${v.lances.slice().reverse().map((e, i) => `<li class="${e.seq > visto ? "novo" : ""} ${e.k === "marco" ? "marco" : e.l === "a" ? "f" : "c"}${i === 0 ? " atual" : ""}">
+        <span class="m">${h(e.min)}</span><span class="ic-l">${ICONE_LANCE[e.k] || ""}</span><span class="t">${textoLance(p, e)}</span></li>`).join("")}</ul>`;
+    })() : "";
     return `<div class="vivo-painel">
-      <div><h3>Lances ${atual}</h3>${evs ? `<ul class="ev-lista">${evs}</ul>` : '<p class="sub">Nenhum lance registrado ainda.</p>'}</div>
+      <div><h3>${narr ? "Lance a lance" : "Lances"} ${atual}</h3>${narr || (evs ? `<ul class="ev-lista">${evs}</ul>` : '<p class="sub">Nenhum lance registrado ainda.</p>')}</div>
       <div><h3>Estatísticas</h3>${est ? `<div class="est-lista">${est}</div>` : '<p class="sub">Estatísticas ainda não disponíveis.</p>'}</div>
     </div>`;
   }

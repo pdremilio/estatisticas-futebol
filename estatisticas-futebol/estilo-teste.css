@@ -1041,3 +1041,4 @@ table.odds-tabela { margin-top: 14px; }
 .janela-jogo .radar-grade { grid-template-columns: 1fr; }
 .janela-1t { text-align: center; margin: 0 0 6px; }
 .janela-rodape { text-align: center; font-size: 13px; margin: 8px 0 4px; }
+.radar-lista.narracao { max-height: 420px; overflow-y: auto; padding-right: 4px; }
