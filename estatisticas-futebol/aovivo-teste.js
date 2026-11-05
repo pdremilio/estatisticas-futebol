@@ -513,6 +513,103 @@
     return lerDetalhe(r, p);
   }
   // painel ao vivo: detalhe de todos os jogos rolando (e dos que acabaram de terminar, uma vez)
+  // ---------- 365Scores: ataques, xG e estatísticas ao vivo (atualiza a cada ~6 s)
+  // API pública do app 365Scores (sem chave, em português). Testada em 05/11/2026: o contador de ataques
+  // muda em segundos. Ela dá o TOTAL de ataques; o site registra quantos entraram em cada minuto enquanto
+  // o jogo está aberto (e guarda na sessão, para não perder ao recarregar). Se falhar, fica tudo como antes (ESPN).
+  const S365 = "https://webws.365scores.com/web/";
+  const Q365 = "appTypeId=5&langId=31&timezoneName=America/Sao_Paulo&userCountryId=21";
+  const CICLO_365 = 6000;
+  let lista365 = null, lista365Em = 0;
+  const par365 = new Map(); // "code:idESPN" -> id do jogo no 365Scores (0 = não achou)
+  async function jogos365() {
+    if (lista365 && Date.now() - lista365Em < 90000) return lista365;
+    const r = await buscarJSON(`${S365}games/current/?${Q365}&sports=1`);
+    if (r && r.games) { lista365 = r.games; lista365Em = Date.now(); }
+    return lista365;
+  }
+  async function idDo365(p) {
+    const ch = p.vv.espn.code + ":" + p.vv.espn.id;
+    if (par365.has(ch)) return par365.get(ch);
+    const lista = await jogos365();
+    if (!lista) return 0;
+    const T = dados.times || {}, nome = (id) => [(T[id] || {}).n, (T[id] || {}).c, (T[id] || {}).t].join(" ");
+    const th = tokens(nome(p.h)), ta = tokens(nome(p.a)), quando = Date.parse(p.d);
+    let melhor = 0, nota = 0;
+    for (const g of lista) {
+      const dif = Math.abs(Date.parse(g.startTime) - quando);
+      if (!(dif <= 3 * 3600e3)) continue;
+      const hc = g.homeCompetitor || {}, ac = g.awayCompetitor || {};
+      const sh = parecido(th, tokens(hc.name + " " + (hc.shortName || "") + " " + (hc.symbolicName || "")));
+      const sa = parecido(ta, tokens(ac.name + " " + (ac.shortName || "") + " " + (ac.symbolicName || "")));
+      if (!sh || !sa) continue;
+      const n = sh + sa - dif / 86400e3;
+      if (n > nota) { melhor = g.id; nota = n; }
+    }
+    // só guarda "não achou" quando a lista já tem jogos daquele horário (evita desistir cedo demais)
+    if (melhor || Date.now() > quando + 30 * 60e3) par365.set(ch, melhor);
+    return melhor;
+  }
+  const num365 = (v) => { const m = String(v == null ? "" : v).replace(",", ".").match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : null; };
+  const EST_365 = { "Gols esperados (xG)": "xg", "Ataque": "atk", "Chances perigosas criadas": "cp", "Posse de Bola": "posse", "Total de chutes": "chutes",
+    "Chutes no gol": "alvo", "Escanteios": "esc", "Trave": "trave", "Faltas": "faltas", "Cartões amarelos": "amarelos", "Cartões vermelhos": "vermelhos",
+    "Impedimentos": "imped", "Defesas do goleiro": "defesas", "Total de passes": "passes" };
+  function chaveSessao(gid) { return "sb365_" + gid; }
+  function lerSessao(gid) { try { return JSON.parse(sessionStorage.getItem(chaveSessao(gid)) || "null"); } catch (e) { return null; } }
+  function gravarSessao(gid, atk) { try { sessionStorage.setItem(chaveSessao(gid), JSON.stringify(atk)); } catch (e) {} }
+  const ultimo365 = new Map();
+  async function atualizar365(p, forcar) {
+    if (!p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
+    const ch = p.vv.espn.code + ":" + p.vv.espn.id;
+    if (!forcar && Date.now() - (ultimo365.get(ch) || 0) < CICLO_365 - 500) return false;
+    ultimo365.set(ch, Date.now());
+    const gid = await idDo365(p);
+    if (!gid) return false;
+    const r = await buscarJSON(`${S365}game/stats/?${Q365}&games=${gid}`);
+    if (!r || !r.statistics) return false;
+    const g = (r.games || [])[0] || {};
+    const idCasa = (g.homeCompetitor || {}).id;
+    const es = {};
+    for (const x of r.statistics) {
+      const k = EST_365[x.name];
+      if (!k) continue;
+      const v = num365(x.value);
+      if (v == null) continue;
+      es[k] = es[k] || [null, null];
+      es[k][x.competitorId === idCasa ? 0 : 1] = v;
+    }
+    const vv = p.vv;
+    const antes = JSON.stringify([vv.es365, vv.atk && vv.atk.ult]);
+    vv.es365 = es;
+    vv.id365 = gid;
+    vv.em365 = new Date().toISOString();
+    // ataques por minuto: a diferença entre uma leitura e outra entra no minuto atual
+    const atk = (vv.atk = vv.atk || lerSessao(gid) || { h: {}, a: {}, ult: null, desde: new Date().toISOString() });
+    const tot = es.atk ? [es.atk[0] || 0, es.atk[1] || 0] : null;
+    const s = slotDe(g.gameTimeDisplay || vv.clk, vv.per);
+    if (tot && s) {
+      const k = chaveSlot(s);
+      if (atk.ult) {
+        for (const [i, l] of [[0, "h"], [1, "a"]]) {
+          const d = tot[i] - atk.ult[i];
+          if (d > 0 && d < 20) atk[l][k] = (atk[l][k] || 0) + d;
+        }
+      }
+      atk.ult = tot;
+      gravarSessao(gid, atk);
+    }
+    return antes !== JSON.stringify([vv.es365, vv.atk && vv.atk.ult]);
+  }
+  let timer365 = null;
+  function ciclo365() {
+    clearTimeout(timer365);
+    const seguir = () => { timer365 = setTimeout(ciclo365, CICLO_365); };
+    if (document.hidden) return seguir();
+    const p = jogoAberto();
+    if (!p || p.vv.st !== "in") return seguir();
+    atualizar365(p, false).then((m) => { if (m) redesenhar(); }).catch(() => {}).finally(seguir);
+  }
+
   async function atualizarPainel(forcar) {
     if (!painelAberto()) return false;
     const lista = [];
@@ -521,7 +618,9 @@
       if (p.vv.st === "in" || (p.vv.st === "post" && !p.vv.pr && naJanela(p, Date.now()))) lista.push(p);
     }
     const res = await Promise.all(lista.map((p) => atualizarDetalhe(p, forcar && !ultimoDetalhe.has(p.vv.espn.code + ":" + p.vv.espn.id))));
-    return res.some(Boolean);
+    // painel: ataques do 365Scores de todos os jogos rolando (no ritmo do painel, a cada 20 s)
+    const r365 = await Promise.all(lista.filter((p) => p.vv.st === "in").map((p) => atualizar365(p, true).catch(() => false)));
+    return res.some(Boolean) || r365.some(Boolean);
   }
 
   function agendar(ms) { clearTimeout(timer); timer = setTimeout(ciclo, ms); }
@@ -597,8 +696,9 @@
       const a = await atualizarDetalhe(p, true);
       const b = p ? await atualizarElencos(p) : false;
       if (p) atualizarMinutos(p);
+      const d = p && p.vv.st === "in" ? await atualizar365(p, true).catch(() => false) : false;
       const c = await atualizarPainel(true);
-      if (a || b || c) redesenhar();
+      if (a || b || c || d) redesenhar();
     }, 60);
   }
 
@@ -611,13 +711,14 @@
     window.addEventListener("online", acordar);
     window.addEventListener("focus", acordar);
     setInterval(vigia, 15000);
+    ciclo365();
     window.addEventListener("hashchange", aoNavegar);
     document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-ir^="jogo/"], [data-abajogo="escalacoes"]')) aoNavegar(); });
     ciclo();
   }
 
   window.AoVivo = {
-    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe,
+    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe,
     _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); },
   };
 })();

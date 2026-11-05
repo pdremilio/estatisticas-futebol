@@ -217,13 +217,14 @@
   const ROT_STATUS = (p) => (aoVivo(p) ? (p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : `<span class="vivo">${STATUS[p.s]}</span>`) : STATUS[p.s] || p.s);
 
   // ---------- ao vivo: estatísticas, lances, pressão e escalações (dados da ESPN, ver aovivo.js)
-  const EST_VIVO = [["posse", "Posse de bola", "%"], ["xg", "Gols esperados (xG)"], ["chutes", "Finalizações"], ["alvo", "No alvo"],
+  const EST_VIVO = [["posse", "Posse de bola", "%"], ["xg", "Gols esperados (xG)"], ["atk", "Ataques"], ["cp", "Chances perigosas"], ["chutes", "Finalizações"], ["alvo", "No alvo"], ["trave", "Na trave"],
     ["esc", "Escanteios"], ["faltas", "Faltas"], ["amarelos", "Cartões amarelos"], ["vermelhos", "Cartões vermelhos"], ["imped", "Impedimentos"],
     ["defesas", "Defesas do goleiro"], ["passes", "Passes"]];
   const temAoVivo = (p) => !!(p.vv && p.vv.espn);
   // aviso quando a ESPN não responde há alguns ciclos (o placar volta a ser o da football-data)
   const avisoFonte = () => (window.AoVivo && window.AoVivo.indisponivel && window.AoVivo.indisponivel()
     ? `<div class="aviso-fonte" role="status"><b>Dados ao vivo temporariamente indisponíveis.</b> A ESPN não está respondendo; tentando de novo a cada 20 s. Enquanto isso, o placar vem da football-data, que atrasa alguns minutos.</div>` : "");
+  const horaCurta = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const horaAtualizacao = (p) => { const v = p.vv || {}, t = v.emDet || v.em; if (!t) return ""; const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 
   // ---------- gráfico de pressão: uma barra por minuto (para cima o mandante, para baixo o visitante)
@@ -236,13 +237,26 @@
     esc: "escanteio", amarelo: "cartão amarelo", vermelho: "cartão vermelho", "2amarelo": "2º amarelo (expulso)", sub: "substituição" };
   const PRIOR = { gol: 9, vermelho: 8, "2amarelo": 8, trave: 7, alvo: 6, amarelo: 5, fora: 4, bloq: 3, sub: 2, esc: 1 };
   const grupoMarca = (k) => (k === "amarelo" || k === "vermelho" || k === "2amarelo" ? "cartao" : k);
-  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "minuto" };
+  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "minuto", som: false };
   estado.prOpc = Object.assign({}, OPC_PADRAO, ler("pr_opc", {}));
   estado.prConfig = false;
   let infoPressao = "";
   const iconeMarca = (k) => (k === "gol" ? "⚽" : k === "sub" ? "⇄" : "");
 
-  function valoresPressao(pr, modo) {
+  // peso de cada ataque (365Scores) na barra do minuto; os lances da ESPN (chutes, escanteios, gols) continuam valendo
+  const PESO_ATAQUE = 0.45;
+  function somarAtaques(pr, atk) {
+    if (!atk) return pr;
+    const h = pr.h.slice(), a = pr.a.slice();
+    pr.slots.forEach((s, i) => {
+      const k = s.per + ":" + s.b + ":" + s.ad;
+      if (atk.h[k]) h[i] = Math.round((h[i] + atk.h[k] * PESO_ATAQUE) * 10) / 10;
+      if (atk.a[k]) a[i] = Math.round((a[i] + atk.a[k] * PESO_ATAQUE) * 10) / 10;
+    });
+    return Object.assign({}, pr, { h, a });
+  }
+  function valoresPressao(pr0, modo, atk) {
+    const pr = somarAtaques(pr0, atk);
     if (modo !== "tendencia") return { h: pr.h, a: pr.a };
     // tendência: cada minuto carrega um pouco dos anteriores (o lance "esfria" aos poucos)
     const h = [], a = [];
@@ -254,6 +268,63 @@
     return { h, a };
   }
 
+  // ---------- alerta de pressão: quem está dominando os últimos minutos (lances da ESPN + ataques do 365Scores)
+  // nível 1 "pressão forte": ≥ 68% da pressão das últimas 8 barras; nível 2 "gol pode sair": ≥ 75% e
+  // pelo menos 3 lances perigosos (chute no gol, trave ou escanteio) nesse período.
+  function alertaPressao(p) {
+    const pr = p.vv && p.vv.pr;
+    if (!pr || pr.fim || pr.intervalo || p.s !== "IN_PLAY") return null;
+    const atual = pr.atual == null ? pr.ultimo : pr.atual;
+    if (atual < 6) return null;
+    const val = valoresPressao(pr, "minuto", p.vv.atk);
+    const ini = Math.max(0, atual - 7);
+    let sh = 0, sa = 0;
+    for (let i = ini; i <= atual; i++) { sh += val.h[i] || 0; sa += val.a[i] || 0; }
+    const l = sh >= sa ? "h" : "a", forte = Math.max(sh, sa), total = sh + sa;
+    if (!total) return null;
+    const share = forte / total;
+    const perigo = pr.ev.filter((e) => e.l === l && e.i >= ini && ["alvo", "trave", "esc"].includes(e.k)).length;
+    // há quantos minutos o time está por cima (média de 3 barras)
+    let mins = 0;
+    for (let i = atual; i >= 2; i--) {
+      const mh = (val.h[i] || 0) + (val.h[i - 1] || 0) + (val.h[i - 2] || 0), ma = (val.a[i] || 0) + (val.a[i - 1] || 0) + (val.a[i - 2] || 0);
+      if ((l === "h" ? mh - ma : ma - mh) > 0.5) mins++; else break;
+    }
+    // gol do próprio time há menos de 2 minutos: a pressão "virou" gol, não alerta
+    if (pr.ev.some((e) => e.k === "gol" && e.l === l && e.i >= atual - 1)) return null;
+    let nivel = 0;
+    if (share >= 0.75 && forte >= 9 && perigo >= 3) nivel = 2;
+    else if (share >= 0.68 && forte >= 6) nivel = 1;
+    if (!nivel) return null;
+    return { nivel, l, mins: Math.max(mins, 3), share: Math.round(share * 100), perigo, tid: l === "h" ? p.h : p.a };
+  }
+  const textoAlerta = (a) => a.nivel === 2
+    ? `<b>${h(nomeTime(a.tid))}</b> com pressão absurda há ${a.mins} min · ${a.perigo} lances perigosos · gol pode estar próximo`
+    : `<b>${h(nomeTime(a.tid))}</b> pressionando forte há ${a.mins} min (${a.share}% da pressão)`;
+  function blocoAlerta(p, compacto) {
+    const a = alertaPressao(p);
+    avisarSom(p, a);
+    if (!a) return "";
+    return `<div class="alerta-pressao n${a.nivel} ${a.l === "h" ? "c" : "f"}${compacto ? " mini" : ""}" role="status"><span class="alerta-ic" aria-hidden="true">${a.nivel === 2 ? "🔥" : "⚡"}</span><span>${textoAlerta(a)}</span></div>`;
+  }
+  // som do alerta (opcional, ligado no "Exibir"): toca quando o alerta aparece ou sobe de nível
+  const nivelAvisado = {};
+  let audio = null;
+  function avisarSom(p, a) {
+    const ch = String(p.i), nivel = a ? a.nivel : 0, antes = nivelAvisado[ch] || 0;
+    nivelAvisado[ch] = nivel;
+    if (!estado.prOpc.som || nivel <= antes) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const tocar = (t0, freq) => { const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = freq; o.type = "sine";
+        g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+        o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + 0.25); };
+      const t = audio.currentTime + 0.02;
+      tocar(t, 880); tocar(t + 0.3, nivel === 2 ? 1175 : 880);
+      if (nivel === 2) tocar(t + 0.6, 1175);
+    } catch (e) {}
+  }
+
   function graficoPressao(p, compacto) {
     const pr = p.vv && p.vv.pr;
     if (!pr) {
@@ -263,7 +334,7 @@
     const opc = compacto ? Object.assign({}, OPC_PADRAO, { alvo: false, fora: false, bloq: false, trave: false, cartao: true, sub: false, modo: estado.prOpc.modo }) : estado.prOpc;
     const n = pr.slots.length, L = 6, W = n * L, H = 100, meio = H / 2;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
-    const val = valoresPressao(pr, opc.modo);
+    const val = valoresPressao(pr, opc.modo, p.vv.atk);
     let max = opc.modo === "tendencia" ? 8 : 6;
     for (let i = 0; i <= atual && i < n; i++) max = Math.max(max, val.h[i] || 0, val.a[i] || 0);
     const alt = (v) => Math.max((v || 0) / max * (meio - 3), v ? 2 : 0);
@@ -314,7 +385,7 @@
     const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${faixa}
           <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/>${linhas}${barras}</svg>`;
     if (compacto) {
-      return `<div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}</div></div>`;
+      return `${blocoAlerta(p, true)}<div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}</div></div>`;
     }
     const simb = TIPOS_MARCA.filter(([k]) => opc[k] && k !== "esc").map(([k]) => {
       const ex = k === "cartao" ? '<i class="mk-ex mk-amarelo"></i><i class="mk-ex mk-vermelho"></i>' : `<i class="mk-ex mk-${k}">${iconeMarca(k)}</i>`;
@@ -326,10 +397,12 @@
           <button type="button" class="chip" data-prmodo="minuto" aria-pressed="${opc.modo !== "tendencia"}">Só o minuto</button>
           <button type="button" class="chip" data-prmodo="tendencia" aria-pressed="${opc.modo === "tendencia"}">Tendência</button>
           <button type="button" class="chip" data-propc="padrao">Restaurar padrão</button></div>
+        <div class="pc-linha"><span class="sub">Alerta</span><button type="button" class="chip" data-propc="som" aria-pressed="${!!opc.som}">🔔 Som quando um time pressionar forte</button></div>
         <p class="sub">"Só o minuto": cada barra mostra só o que aconteceu naquele minuto. "Tendência": cada barra carrega um pouco dos minutos anteriores.</p>
       </div>` : "";
     return `<div class="pressao">
-      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">chutes, escanteios e gols por minuto</span>
+      ${blocoAlerta(p)}
+      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${p.vv.atk ? "ataques, chutes, escanteios e gols por minuto" : "chutes, escanteios e gols por minuto"}</span>
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Exibir</button></div>
       ${config}
@@ -338,7 +411,7 @@
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
       <div class="pressao-simb">${simb}</div>
       <p class="pressao-info" aria-live="polite">${infoPressao ? h(infoPressao) : "Toque numa marca para ver o lance."}</p>
-      <p class="sub nota">${horaAtualizacao(p) ? `Atualizado às ${horaAtualizacao(p)} · ` : ""}Fonte: narração da ESPN, que chega 1 a 2 minutos depois do lance.</p>
+      <p class="sub nota">${p.vv.atk ? `Ataques: 365Scores, a cada ~6 s (registrados desde ${horaCurta(p.vv.atk.desde)}, quando o jogo foi aberto). ` : ""}${horaAtualizacao(p) ? `Atualizado às ${horaAtualizacao(p)} · ` : ""}Chutes, escanteios e gols: narração da ESPN, que chega 1 a 2 minutos depois do lance.</p>
     </div>`;
   }
   document.addEventListener("click", (e) => {
@@ -651,14 +724,16 @@
   }
   function blocoAoVivo(p) {
     const v = p.vv;
-    if (!v || (!(v.ev && v.ev.length) && !v.es && !(v.lances && v.lances.length))) return "";
+    if (!v || (!(v.ev && v.ev.length) && !v.es && !v.es365 && !(v.lances && v.lances.length))) return "";
+    // estatísticas: as do 365Scores (mais rápidas e com ataques/xG) por cima das da ESPN
+    const esTodas = v.es || v.es365 ? Object.assign({}, v.es || {}, v.es365 || {}) : null;
     const icone = (t) => (t === "gol" ? "⚽" : t === "amarelo" ? '<i class="ic amarelo"></i>' : t === "vermelho" ? '<i class="ic vermelho"></i>' : t === "sub" ? "⇄" : t === "var" ? "VAR" : "");
     const txt = (e) => `<span class="${e.t === "gol" ? "gol" : ""}">${e.l === "h" ? "" : icone(e.t) + " "}${h(e.j || "")}${e.x ? ` <small>${h(e.x)}</small>` : ""}${e.l === "h" ? " " + icone(e.t) : ""}</span>`;
     const minNum = (m) => { const [a, b] = String(m).split("+"); return Number(a) + (Number(b) || 0) / 100; };
     const evs = (v.ev || []).slice().sort((a, b) => minNum(b.m) - minNum(a.m)).map((e) => `<li><span class="c">${e.l === "h" ? txt(e) : ""}</span><span class="m">${h(e.m)}'</span><span>${e.l === "a" ? txt(e) : ""}</span></li>`).join("");
     const num = (x) => (x == null ? null : Number(String(x).replace("%", "")));
-    const est = v.es ? EST_VIVO.filter(([k]) => v.es[k] && (num(v.es[k][0]) != null || num(v.es[k][1]) != null)).map(([k, rot, suf = ""]) => {
-      const a = num(v.es[k][0]) || 0, b = num(v.es[k][1]) || 0, t = a + b || 1;
+    const est = esTodas ? EST_VIVO.filter(([k]) => esTodas[k] && (num(esTodas[k][0]) != null || num(esTodas[k][1]) != null)).map(([k, rot, suf = ""]) => {
+      const a = num(esTodas[k][0]) || 0, b = num(esTodas[k][1]) || 0, t = a + b || 1;
       const f = (x) => (k === "xg" ? fNum(x, 2) : x) + suf;
       return `<div class="est-linha"><span class="v">${f(a)}</span><span class="rot">${rot}</span><span class="v">${f(b)}</span>
         <span class="est-trilho"><span style="width:${(a / t) * 100}%"></span><span style="width:${(b / t) * 100}%"></span></span></div>`;
@@ -968,7 +1043,7 @@
     const marcaFav = (tid) => (favTimes.has(String(tid)) ? `<i class="fav-time" title="Time favorito">${ESTRELA_SVG(12)}</i>` : "");
     return `<div class="jogo-v2" role="link" tabindex="0" data-ir="jogo/${code}/${p.i}">
       ${botaoEstrela("data-fav", k, fav, "este jogo")}
-      <span class="quando">${vivo && p.vv && p.vv.min ? `<span>${hora(p.d)}</span><b class="vivo-min">${h(p.vv.min)}</b>` : `<span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b>`}</span>
+      <span class="quando">${vivo && p.vv && p.vv.min ? `<span>${hora(p.d)}</span><b class="vivo-min">${h(p.vv.min)}</b>${(() => { const al = alertaPressao(p); return al ? `<i class="alerta-lista n${al.nivel} ${al.l === "h" ? "c" : "f"}" title="${h(nomeTime(al.tid))} pressionando forte">${al.nivel === 2 ? "🔥" : "⚡"}</i>` : ""; })()}` : `<span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b>`}</span>
       <span class="situacao">${ROT_STATUS(p)}</span>
       <span class="equipes">
         <span class="${vH ? "venc" : perdeu(vH, vA)}">${escudo(p.h)}<span>${h(nomeTime(p.h))}</span>${marcaFav(p.h)}</span>

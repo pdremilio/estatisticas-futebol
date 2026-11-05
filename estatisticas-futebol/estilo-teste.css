@@ -1078,3 +1078,28 @@ table.odds-tabela { margin-top: 14px; }
 .ex-medias { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; margin-top: 10px; }
 .ex-medias small { display: block; font-size: 11px; color: var(--tinta-3); }
 .ex-medias b { font: 700 20px var(--fonte-titulo); } .ex-medias b.c { color: var(--casa); } .ex-medias b.f { color: var(--fora); }
+/* gráfico de pressão mais compacto (dá noção do jogo inteiro de uma vez) */
+.pressao { max-width: 760px; margin-left: auto; margin-right: auto; }
+.pressao-area { height: 136px; }
+.pressao-area svg { top: 22px; bottom: 22px; height: calc(100% - 44px); }
+.pressao .mk.mk-c.mk-n0 { top: 10px; } .pressao .mk.mk-c.mk-n1 { top: 0; }
+.pressao .mk.mk-f.mk-n0 { bottom: 10px; } .pressao .mk.mk-f.mk-n1 { bottom: 0; }
+.pressao .mk.mk-c.mk-gol.mk-n0 { top: 6px; } .pressao .mk.mk-f.mk-gol.mk-n0 { bottom: 6px; }
+@media (max-width: 640px) { .pressao-area { height: 128px; } }
+@media (min-width: 1700px) { .pressao { max-width: 720px; } .pressao-area { height: 128px; } }
+/* alerta de pressão */
+.alerta-pressao { display: flex; align-items: center; gap: 8px; max-width: 760px; margin: 0 auto 10px; padding: 8px 12px; border-radius: var(--raio-p);
+  font-size: 14px; border: 1px solid; background: var(--superficie-2); }
+.alerta-pressao.c { border-color: var(--casa); } .alerta-pressao.f { border-color: var(--fora); }
+.alerta-pressao.n2 { background: color-mix(in srgb, var(--derrota) 14%, var(--superficie)); border-color: var(--derrota); }
+.alerta-pressao .alerta-ic { font-size: 18px; }
+.alerta-pressao.mini { font-size: 12.5px; padding: 5px 8px; margin: 8px 0 0; }
+.alerta-pressao.mini .alerta-ic { font-size: 14px; }
+@media (prefers-reduced-motion: no-preference) {
+  .alerta-pressao { animation: alerta-pulso 1.4s ease-in-out infinite; }
+  .alerta-pressao.n2 .alerta-ic { animation: alerta-tremer .6s ease-in-out infinite; display: inline-block; }
+  .alerta-lista { animation: alerta-pulso 1.2s ease-in-out infinite; }
+}
+@keyframes alerta-pulso { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 18%, transparent); } }
+@keyframes alerta-tremer { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+.alerta-lista { font-style: normal; font-size: 12px; margin-left: 3px; }
