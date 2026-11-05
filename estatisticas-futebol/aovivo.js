@@ -17,6 +17,9 @@
   const BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer/";
   const CORE = "https://sports.core.api.espn.com/v2/sports/soccer/leagues/"; // minutos jogados de cada atleta
   const ESPN = { BSA: "bra.1", PL: "eng.1", PD: "esp.1", SA: "ita.1", BL1: "ger.1", FL1: "fra.1", PPL: "por.1", DED: "ned.1", ELC: "eng.2", CL: "uefa.champions" };
+  // liga da ESPN de cada competição: a beta 5 grava no próprio dado ("espn"); a football-data usa a tabela acima
+  const lgDe = (code) => ((dados && dados.competicoes[code]) || {}).espn || ESPN[code];
+  const codigos = () => Object.keys((dados && dados.competicoes) || {}).filter((c) => lgDe(c));
   const CICLO_VIVO = 20000, CICLO_CALMO = 60000, DETALHE_PRE = 120000, ELENCO_VALIDADE = 6 * 3600e3;
 
   // ---------- nomes parecidos (mesma regra do atualizador de odds)
@@ -50,7 +53,7 @@
   }
   function buscasAtivas() {
     const agora = Date.now(), lista = new Map(); // "liga|dia" -> [code, dia]
-    for (const code in ESPN) {
+    for (const code of codigos()) {
       const comp = dados.competicoes[code];
       for (const p of (comp && comp.partidas) || []) {
         if (!naJanela(p, agora)) continue;
@@ -64,6 +67,12 @@
   function acharPartida(code, ev) {
     const chave = code + ":" + ev.id;
     if (casados.has(chave)) return casados.get(chave);
+    if (dados.fonte === "espn") {
+      // beta 5: o jogo do site já é o jogo da ESPN (mesmo código)
+      const p = (dados.competicoes[code].partidas || []).find((x) => String(x.i) === String(ev.id)) || null;
+      if (p) casados.set(chave, p);
+      return p;
+    }
     const c = ev.competitions && ev.competitions[0];
     if (!c) return null;
     const casa = c.competitors.find((x) => x.homeAway === "home"), fora = c.competitors.find((x) => x.homeAway === "away");
@@ -131,7 +140,7 @@
     const antes = JSON.stringify([p.s, p.fh, p.fa, p.du, p.hh, p.ha, p.vv && p.vv.min]);
     if (!p._orig) p._orig = { s: p.s, fh: p.fh, fa: p.fa, hh: p.hh, ha: p.ha };
     const vv = (p.vv = p.vv || {});
-    vv.espn = { lg: ESPN[code], id: ev.id, code };
+    vv.espn = { lg: lgDe(code), id: ev.id, code };
     vv.tid = { h: casa.team && casa.team.id, a: fora.team && fora.team.id };
     vv.st = tp.state;
     vv.clk = st.displayClock || ""; vv.per = st.period || 0;
@@ -246,6 +255,46 @@
     pr.idx = idx;
     return pr;
   }
+  // ---------- radar: os últimos lances da narração, com a posição no campo
+  // A ESPN dá a posição (0–100) do ponto de vista de quem fez o lance (sempre atacando para a direita);
+  // o site espelha os do visitante para desenhar os dois times no mesmo campo.
+  const TIPOS_RADAR = { gol: 1, alvo: 1, fora: 1, bloq: 1, trave: 1, esc: 1, imped: 1, amarelo: 1, vermelho: 1, "2amarelo": 1, sub: 1 };
+  function montarLances(r, ladoDe) {
+    const lista = [];
+    for (const c of r.commentary || []) {
+      const pl = c.play;
+      if (!pl || !pl.type) continue;
+      const t = pl.type.type || "", min = (c.time && c.time.displayValue) || "";
+      const l = ladoDe(pl.team);
+      if (!l) {
+        // marcos do jogo, sem time
+        const marco = { kickoff: "Começa o jogo", halftime: "Fim do 1º tempo", "start-2nd-half": "Começa o 2º tempo", "end-regular-time": "Fim do tempo normal", "full-time": "Fim de jogo" }[t];
+        if (marco) lista.push({ seq: Number(c.sequence) || 0, k: "marco", min, txt: marco });
+        continue;
+      }
+      let k = classificar(t, c.text);
+      if (t === "foul" && !k) {
+        // só usamos a linha "Fulano (Time) wins a free kick ...": diz quem sofreu e onde
+        if (!/wins a free kick/i.test(c.text || "")) continue;
+        k = "faltaDef";
+      }
+      if (!k || !(TIPOS_RADAR[k] || k === "falta" || k === "faltaDef")) continue;
+      const lado = k === "falta" || k === "faltaDef" ? (l === "h" ? "a" : "h") : l;
+      const part = (pl.participants || []).map((x) => x.athlete && x.athlete.displayName).filter(Boolean);
+      const j = k === "sub" ? part[0] || "" : k === "falta" || k === "faltaDef" ? (String(c.text || "").match(/^(.+?)\s+\(/) || [])[1] || "" : jogadorDe(c.text);
+      const onde = /attacking half/i.test(c.text || "") ? "ataque" : /wing/i.test(c.text || "") ? "ponta" : /defensive half/i.test(c.text || "") ? "defesa" : "";
+      const num = (v) => (v == null || isNaN(Number(v)) ? null : Number(v));
+      lista.push({
+        seq: Number(c.sequence) || 0, k: k === "faltaDef" ? "falta" : k, l: lado, j, j2: k === "sub" ? part[1] || "" : "", min, onde,
+        own: t === "own-goal", pen: /penalty/.test(t),
+        // posição: a falta vem do ponto de vista de quem cometeu; o site guarda do ponto de vista de quem fez o lance
+        x: num(pl.fieldPositionX), y: num(pl.fieldPositionY), x2: num(pl.fieldPosition2X), y2: num(pl.fieldPosition2Y), ref: l,
+      });
+    }
+    lista.sort((a, b) => a.seq - b.seq);
+    return lista.slice(-40);
+  }
+
   // minuto atual (relógio do placar, que corre na frente da narração)
   function recalcularAtual(p) {
     const vv = p.vv, pr = vv.pr;
@@ -334,11 +383,12 @@
     }
 
     const pr = montarPressao(r, ladoDe, vv);
-    const antes = JSON.stringify([vv.ev, vv.es, vv.esc && Object.keys(vv.esc), vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.clk]);
-    vv.ev = ev; vv.es = es; vv.esc = esc; vv.pr = pr; vv.emDet = new Date().toISOString();
+    const lances = montarLances(r, ladoDe);
+    const antes = JSON.stringify([vv.ev, vv.es, vv.esc && Object.keys(vv.esc), vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.clk, vv.lances && vv.lances.length && vv.lances[vv.lances.length - 1].seq]);
+    vv.ev = ev; vv.es = es; vv.esc = esc; vv.pr = pr; vv.lances = lances; vv.emDet = new Date().toISOString();
     if (pr) recalcularAtual(p);
     if (temGol1T || (p.s === "IN_PLAY" && vv.per >= 2) || p.s === "FINISHED") { p.hh = hh; p.ha = ha; }
-    return antes !== JSON.stringify([vv.ev, vv.es, vv.esc && Object.keys(vv.esc), vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.clk]);
+    return antes !== JSON.stringify([vv.ev, vv.es, vv.esc && Object.keys(vv.esc), vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.clk, vv.lances && vv.lances.length && vv.lances[vv.lances.length - 1].seq]);
   }
 
   // ---------- números dos jogadores na temporada (elenco do time na ESPN, na competição do jogo)
@@ -466,7 +516,7 @@
   async function atualizarPainel(forcar) {
     if (!painelAberto()) return false;
     const lista = [];
-    for (const code in ESPN) for (const p of ((dados.competicoes[code] || {}).partidas || [])) {
+    for (const code of codigos()) for (const p of ((dados.competicoes[code] || {}).partidas || [])) {
       if (!p.vv || !p.vv.espn) continue;
       if (p.vv.st === "in" || (p.vv.st === "post" && !p.vv.pr && naJanela(p, Date.now()))) lista.push(p);
     }
@@ -488,7 +538,7 @@
       let mudou = false;
       if (buscas.length) {
         proximo = CICLO_VIVO;
-        const placares = await Promise.all(buscas.map(([code, dia]) => buscarJSON(`${BASE}${ESPN[code]}/scoreboard?dates=${dia}`).then((r) => [code, r])));
+        const placares = await Promise.all(buscas.map(([code, dia]) => buscarJSON(`${BASE}${lgDe(code)}/scoreboard?dates=${dia}`).then((r) => [code, r])));
         if (meu !== geracao) return;
         const ok = placares.some(([, r]) => r);
         falhasSeguidas = ok ? 0 : falhasSeguidas + 1;

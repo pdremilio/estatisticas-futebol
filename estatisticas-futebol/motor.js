@@ -24,7 +24,60 @@
       btts25: 0,                                // ambas marcam e mais de 2,5
       mp: 0, sp: 0, pdes: 0,                    // marcou primeiro / sofreu primeiro / não dá para saber
       forma: [],                                // últimos resultados ("V","E","D"), mais recente no fim
+      // beta 5 (dados da ESPN): gols com minuto e tipo, e estatísticas de cada jogo
+      jg: 0,                                    // jogos com a lista de gols (minuto e tipo)
+      pm: [0, 0, 0, 0, 0, 0], ps: [0, 0, 0, 0, 0, 0], // gols marcados/sofridos por período (0-15 ... 76-90+)
+      tm: novoTipos(), ts: novoTipos(),          // gols marcados/sofridos por tipo
+      mpV: 0, mpE: 0, mpD: 0, spV: 0, spE: 0, spD: 0, // resultado quando marcou / sofreu primeiro
+      pgMin: 0, pgN: 0,                          // minuto do 1º gol do jogo (soma e quantidade)
+      je: 0,                                    // jogos com estatísticas
+      escF: 0, escC: 0, amF: 0, amC: 0, vmF: 0, vmC: 0, chF: 0, chC: 0, cgF: 0, cgC: 0, poF: 0, faF: 0, faC: 0,
+      esc85: 0, esc95: 0, esc105: 0, cart35: 0, cart45: 0, escMais: 0,
     };
+  }
+  // tipos de gol: c cabeça · e após escanteio · b bola parada · f falta direta · p pênalti · k contra-ataque ·
+  // x de fora da área · r após cruzamento · o gol contra (a favor de quem foi beneficiado)
+  function novoTipos() { return { n: 0, c: 0, e: 0, b: 0, f: 0, p: 0, k: 0, x: 0, r: 0, o: 0 }; }
+  const PERIODO = (m) => (m <= 15 ? 0 : m <= 30 ? 1 : m <= 45 ? 2 : m <= 60 ? 3 : m <= 75 ? 4 : 5);
+
+  // quem marcou primeiro, pela ordem real dos gols (quando a fonte tem o minuto)
+  function primeiroDoJogo(p, casa) {
+    if (p && p.gl) {
+      if (!p.gl.length) return null;
+      return (p.gl[0][1] === "h") === casa ? "eu" : "eles";
+    }
+    return casa ? primeiroGol(p.fh, p.fa, p.hh, p.ha) : primeiroGol(p.fa, p.fh, p.ha, p.hh);
+  }
+
+  function somarExtras(b, p, casa, gm, gs) {
+    const eu = casa ? "h" : "a";
+    if (p.gl) {
+      b.jg++;
+      for (const g of p.gl) {
+        const meu = g[1] === eu, m = g[0];
+        if (m <= 90) (meu ? b.pm : b.ps)[PERIODO(m)]++;
+        const T = meu ? b.tm : b.ts;
+        T.n++;
+        for (const ch of g[2] || "") if (T[ch] != null) T[ch]++;
+      }
+      if (p.gl.length) {
+        b.pgMin += p.gl[0][0]; b.pgN++;
+        const primeiro = (p.gl[0][1] === eu);
+        const r = gm > gs ? "V" : gm === gs ? "E" : "D";
+        b[(primeiro ? "mp" : "sp") + r]++;
+      }
+    }
+    const e = p.es;
+    if (e && e[0] != null && e[1] != null) {
+      const i = casa ? 0 : 1, o = 1 - i, v = (k) => e[k * 2 + i] || 0, w = (k) => e[k * 2 + o] || 0;
+      b.je++;
+      b.escF += v(0); b.escC += w(0); b.amF += v(1); b.amC += w(1); b.vmF += v(2); b.vmC += w(2);
+      b.chF += v(3); b.chC += w(3); b.cgF += v(4); b.cgC += w(4); b.poF += v(5); b.faF += v(6); b.faC += w(6);
+      const esc = v(0) + w(0), cart = v(1) + w(1) + v(2) + w(2);
+      if (esc > 8.5) b.esc85++; if (esc > 9.5) b.esc95++; if (esc > 10.5) b.esc105++;
+      if (cart > 3.5) b.cart35++; if (cart > 4.5) b.cart45++;
+      if (v(0) > w(0)) b.escMais++;
+    }
   }
 
   // Quem marcou primeiro, do ponto de vista do time (gm = gols dele).
@@ -45,9 +98,10 @@
     return "?";
   }
 
-  function somarNoBucket(b, gm, gs, gm1, gs1) {
+  function somarNoBucket(b, gm, gs, gm1, gs1, p, casa) {
     b.j++; b.gm += gm; b.gs += gs;
-    const pg = primeiroGol(gm, gs, gm1, gs1);
+    const pg = p && p.gl ? primeiroDoJogo(p, casa) : primeiroGol(gm, gs, gm1, gs1);
+    if (p) somarExtras(b, p, casa, gm, gs);
     if (pg === "eu") b.mp++; else if (pg === "eles") b.sp++; else if (pg === "?") b.pdes++;
     const tot = gm + gs;
     for (let i = 0; i < LINHAS.length; i++) if (tot > LINHAS[i]) b.ov[i]++;
@@ -76,6 +130,7 @@
   function copiarBucket(b) {
     const c = Object.assign({}, b);
     c.ov = b.ov.slice(); c.forma = b.forma.slice();
+    c.pm = b.pm.slice(); c.ps = b.ps.slice(); c.tm = Object.assign({}, b.tm); c.ts = Object.assign({}, b.ts);
     return c;
   }
 
@@ -93,8 +148,8 @@
     for (const p of jogos) {
       if (!encerrada(p)) continue;
       const casa = String(p.h) === String(tid);
-      if (casa) somarNoBucket(b, p.fh, p.fa, p.hh, p.ha);
-      else somarNoBucket(b, p.fa, p.fh, p.ha, p.hh);
+      if (casa) somarNoBucket(b, p.fh, p.fa, p.hh, p.ha, p, true);
+      else somarNoBucket(b, p.fa, p.fh, p.ha, p.hh, p, false);
     }
     return b;
   }
@@ -208,10 +263,10 @@
       if (!encerrada(p)) continue;
       // foto ANTES do jogo: é isso que o backtest usa, sem olhar o resultado
       fotos[p.i] = { h: fotoTime(th), a: fotoTime(ta), liga: ligaMed() };
-      somarNoBucket(th.geral, p.fh, p.fa, p.hh, p.ha);
-      somarNoBucket(th.casa, p.fh, p.fa, p.hh, p.ha);
-      somarNoBucket(ta.geral, p.fa, p.fh, p.ha, p.hh);
-      somarNoBucket(ta.fora, p.fa, p.fh, p.ha, p.hh);
+      somarNoBucket(th.geral, p.fh, p.fa, p.hh, p.ha, p, true);
+      somarNoBucket(th.casa, p.fh, p.fa, p.hh, p.ha, p, true);
+      somarNoBucket(ta.geral, p.fa, p.fh, p.ha, p.hh, p, false);
+      somarNoBucket(ta.fora, p.fa, p.fh, p.ha, p.hh, p, false);
       const delta = atualizarElo(th, ta, p.fh, p.fa);
       th.jogos.push({ p, casa: true, elo: th.elo, delta });
       ta.jogos.push({ p, casa: false, elo: ta.elo, delta: -delta });
@@ -407,7 +462,7 @@
 
   const Motor = {
     LINHAS, MERCADOS, SUJEITOS, METRICAS_TIME, METRICAS_PROJ, METRICAS_CMP,
-    prepararCompeticao, metricas, bucketDeJogos, primeiroGol, gols2T, projetar, fotoAtual, encerrada,
+    prepararCompeticao, metricas, bucketDeJogos, primeiroGol, primeiroDoJogo, gols2T, projetar, fotoAtual, encerrada,
     backtest, proximosNoFiltro, passa, valorMetrica, tabela, ranking,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Motor;

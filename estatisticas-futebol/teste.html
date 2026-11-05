@@ -41,6 +41,7 @@
 </footer>
 
 <!-- beta 5: base nova (ESPN + FotMob). Se não carregar ou estiver parada há mais de 12 h, usa a football-data (reserva). -->
+<script>window.SB_TESTE = true;</script>
 <script>window.DADOS5_TENTOU = true; document.write('<script src="dados5.js?v=' + Date.now() + '"><\/script>');</script>
 <script>(function () {
   var d = window.DADOS5, ok = !!(d && d.competicoes && Object.keys(d.competicoes).length && d.ok_em && (Date.now() - Date.parse(d.ok_em) < 12 * 3600e3));

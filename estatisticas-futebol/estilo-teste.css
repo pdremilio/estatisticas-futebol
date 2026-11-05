@@ -1042,3 +1042,11 @@ table.odds-tabela { margin-top: 14px; }
 .janela-1t { text-align: center; margin: 0 0 6px; }
 .janela-rodape { text-align: center; font-size: 13px; margin: 8px 0 4px; }
 .radar-lista.narracao { max-height: 420px; overflow-y: auto; padding-right: 4px; }
+/* aba Extras: escanteios e cartões jogo a jogo */
+.ex-lista li, .ex-cab { display: grid; grid-template-columns: 40px minmax(0, 1fr) 62px 62px 18px; align-items: center; gap: 6px; }
+.ex-cab { font-size: 11px; color: var(--tinta-3); text-align: center; padding: 0 8px 2px; }
+.ex-lista .conf { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-par { display: inline-flex; justify-content: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.ex-par b { min-width: 18px; text-align: right; } .ex-par span { min-width: 18px; color: var(--tinta-3); }
+.ex-par .ic { display: inline-block; width: 6px; height: 9px; border-radius: 1px; margin-left: 2px; vertical-align: 0; }
+.ex-par .ic.vermelho { background: var(--derrota); }

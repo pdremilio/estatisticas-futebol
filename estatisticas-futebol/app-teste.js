@@ -41,8 +41,9 @@
 
   // ------------------------------------------------------------ armazenamento local (tolerante a falhas)
   // na beta 5 os códigos de times e jogos são os da ESPN: as preferências ficam separadas ("ef5_") e não vão para a conta
-  const PREFIXO = B5 ? "ef5_" : "ef_";
-  const guardar = (k, v) => { try { localStorage.setItem(PREFIXO + k, JSON.stringify(v)); } catch (e) {} if (window.Contas && !B5) window.Contas.marcarAlteracao(k); };
+  // a página de teste guarda separado ("ef5_") e não sincroniza com a conta; o site oficial usa as chaves de sempre
+  const PREFIXO = B5 && window.SB_TESTE ? "ef5_" : "ef_";
+  const guardar = (k, v) => { try { localStorage.setItem(PREFIXO + k, JSON.stringify(v)); } catch (e) {} if (window.Contas && PREFIXO === "ef_") window.Contas.marcarAlteracao(k); };
   const ler = (k, padrao) => { try { const v = localStorage.getItem(PREFIXO + k); return v == null ? padrao : JSON.parse(v); } catch (e) { return padrao; } };
 
   // ------------------------------------------------------------ preparo
@@ -1179,6 +1180,37 @@
     </div>`;
   }
 
+  // aba Extras: escanteios e cartões de cada jogo (a favor x contra), para ver a tendência jogo a jogo
+  function extrasPorJogo(code, tid, jogos, lado) {
+    const base = lado === "casa" ? "do mandante (casa)" : lado === "fora" ? "do visitante (fora)" : "de " + nomeTime(tid);
+    const fim = jogos.filter(encerrada).slice().reverse();
+    const linhas = fim.map((p) => {
+      const casa = String(p.h) === String(tid), adv = casa ? p.a : p.h, e = p.es;
+      const i = casa ? 0 : 1, o = 1 - i;
+      const tem = e && e[0] != null && e[1] != null;
+      const par = (k) => (tem ? `<b>${e[k * 2 + i] ?? 0}</b><span>${e[k * 2 + o] ?? 0}</span>` : "<b>–</b><span>–</span>");
+      const cart = tem ? `<b>${(e[2 + i] || 0) + (e[4 + i] || 0)}${e[4 + i] ? '<i class="ic vermelho" title="Teve vermelho"></i>' : ""}</b><span>${(e[2 + o] || 0) + (e[4 + o] || 0)}</span>` : "<b>–</b><span>–</span>";
+      const gm = casa ? p.fh : p.fa, gs = casa ? p.fa : p.fh, r = gm > gs ? "V" : gm === gs ? "E" : "D";
+      return `<li class="clicavel" data-ir="jogo/${code}/${p.i}" role="link" tabindex="0">
+        <span class="data">${dataCurta(p.d)}</span>
+        <span class="conf"><span class="sub">${casa ? "x" : "@"}</span> ${h(nomeTime(adv))} <b>${gm}-${gs}</b></span>
+        <span class="ex-par" title="Escanteios: a favor · contra">${par(0)}</span>
+        <span class="ex-par" title="Cartões: a favor · contra">${cart}</span>
+        <span class="r ${r}">${r}</span></li>`;
+    }).join("");
+    const com = fim.filter((p) => p.es && p.es[0] != null);
+    const soma = (f) => com.reduce((s2, p) => s2 + f(p), 0);
+    const mEsc = com.length ? fNum(soma((p) => (p.es[0] || 0) + (p.es[1] || 0)) / com.length, 1) : "–";
+    const mCart = com.length ? fNum(soma((p) => (p.es[2] || 0) + (p.es[3] || 0) + (p.es[4] || 0) + (p.es[5] || 0)) / com.length, 1) : "–";
+    return `<div class="lateral">
+      <div class="lateral-cab"><h3>Escanteios e cartões ${h(base)}</h3>${controleUltimos()}</div>
+      ${linhas ? `<div class="ex-cab" aria-hidden="true"><span></span><span></span><span>Escanteios</span><span>Cartões</span><span></span></div>
+        <ul class="lista-lateral ex-lista">${linhas}</ul>
+        <p class="legenda-bolas"><span>Número da esquerda: a favor · da direita: contra. Média por jogo: ${mEsc} escanteios e ${mCart} cartões.</span></p>`
+        : `<p class="sub">Sem jogos encerrados antes desta partida.</p>`}
+    </div>`;
+  }
+
   function listaLateral(code, tid, jogos, lado, tempo) {
     const base = lado === "casa" ? "Jogos do mandante (casa)" : lado === "fora" ? "Jogos do visitante (fora)" : "Jogos de " + nomeTime(tid);
     const titulo = tempo ? base.replace(/^Jogos/, `${tempo}º tempo`) : base;
@@ -1323,7 +1355,7 @@
       const bH = M.bucketDeJogos(jh, p.h), bA = M.bucketDeJogos(ja, p.a);
       const titulos = { inteiro: "Jogo inteiro", tempos: `${tempo}º tempo`, overs: "Overs", gtipos: "Tipos de gols", periodos: "Períodos dos gols", extras: "Extras" };
       const semDetalhe = (aba === "gtipos" || aba === "periodos") ? !(bH.jg + bA.jg) : aba === "extras" ? !(bH.je + bA.je) : false;
-      const lateral = (tid, jogos, ladoX, cls) => (aba === "overs" ? distribuicaoGols(jogos, tid, ladoX, cls) : listaLateral(code, tid, jogos, ladoX, tempo));
+      const lateral = (tid, jogos, ladoX, cls) => (aba === "overs" ? distribuicaoGols(jogos, tid, ladoX, cls) : aba === "extras" ? extrasPorJogo(code, tid, jogos, ladoX) : listaLateral(code, tid, jogos, ladoX, tempo));
       const botoesTempo = tempo ? `<div class="tempo-botoes" role="group" aria-label="Tempo">
           <button type="button" data-tempo="1" aria-pressed="${tempo === 1}">1º tempo</button>
           <button type="button" data-tempo="2" aria-pressed="${tempo === 2}">2º tempo</button></div>` : "";
