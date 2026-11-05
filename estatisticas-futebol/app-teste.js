@@ -1180,6 +1180,75 @@
     </div>`;
   }
 
+  // ---------- painéis laterais com gráfico (no estilo do painel de Overs)
+  const tituloLado = (lado, tid, txt) => `${txt} ${lado === "casa" ? "do mandante (casa)" : lado === "fora" ? "do visitante (fora)" : "de " + nomeTime(tid)}`;
+  // barras duplas: marcados (cor do time) e sofridos (cinza)
+  function barrasDuplas(rotulos, marc, sofr, cls) {
+    const max = Math.max(1, ...marc, ...sofr);
+    return `<div class="dist dist-dupla">${rotulos.map((rot, i) => `<div class="dist-linha">
+        <span class="dist-rot">${rot}</span>
+        <div class="dist-par"><div class="dist-trilho ${cls}"><span style="width:${(marc[i] / max) * 100}%"></span></div><div class="dist-trilho sofr"><span style="width:${(sofr[i] / max) * 100}%"></span></div></div>
+        <span class="dist-val"><b>${marc[i]}</b> <span class="sub">${sofr[i]}</span></span></div>`).join("")}</div>`;
+  }
+  const legendaDupla = (cls, extra) => `<p class="legenda-bolas legenda-dupla"><span><i class="marcador ${cls}"></i>marcados</span><span><i class="marcador sofr"></i>sofridos</span>${extra ? `<span>${extra}</span>` : ""}</p>`;
+  function painelPeriodos(tid, jogos, lado, cls) {
+    const b = M.bucketDeJogos(jogos, tid);
+    const corpo = b.jg ? (() => {
+      const iM = b.pm.indexOf(Math.max(...b.pm)), iS = b.ps.indexOf(Math.max(...b.ps));
+      return barrasDuplas(PERIODOS, b.pm, b.ps, cls) + legendaDupla(cls, `mais marca: <b>${PERIODOS[iM]}</b> · mais sofre: <b>${PERIODOS[iS]}</b>`);
+    })() : `<p class="sub">Ainda sem o minuto dos gols destes jogos.</p>`;
+    return `<div class="lateral"><div class="lateral-cab"><h3>${h(tituloLado(lado, tid, "Gols por período"))}</h3>${controleUltimos()}</div>${corpo}</div>`;
+  }
+  function painelTipos(tid, jogos, lado, cls) {
+    const b = M.bucketDeJogos(jogos, tid);
+    const tipos = TIPOS_GOL.filter(([k]) => k !== "o");
+    const CURTO = { c: "Cabeça", e: "Escanteio", b: "Bola parada", f: "Falta direta", p: "Pênalti", k: "Contra-ataque", x: "Fora da área", r: "Cruzamento" };
+    const corpo = b.jg ? barrasDuplas(tipos.map(([k]) => CURTO[k]), tipos.map(([k]) => b.tm[k]), tipos.map(([k]) => b.ts[k]), cls)
+      + legendaDupla(cls, `${b.tm.n} gols marcados e ${b.ts.n} sofridos nesses jogos`) : `<p class="sub">Ainda sem o detalhe dos gols destes jogos.</p>`;
+    return `<div class="lateral lateral-tipos"><div class="lateral-cab"><h3>${h(tituloLado(lado, tid, "Tipos de gol"))}</h3>${controleUltimos()}</div>${corpo}</div>`;
+  }
+  // Extras: gráfico jogo a jogo (a favor para cima, contra para baixo) com a estatística escolhida
+  const EX_LAT = [["esc", "Escanteios", 0], ["cart", "Cartões", 1], ["ch", "Chutes", 3], ["cg", "No gol", 4]];
+  estado.exLat = ler("ex_lat", "esc");
+  function painelExtras(code, tid, jogos, lado, cls) {
+    const [chave, rot, k] = EX_LAT.find((x) => x[0] === estado.exLat) || EX_LAT[0];
+    const fim = jogos.filter(encerrada);
+    const val = (p, casa) => {
+      const e = p.es;
+      if (!e || e[0] == null || e[1] == null) return null;
+      const i = casa ? 0 : 1, o = 1 - i;
+      if (chave === "cart") return [(e[2 + i] || 0) + (e[4 + i] || 0), (e[2 + o] || 0) + (e[4 + o] || 0)];
+      return [e[k * 2 + i] || 0, e[k * 2 + o] || 0];
+    };
+    const itens = fim.map((p) => { const casa = String(p.h) === String(tid); return { p, casa, v: val(p, casa) }; });
+    const com = itens.filter((x) => x.v);
+    const max = Math.max(1, ...com.map((x) => Math.max(x.v[0], x.v[1])));
+    const colunas = itens.map(({ p, casa, v }) => {
+      const adv = nomeTime(casa ? p.a : p.h), gm = casa ? p.fh : p.fa, gs = casa ? p.fa : p.fh;
+      const dica = `${dataCurta(p.d)} ${casa ? "x" : "@"} ${adv} (${gm}-${gs})${v ? ` · ${rot.toLowerCase()}: ${v[0]} a favor, ${v[1]} contra` : " · sem estatísticas"}`;
+      return `<button type="button" class="ex-col${v ? "" : " vazio"}" data-ir="jogo/${code}/${p.i}" title="${h(dica)}" aria-label="${h(dica)}">
+        <span class="ex-cima"><span class="ex-barra ${cls}" style="height:${v ? (v[0] / max) * 82 : 0}%"></span>${v ? `<i>${v[0]}</i>` : ""}</span>
+        <span class="ex-baixo"><span class="ex-barra sofr" style="height:${v ? (v[1] / max) * 82 : 0}%"></span>${v ? `<i>${v[1]}</i>` : ""}</span></button>`;
+    }).join("");
+    const med = (i) => (com.length ? fNum(com.reduce((s2, x) => s2 + x.v[i], 0) / com.length, 1) : "–");
+    const medT = com.length ? fNum(com.reduce((s2, x) => s2 + x.v[0] + x.v[1], 0) / com.length, 1) : "–";
+    const chips = `<div class="ex-chips" role="group" aria-label="Estatística do gráfico">${EX_LAT.map(([c, r]) => `<button type="button" class="chip" data-exlat="${c}" aria-pressed="${c === chave}">${r}</button>`).join("")}</div>`;
+    return `<div class="lateral"><div class="lateral-cab"><h3>${h(tituloLado(lado, tid, rot))}</h3>${controleUltimos()}</div>
+      ${chips}
+      ${fim.length ? `<div class="ex-grafico" style="--n:${Math.max(itens.length, 5)}">${colunas}</div>
+        <div class="ex-medias"><span><small>A favor</small><b class="${cls}">${med(0)}</b></span><span><small>Contra</small><b>${med(1)}</b></span><span><small>No jogo</small><b>${medT}</b></span></div>
+        ${legendaDupla(cls, `média por jogo · ${com.length} de ${fim.length} jogos com estatísticas · toque numa barra para abrir o jogo`).replace("marcados", "a favor").replace("sofridos", "contra")}`
+        : `<p class="sub">Sem jogos encerrados antes desta partida.</p>`}
+    </div>`;
+  }
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest && e.target.closest("[data-exlat]");
+    if (!t) return;
+    estado.exLat = t.dataset.exlat;
+    guardar("ex_lat", estado.exLat);
+    aoVivoAtualizado();
+  });
+
   // aba Extras: escanteios e cartões de cada jogo (a favor x contra), para ver a tendência jogo a jogo
   function extrasPorJogo(code, tid, jogos, lado) {
     const base = lado === "casa" ? "do mandante (casa)" : lado === "fora" ? "do visitante (fora)" : "de " + nomeTime(tid);
@@ -1355,7 +1424,11 @@
       const bH = M.bucketDeJogos(jh, p.h), bA = M.bucketDeJogos(ja, p.a);
       const titulos = { inteiro: "Jogo inteiro", tempos: `${tempo}º tempo`, overs: "Overs", gtipos: "Tipos de gols", periodos: "Períodos dos gols", extras: "Extras" };
       const semDetalhe = (aba === "gtipos" || aba === "periodos") ? !(bH.jg + bA.jg) : aba === "extras" ? !(bH.je + bA.je) : false;
-      const lateral = (tid, jogos, ladoX, cls) => (aba === "overs" ? distribuicaoGols(jogos, tid, ladoX, cls) : aba === "extras" ? extrasPorJogo(code, tid, jogos, ladoX) : listaLateral(code, tid, jogos, ladoX, tempo));
+      const lateral = (tid, jogos, ladoX, cls) => (aba === "overs" ? distribuicaoGols(jogos, tid, ladoX, cls)
+        : aba === "extras" ? painelExtras(code, tid, jogos, ladoX, cls)
+        : aba === "periodos" ? painelPeriodos(tid, jogos, ladoX, cls)
+        : aba === "gtipos" ? painelTipos(tid, jogos, ladoX, cls)
+        : listaLateral(code, tid, jogos, ladoX, tempo));
       const botoesTempo = tempo ? `<div class="tempo-botoes" role="group" aria-label="Tempo">
           <button type="button" data-tempo="1" aria-pressed="${tempo === 1}">1º tempo</button>
           <button type="button" data-tempo="2" aria-pressed="${tempo === 2}">2º tempo</button></div>` : "";

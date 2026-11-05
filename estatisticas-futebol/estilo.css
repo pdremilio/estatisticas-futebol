@@ -1050,3 +1050,31 @@ table.odds-tabela { margin-top: 14px; }
 .ex-par b { min-width: 18px; text-align: right; } .ex-par span { min-width: 18px; color: var(--tinta-3); }
 .ex-par .ic { display: inline-block; width: 6px; height: 9px; border-radius: 1px; margin-left: 2px; vertical-align: 0; }
 .ex-par .ic.vermelho { background: var(--derrota); }
+/* painéis laterais com gráfico: períodos, tipos de gol e extras */
+.dist-dupla { gap: 8px; }
+.dist-par { display: grid; gap: 3px; }
+.dist-par .dist-trilho { height: 8px; }
+.dist-trilho.sofr span { background: var(--tinta-3); opacity: .65; }
+.dist-dupla .dist-linha { grid-template-columns: 62px minmax(0, 1fr) 46px; }
+.dist-dupla .dist-rot { white-space: nowrap; }
+.lateral-tipos .dist-linha { grid-template-columns: 96px minmax(0, 1fr) 46px; }
+.legenda-dupla { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; }
+.legenda-dupla span { display: inline-flex; align-items: center; gap: 5px; }
+.marcador.sofr { background: var(--tinta-3); opacity: .65; }
+.ex-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 2px 0 10px; }
+.ex-chips .chip { font-size: 13px; padding: 4px 10px; }
+.ex-grafico { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 3px; height: 190px; padding: 0 2px; }
+.ex-col { display: grid; grid-template-rows: 1fr 1fr; padding: 0; border: 0; background: none; cursor: pointer; min-width: 0; border-radius: 4px; }
+.ex-col:hover, .ex-col:focus-visible { background: var(--superficie-2); outline: none; }
+.ex-cima, .ex-baixo { position: relative; display: flex; justify-content: center; }
+.ex-cima { align-items: flex-end; border-bottom: 1px solid var(--linha); }
+.ex-baixo { align-items: flex-start; }
+.ex-barra { width: 72%; max-width: 22px; min-height: 2px; }
+.ex-cima .ex-barra { border-radius: 3px 3px 0 0; } .ex-baixo .ex-barra { border-radius: 0 0 3px 3px; }
+.ex-barra.c { background: var(--casa); } .ex-barra.f { background: var(--fora); } .ex-barra.sofr { background: var(--tinta-3); opacity: .65; }
+.ex-col i { position: absolute; left: 0; right: 0; text-align: center; font: 600 10px var(--fonte); font-style: normal; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+.ex-cima i { top: 0; } .ex-baixo i { bottom: 0; }
+.ex-col.vazio .ex-cima::after { content: "·"; color: var(--tinta-3); position: absolute; bottom: -2px; }
+.ex-medias { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; margin-top: 10px; }
+.ex-medias small { display: block; font-size: 11px; color: var(--tinta-3); }
+.ex-medias b { font: 700 20px var(--fonte-titulo); } .ex-medias b.c { color: var(--casa); } .ex-medias b.f { color: var(--fora); }
