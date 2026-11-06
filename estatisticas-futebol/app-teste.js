@@ -72,7 +72,7 @@
     comp: comps.includes(ler("comp", "")) ? ler("comp", "") : comps[0],
     dia: null, compJogos: "todas", vistaTabela: "TOTAL",
     ordem: ler("ordem", "hora"), ocultarEncerrados: ler("ocultar", false), soFavoritos: false, busca: "",
-    abaJogo: "resumo", recorte: "lado", ultimos: 5, subClass: "tabela", tempo: 1,
+    abaJogo: "inteiro", recorte: "lado", ultimos: 5, subClass: "tabela", tempo: 1,
     rkOrdem: ler("rk_ordem", "elo"), rkN: ler("rk_n", 5), rkFiltro: "todos",
   };
 
@@ -135,18 +135,6 @@
   const encerrada = (p) => M.encerrada(p);
   const aoVivo = (p) => ["IN_PLAY", "PAUSED", "LIVE"].includes(p.s);
 
-  // beta 6: cabeçalho da seção Ligas (escolher a liga + Tabela, Artilharia, Power Ranking, Times, Rodadas)
-  const SUBS_LIGA = [["tabela", "Tabela"], ["artilharia", "Artilharia"], ["ranking", "Power Ranking"], ["times", "Times"], ["rodadas", "Rodadas"]];
-  function cabLiga(code, sub, extra = "") {
-    const todas = code === "todas";
-    const base = todas ? estado.comp : code;
-    return `<div class="liga-cab">
-      <div class="chips liga-chips" role="group" aria-label="Liga">${extra}${compsOrd().map((c) =>
-        `<button class="chip" type="button" data-ir="ligas/${c}/${sub === "time" ? "times" : sub}" aria-pressed="${c === code}">${seloComp(c)}${h(nomeComp(c))}</button>`).join("")}</div>
-      <div class="liga-titulo"><h1>${todas ? "Todas as ligas" : `${estrelaLiga(code, 18)}${seloComp(code)}<span>${h((DADOS.competicoes[code] || {}).nome || nomeComp(code))}</span>`}</h1>
-        <nav class="liga-subs" aria-label="Seções da liga">${SUBS_LIGA.map(([id, rot]) => `<button type="button" data-ir="ligas/${todas && id === "ranking" ? "todas" : base}/${id}" aria-current="${id === sub}">${rot}</button>`).join("")}</nav></div>
-    </div>`;
-  }
   function chipsComp(rotaBase, atual, extra = "") {
     return `<div class="chips" role="group" aria-label="Competição">${extra}${compsOrd().map((c) =>
       `<button class="chip" type="button" data-ir="${rotaBase}/${c}" aria-pressed="${c === atual}">${seloComp(c)}${h(nomeComp(c))}</button>`).join("")}</div>`;
@@ -212,8 +200,9 @@
     const temaSalvo = ler("tema", null);
     if (temaSalvo) document.documentElement.dataset.tema = temaSalvo;
     document.getElementById("tema").addEventListener("click", () => {
-      // beta 6: o site é escuro por padrão; o claro só vale se a pessoa escolher
-      const escuroAgora = document.documentElement.dataset.tema !== "claro";
+      const escuroAgora = document.documentElement.dataset.tema
+        ? document.documentElement.dataset.tema === "escuro"
+        : matchMedia("(prefers-color-scheme: dark)").matches;
       const novo = escuroAgora ? "claro" : "escuro";
       document.documentElement.dataset.tema = novo;
       guardar("tema", novo);
@@ -248,7 +237,7 @@
     esc: "escanteio", amarelo: "cartão amarelo", vermelho: "cartão vermelho", "2amarelo": "2º amarelo (expulso)", sub: "substituição" };
   const PRIOR = { gol: 9, vermelho: 8, "2amarelo": 8, trave: 7, alvo: 6, amarelo: 5, fora: 4, bloq: 3, sub: 2, esc: 1 };
   const grupoMarca = (k) => (k === "amarelo" || k === "vermelho" || k === "2amarelo" ? "cartao" : k);
-  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "tendencia", som: false };
+  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "minuto", som: false };
   estado.prOpc = Object.assign({}, OPC_PADRAO, ler("pr_opc", {}));
   estado.prConfig = false;
   let infoPressao = "";
@@ -443,7 +432,7 @@
       infoPressao = t.dataset.info || "";
       const caixa = t.closest(".pressao").querySelector(".pressao-info");
       if (caixa) caixa.textContent = infoPressao;
-      if (t.closest(".painel-vivo-card, .cartao-vivo")) e.stopPropagation();
+      if (t.closest(".painel-vivo-card")) e.stopPropagation();
       return;
     }
     if (t.hasAttribute("data-prconfig")) estado.prConfig = !estado.prConfig;
@@ -705,37 +694,43 @@
   }
 
   // ---------- aba "Ao vivo" do topo: todos os jogos rolando, para quem não consegue assistir
-  estado.pvOrdem = ler("pv_ordem", "pressao");
-  estado.pvAlerta = ler("pv_alerta", false);
   function telaPainelVivo() {
     estado.sel = null;
     const todos = todasPartidas();
-    let vivos = todos.filter((x) => aoVivo(x.p));
-    const total = vivos.length;
+    const vivos = todos.filter((x) => aoVivo(x.p));
     const pesoFav = (x) => (favoritos.has(chaveFav(x.code, x.p)) ? 4 : 0) + (favTimes.has(String(x.p.h)) || favTimes.has(String(x.p.a)) ? 2 : 0) + (favLigas.has(x.code) ? 1 : 0);
-    const minuto = (x) => { const m = String((x.p.vv && x.p.vv.min) || "").match(/(\d+)(?:'?\s*\+\s*(\d+))?/); return m ? Number(m[1]) + (Number(m[2]) || 0) / 100 : 0; };
-    if (estado.pvAlerta) vivos = vivos.filter((x) => alertaPressao(x.p));
-    if (estado.pvOrdem === "minuto") vivos.sort((a, b) => minuto(b) - minuto(a));
-    else if (estado.pvOrdem === "liga") vivos.sort((a, b) => pesoFav(b) - pesoFav(a) || comps.indexOf(a.code) - comps.indexOf(b.code) || (a.p.d < b.p.d ? -1 : 1));
-    else vivos.sort((a, b) => pressaoAgora(b.p) - pressaoAgora(a.p) || pesoFav(b) - pesoFav(a));
+    vivos.sort((a, b) => pesoFav(b) - pesoFav(a) || comps.indexOf(a.code) - comps.indexOf(b.code) || (a.p.d < b.p.d ? -1 : 1));
     const agora = Date.now();
     const proximos = todos.filter((x) => !aoVivo(x.p) && !encerrada(x.p) && Date.parse(x.p.d) > agora - 15 * 60e3 && Date.parse(x.p.d) < agora + 18 * 3600e3 && x.p.h && x.p.a).slice(0, 8);
     const encerradosHoje = todos.filter((x) => encerrada(x.p) && x.p.vv && x.p.vv.fonte && agora - Date.parse(x.p.d) < 5 * 3600e3);
+    const num = (es, k, i) => (es && es[k] && es[k][i] != null ? es[k][i] : "–");
+    const card = (x) => {
+      const p = x.p, v = p.vv || {}, es = v.es;
+      const ultimos = (v.ev || []).slice().reverse().filter((e) => ["gol", "vermelho", "amarelo"].includes(e.t)).slice(0, 2)
+        .map((e) => `<li><span class="m">${h(e.m)}'</span>${e.t === "gol" ? "⚽" : `<i class="ic ${e.t}"></i>`} ${h(e.j)} <span class="sub">(${h(nomeTime(e.l === "h" ? p.h : p.a))})</span></li>`).join("");
+      const est = es ? `<div class="pv-est">
+          <span><small>Chutes</small>${num(es, "chutes", 0)}<i>×</i>${num(es, "chutes", 1)}</span>
+          <span><small>No gol</small>${num(es, "alvo", 0)}<i>×</i>${num(es, "alvo", 1)}</span>
+          <span><small>Escanteios</small>${num(es, "esc", 0)}<i>×</i>${num(es, "esc", 1)}</span>
+          <span><small>Posse</small>${num(es, "posse", 0)}<i>×</i>${num(es, "posse", 1)}</span></div>` : "";
+      const fav = favoritos.has(chaveFav(x.code, p));
+      return `<article class="painel painel-vivo-card" role="link" tabindex="0" data-ir="jogo/${x.code}/${p.i}">
+        <div class="pv-topo">${seloComp(x.code)}<span class="sub">${h(nomeComp(x.code))}</span>${fav ? `<i class="fav-time">${ESTRELA_SVG(12)}</i>` : ""}<span class="pv-min">${p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : v.min ? `<span class="vivo-min">${h(v.min)}</span>` : '<span class="vivo">Ao vivo</span>'}</span>${botaoJanela(x.code, p, "so-icone")}</div>
+        <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span><span class="pv-gols">${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}</span><span class="pv-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
+        ${graficoPressao(p, true) || (temAoVivo(p) ? '<p class="sub pv-carregando">Carregando lances…</p>' : '<p class="sub pv-carregando">Sem dados ao vivo para este jogo.</p>')}
+        ${est}${radarLances(p, true)}${ultimos ? `<ul class="pv-ev">${ultimos}</ul>` : ""}
+      </article>`;
+    };
     const linhaProx = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">${hora(x.p.d)}</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button></li>`;
-    const linhaFim = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">Fim</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} <b>${x.p.fh}:${x.p.fa}</b> ${h(nomeTime(x.p.a))}</button></li>`;
-    const bt = (k, rot) => `<button type="button" data-pvordem="${k}" aria-pressed="${estado.pvOrdem === k}">${rot}</button>`;
+    const linhaFim = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">Fim</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} <b>${x.p.fh}×${x.p.fa}</b> ${h(nomeTime(x.p.a))}</button></li>`;
     app.innerHTML = `<section class="painel-vivo">
-      ${avisoFonte()}<div class="pv-cab"><h1>Ao vivo</h1><span class="sub">${total ? `${total} ${total === 1 ? "jogo" : "jogos"} · atualiza sozinho` : ""}</span>
-        <div class="pv-ctrl"><span class="sub">Ordenar</span><div class="alternar" role="group" aria-label="Ordenar">${bt("pressao", "Mais pressão agora")}${bt("minuto", "Minuto")}${bt("liga", "Liga")}</div>
-        <button type="button" class="chip" data-pvalerta aria-pressed="${!!estado.pvAlerta}">Só com alerta</button>
-        <button type="button" class="chip" data-propc="som" aria-pressed="${!!estado.prOpc.som}">Som nos alertas</button></div></div>
-      ${vivos.length ? `<div class="pv-grade">${vivos.map((x) => cartaoVivo(x, false)).join("")}</div>`
-        : `<div class="painel"><div class="vazio"><strong>${total ? "Nenhum jogo com alerta agora" : "Nenhum jogo rolando agora"}</strong>${total ? `<button class="link" type="button" data-pvalerta>Mostrar todos os ${total} jogos</button>` : "Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas."}</div></div>`}
+      ${avisoFonte()}<div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${vivos.length ? `${vivos.length} ${vivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho a cada 20 s` : ""}</span></div>
+      ${vivos.length ? `<div class="pv-grade">${vivos.map(card).join("")}</div>` : `<div class="painel"><div class="vazio"><strong>Nenhum jogo rolando agora</strong>Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas.</div></div>`}
       ${proximos.length || encerradosHoje.length ? `<div class="pv-listas">
         ${proximos.length ? `<div class="painel"><div class="painel-cab"><h3>Próximos jogos</h3></div><ul class="lista-simples pv-lista">${proximos.map(linhaProx).join("")}</ul></div>` : ""}
         ${encerradosHoje.length ? `<div class="painel"><div class="painel-cab"><h3>Terminaram há pouco</h3></div><ul class="lista-simples pv-lista">${encerradosHoje.map(linhaFim).join("")}</ul></div>` : ""}
       </div>` : ""}
-      <p class="sub nota">Placar e minuto: ESPN (a cada 20 s). Gráfico e lances: 365Scores (a cada 10 s), com a ESPN de reserva. "Mais pressão agora" soma os últimos 8 minutos do gráfico. Toque num jogo para ver tudo.</p>
+      <p class="sub nota">Placar e minuto: ESPN (a cada 20 s). Gráfico e lances: narração da ESPN, que chega 1 a 2 minutos depois do lance. Toque num jogo para ver tudo.</p>
     </section>`;
   }
   function blocoAoVivo(p) {
@@ -886,43 +881,50 @@
       <span class="sr">Filtros</span>${n ? `<span class="badge">${n}</span>` : ""}`;
   }
 
-  // ------------------------------------------------------------ HOJE (beta 6): ao vivo agora, destaques do dia e a lista
-  const ROT_DIA = (chave) => {
-    const base = hoje();
-    if (chave === base) return "Hoje";
-    if (chave === somarDias(base, 1)) return "Amanhã";
-    if (chave === somarDias(base, -1)) return "Ontem";
-    const [a, m, d] = chave.split("-").map(Number);
-    return SEMANA[new Date(a, m - 1, d).getDay()] + " " + pad(d);
-  };
   function telaJogos() {
     estado.dia = limitarDia(estado.dia || hoje());
-    const dias = [];
-    for (let k = diaMin(); k <= diaMax(); k = somarDias(k, 1)) dias.push(k);
-    const nDia = (k) => todasPartidas().filter((x) => x.dia === k).length;
+    const base = hoje();
+    const rotDia = estado.dia === base ? "Hoje" : estado.dia === somarDias(base, 1) ? "Amanhã" : estado.dia === somarDias(base, -1) ? "Ontem" : "";
+    const [a, m, d] = estado.dia.split("-").map(Number);
+    const dt = new Date(a, m - 1, d);
     app.innerHTML = `
-      <div class="hoje">
-        <div class="hoje-dias" role="group" aria-label="Dia">${dias.map((k) => `<button type="button" class="dia-chip" data-dia="${k}" aria-pressed="${k === estado.dia}">${ROT_DIA(k)}<small>${nDia(k) || ""}</small></button>`).join("")}</div>
-        <div class="hoje-ferramentas">
-          <label class="busca-caixa"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            <input class="busca" id="busca" type="search" placeholder="Time, jogo ou campeonato" value="${h(estado.busca || "")}" aria-label="Buscar time, jogo ou campeonato"></label>
-          <label class="sel-mini"><span class="sr">Liga</span>
-            <select id="comp-jogos"><option value="todas">Todas as ligas</option>${compsOrd().map((c) => `<option value="${c}" ${estado.compJogos === c ? "selected" : ""}>${h(nomeComp(c))}</option>`).join("")}</select></label>
-          <label class="sel-mini"><span class="sr">Ordenar</span>
-            <select id="ordenar">${[["hora", "Por horário"], ["comp", "Por liga"], ["chance", "Maior favorito"]].map(([k, r]) => `<option value="${k}" ${estado.ordem === k ? "selected" : ""}>${r}</option>`).join("")}</select></label>
-          <button class="botao-q" type="button" id="so-fav" aria-pressed="${!!estado.soFavoritos}" title="Mostrar só jogos, times e ligas favoritos">
-            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" fill="${estado.soFavoritos ? "var(--cartao)" : "none"}" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Favoritos</button>
-          <button class="botao-q icone" type="button" id="ocultar" aria-pressed="${!!estado.ocultarEncerrados}" title="${estado.ocultarEncerrados ? "Mostrar jogos encerrados" : "Esconder jogos encerrados"}" aria-label="${estado.ocultarEncerrados ? "Mostrar jogos encerrados" : "Esconder jogos encerrados"}">
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>${estado.ocultarEncerrados ? '<path d="M3 3l18 18" stroke="currentColor" stroke-width="2"/>' : ""}</svg></button>
-          <button class="botao-q" type="button" id="abrir-filtros" aria-expanded="${!!estado.painelFiltro}" aria-pressed="${nFiltros(estado.filtro) > 0}" title="Filtros rápidos da lista">${botaoFiltros()}</button>
-          <span class="tb-contagem" id="tb-contagem" aria-live="polite"></span>
-        </div>
-        <div id="painel-filtros" ${estado.painelFiltro ? "" : "hidden"}>${estado.painelFiltro ? painelFiltros() : ""}</div>
-        <section id="hoje-vivo" class="hoje-secao" aria-label="Ao vivo agora"></section>
-        <section id="hoje-destaques" class="hoje-secao" aria-label="Destaques do dia"></section>
-        <section id="lista-jogos-corpo" aria-label="Lista de jogos"></section>
+      <div class="jogos-pagina">
+        <section class="painel lista-v2" aria-label="Lista de jogos">
+          <div class="barra-ferramentas compacta">
+            <div class="tb-linha">
+              <div class="nav-data">
+                <button class="botao-q seta" type="button" data-passo="-1" aria-label="Dia anterior" title="Dia anterior" ${estado.dia <= diaMin() ? "disabled" : ""}>‹</button>
+                <label class="data-atual" title="Escolher data"><span>${rotDia ? `<b>${rotDia}</b> · ` : ""}${SEMANA[dt.getDay()]} ${pad(d)}/${pad(m)}</span>
+                  <input type="date" id="escolher-dia" value="${estado.dia}" min="${diaMin()}" max="${diaMax()}" aria-label="Escolher data"></label>
+                <button class="botao-q seta" type="button" data-passo="1" aria-label="Próximo dia" title="Próximo dia" ${estado.dia >= diaMax() ? "disabled" : ""}>›</button>
+                ${estado.dia !== base ? `<button class="botao-q texto" type="button" data-passo="0">Hoje</button>` : ""}
+              </div>
+              <label class="sel-mini"><span>Ordenar por</span>
+                <select id="ordenar">${[["hora", "Hora de início"], ["comp", "Campeonato"], ["chance", "Maior chance"]].map(([k, r]) => `<option value="${k}" ${estado.ordem === k ? "selected" : ""}>${r}</option>`).join("")}</select></label>
+              <label class="sel-mini"><span class="sr">Competição</span>
+                <select id="comp-jogos"><option value="todas">Todas as competições</option>${compsOrd().map((c) => `<option value="${c}" ${estado.compJogos === c ? "selected" : ""}>${h(nomeComp(c))}</option>`).join("")}</select></label>
+              <button class="botao-q icone" type="button" id="ocultar" aria-pressed="${!!estado.ocultarEncerrados}" title="${estado.ocultarEncerrados ? "Mostrar jogos encerrados" : "Esconder jogos encerrados"}" aria-label="${estado.ocultarEncerrados ? "Mostrar jogos encerrados" : "Esconder jogos encerrados"}">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>${estado.ocultarEncerrados ? '<path d="M3 3l18 18" stroke="currentColor" stroke-width="2"/>' : ""}</svg></button>
+            </div>
+            <div class="tb-linha">
+              <button class="botao-q" type="button" id="so-fav" aria-pressed="${!!estado.soFavoritos}" title="Mostrar só jogos, times e ligas favoritos">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" fill="${estado.soFavoritos ? "var(--cartao)" : "none"}" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                Favoritos</button>
+              <button class="botao-q icone" type="button" id="recolher" title="${recolhidas.size ? "Expandir jogos" : "Recolher jogos"}" aria-label="${recolhidas.size ? "Expandir jogos" : "Recolher jogos"}">${iconeRecolher()}</button>
+              <button class="botao-q icone" type="button" id="abrir-filtros" aria-expanded="${!!estado.painelFiltro}" aria-pressed="${nFiltros(estado.filtro) > 0}" title="Filtros">${botaoFiltros()}</button>
+              <label class="busca-caixa"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <input class="busca" id="busca" type="search" placeholder="Buscar confronto ou campeonato" value="${h(estado.busca || "")}" aria-label="Buscar confronto ou campeonato"></label>
+              <span class="tb-contagem" id="tb-contagem" aria-live="polite"></span>
+            </div>
+            <div id="painel-filtros" ${estado.painelFiltro ? "" : "hidden"}>${estado.painelFiltro ? painelFiltros() : ""}</div>
+          </div>
+          <div id="lista-jogos-corpo"></div>
+        </section>
+        <aside class="destaques" aria-label="Destaques do dia" id="destaques"></aside>
       </div>`;
     renderListaJogos();
+    const inp = document.getElementById("escolher-dia");
+    inp.addEventListener("change", () => { if (inp.value) { estado.dia = limitarDia(inp.value); telaJogos(); } });
     document.getElementById("ordenar").addEventListener("change", (e) => { estado.ordem = e.target.value; guardar("ordem", estado.ordem); renderListaJogos(); });
     document.getElementById("comp-jogos").addEventListener("change", (e) => { estado.compJogos = e.target.value; renderListaJogos(); });
     document.getElementById("busca").addEventListener("input", (e) => { estado.busca = e.target.value; renderListaJogos(); });
@@ -973,16 +975,13 @@
     const corpo = document.getElementById("lista-jogos-corpo");
     if (!corpo) return;
     const lista = jogosVisiveis();
-    const doDia = todasPartidas().filter((x) => x.dia === estado.dia);
-    const totalDia = doDia.length;
+    const totalDia = todasPartidas().filter((x) => x.dia === estado.dia).length;
+    const rec = document.getElementById("recolher");
+    if (rec) { const t = recolhidas.size ? "Expandir jogos" : "Recolher jogos"; rec.title = t; rec.setAttribute("aria-label", t); rec.innerHTML = iconeRecolher(); }
     const filtrando = lista.length !== totalDia;
     const tbc = document.getElementById("tb-contagem");
     if (tbc) tbc.innerHTML = totalDia ? `${filtrando ? `${lista.length} de ${totalDia} jogos` : `${totalDia} jogo${totalDia > 1 ? "s" : ""}`}${nFiltros(estado.filtro) ? ` · <button class="link" type="button" id="l-limpar2">limpar filtros</button>` : ""}` : "";
-    // ao vivo agora (só no dia de hoje) e destaques
-    const vivoEl = document.getElementById("hoje-vivo");
-    if (vivoEl) vivoEl.innerHTML = estado.dia === hoje() ? faixaAoVivo() : "";
-    const dest = document.getElementById("hoje-destaques");
-    if (dest) dest.innerHTML = destaquesDoDia(doDia);
+    const contagem = "";
     if (!lista.length) {
       let dica = "";
       if (!totalDia) {
@@ -992,148 +991,125 @@
         else if (ant) dica = `<button class="link" type="button" data-dia="${ant.dia}">Ir para o último dia com jogos (${dataCurta(ant.p.d)})</button>`;
         else dica = "Não há jogos nos 3 dias antes nem nos 3 dias depois de hoje.";
       } else dica = "Os filtros estão escondendo todos os jogos deste dia.";
-      corpo.innerHTML = `<div class="painel"><div class="vazio"><strong>${totalDia ? "Nenhum jogo com esses filtros" : "Nenhum jogo neste dia"}</strong>${dica}</div></div>`;
+      corpo.innerHTML = `${contagem}<div class="vazio"><strong>${totalDia ? "Nenhum jogo com esses filtros" : "Nenhum jogo neste dia"}</strong>${dica}</div>`;
     } else {
-      const grupos = [];
+      let html = "";
       if (estado.ordem === "comp") {
-        const g = {};
-        for (const x of lista) (g[x.code] = g[x.code] || []).push(x);
-        for (const c of compsOrd()) if (g[c]) grupos.push([c, g[c]]);
+        const grupos = {};
+        for (const x of lista) (grupos[x.code] = grupos[x.code] || []).push(x);
+        for (const c of compsOrd()) if (grupos[c]) {
+          html += cabGrupo(c, grupos[c].length);
+          if (!recolhidas.has(c)) html += grupos[c].map((x) => linhaJogo(x.code, x.p)).join("");
+        }
       } else {
+        let ultimo = null;
         for (const x of lista) {
-          const ult = grupos[grupos.length - 1];
-          if (ult && ult[0] === x.code) ult[1].push(x); else grupos.push([x.code, [x]]);
+          if (x.code !== ultimo) { html += cabGrupo(x.code); ultimo = x.code; }
+          if (!recolhidas.has(x.code)) html += linhaJogo(x.code, x.p);
         }
       }
-      corpo.innerHTML = grupos.map(([c, xs]) => `<div class="jl-grupo">${cabGrupo(c, xs.length)}${recolhidas.has(c) ? "" : xs.map((x) => linhaJogo(x.code, x.p)).join("")}</div>`).join("")
-        + `<p class="nota-odd">Chance 1 · X · 2 = projeção do site para mandante, empate e visitante. +2,5 e Ambas = chance de mais de 2,5 gols e de os dois marcarem.${TEM_ODDS ? " Casas = odd média das casas de apostas (The Odds API); em destaque quando paga mais do que a chance calculada sugere." : ""}</p>`;
+      corpo.innerHTML = `${contagem}<div class="tabela-jogos ${TEM_ODDS ? "com-odds" : ""}">${CAB_COLUNAS}${html}</div>${NOTA_ODD}`;
     }
     const l2 = document.getElementById("l-limpar2");
     if (l2) l2.addEventListener("click", () => { estado.filtro = copiaFiltro(FILTRO_VAZIO); salvarFiltro(); telaJogos(); });
-  }
-
-  // faixa "Ao vivo agora" no topo da Hoje: os jogos rolando com mini gráfico de pressão
-  function faixaAoVivo() {
-    const vivos = todasPartidas().filter((x) => aoVivo(x.p) && x.p.h && x.p.a);
-    if (!vivos.length) return "";
-    vivos.sort((a, b) => pressaoAgora(b.p) - pressaoAgora(a.p) || comps.indexOf(a.code) - comps.indexOf(b.code));
-    const mostrar = vivos.slice(0, 6);
-    return `<div class="secao-cab"><i class="ponto-vivo" aria-hidden="true"></i><h2>Ao vivo agora</h2><span class="sub">${vivos.length} ${vivos.length === 1 ? "jogo" : "jogos"}</span>
-        <button class="link" type="button" data-ir="aovivo">Abrir o painel ao vivo</button></div>
-      <div class="vivo-faixa">${mostrar.map((x) => cartaoVivo(x, true)).join("")}</div>`;
-  }
-  // cartão de jogo ao vivo (faixa da Hoje e painel Ao vivo)
-  function cartaoVivo(x, curto) {
-    const p = x.p, v = p.vv || {}, al = alertaPressao(p);
-    const min = p.s === "PAUSED" ? "Intervalo" : v.min || "Ao vivo";
-    const num = (es, k, i) => (es && es[k] && es[k][i] != null ? es[k][i] : "–");
-    const es = v.es || v.es365 ? Object.assign({}, v.es || {}, v.es365 || {}) : null;
-    const est = !curto && es ? `<div class="cv-est">
-        <span><small>Posse</small>${num(es, "posse", 0)} – ${num(es, "posse", 1)}</span>
-        <span><small>No gol</small>${num(es, "alvo", 0)} – ${num(es, "alvo", 1)}</span>
-        <span><small>Escanteios</small>${num(es, "esc", 0)} – ${num(es, "esc", 1)}</span>
-        ${es.xg ? `<span><small>xG</small>${fNum(Number(es.xg[0]) || 0, 2)} – ${fNum(Number(es.xg[1]) || 0, 2)}</span>` : ""}</div>` : "";
-    return `<article class="cartao-vivo${al ? " com-alerta n" + al.nivel + (al.l === "h" ? " c" : " f") : ""}" role="link" tabindex="0" data-ir="jogo/${x.code}/${p.i}">
-      <div class="cv-topo">${seloComp(x.code)}<span class="sub">${h(nomeComp(x.code))}</span><span class="cv-min">${h(min)}</span>${curto ? "" : botaoJanela(x.code, p, "so-icone")}</div>
-      <div class="cv-placar"><span class="c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span><span class="cv-gols">${p.fh ?? "–"}<i>:</i>${p.fa ?? "–"}</span><span class="f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
-      ${graficoPressao(p, true) || `<p class="sub cv-sem">${temAoVivo(p) ? "Carregando lances…" : "Sem dados ao vivo para este jogo."}</p>`}
-      ${est}
-    </article>`;
-  }
-  // quanto o jogo está "pegando fogo" agora (para ordenar): pressão das últimas 8 barras + alerta
-  function pressaoAgora(p) {
-    const pr = p.vv && p.vv.pr;
-    if (!pr) return 0;
-    const atual = pr.atual == null ? pr.ultimo : pr.atual;
-    const val = valoresPressao(pr, "minuto", p.vv.atk);
-    let s = 0;
-    for (let i = Math.max(0, atual - 7); i <= atual; i++) s += Math.max(val.h[i] || 0, val.a[i] || 0);
-    const al = alertaPressao(p);
-    return s + (al ? al.nivel * 100 : 0);
+    const dest = document.getElementById("destaques");
+    if (dest) {
+      if (estado.sel) atualizarPainelJogo();
+      else dest.innerHTML = destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia));
+    }
   }
 
   function cabGrupo(code, n) {
     const fechado = recolhidas.has(code);
     const info = COMP_INFO[code];
-    return `<div class="jl-cab">${estrelaLiga(code, 15)}
+    return `<div class="grupo-v2">${estrelaLiga(code, 16)}
       <button class="grupo-toggle" type="button" data-recolher="${code}" aria-expanded="${!fechado}">
       <svg class="seta" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
-      ${seloComp(code)}<b>${h(DADOS.competicoes[code].nome || nomeComp(code))}</b><span class="pais">${h(info ? info.pais : "")}</span>
-      ${n ? `<span class="qtd-grupo">${n}</span>` : ""}</button>
-      <span class="jl-col" aria-hidden="true">Chance 1 · X · 2</span><span class="jl-col n" aria-hidden="true">+2,5</span><span class="jl-col n" aria-hidden="true">Ambas</span>${TEM_ODDS ? '<span class="jl-col od" aria-hidden="true">Casas</span>' : ""}<span class="jl-col e" aria-hidden="true"></span></div>`;
+      ${seloComp(code)}<span class="pais">${h(info ? info.pais : "")}</span><b>${h(DADOS.competicoes[code].nome || nomeComp(code))}</b>
+      ${n ? `<span class="qtd-grupo">${n}</span>` : ""}</button></div>`;
   }
+
+  const CAB_COLUNAS = `<div class="jogo-v2 cab-colunas" aria-hidden="true"><span></span><span>Horário</span><span class="situacao">Situação</span><span>Jogo</span>
+    <span class="chance">Chance de vitória</span><span class="odds">Odd justa*</span>${TEM_ODDS ? '<span class="odds">Odd casas**</span>' : ""}<span class="gols">Placar</span></div>`;
+  const NOTA_ODD = `<p class="nota-odd">*Odd justa = 1 ÷ chance calculada pela projeção do site. Não é a odd das casas de apostas: serve para comparar com ela.${TEM_ODDS ? "<br>**Odd casas = média das casas de apostas (The Odds API). Em verde quando está acima da odd justa, ou seja, quando há valor segundo a projeção." : ""}</p>`;
 
   function linhaJogo(code, p) {
     const fim = encerrada(p), vivo = aoVivo(p);
     const k = chaveFav(code, p), fav = favoritos.has(k);
-    let chance = "", ov = "", am = "", casas = TEM_ODDS ? '<span class="jl-od"></span>' : "";
+    let oddH = "", oddA = "", chance = "", casas = "";
     if (p.h && p.a) {
       const { proj } = projecaoDo(code, p);
-      chance = `<span class="jl-ch" title="Chance: ${h(nomeTime(p.h))} ${fProb(proj.p1)} · empate ${fProb(proj.px)} · ${h(nomeTime(p.a))} ${fProb(proj.p2)}">
-        <span class="barra3"><span style="width:${proj.p1 * 100}%"></span><span style="width:${proj.px * 100}%"></span><span style="width:${proj.p2 * 100}%"></span></span>
-        <small><span class="c">${fProb(proj.p1)}</span><span>${fProb(proj.px)}</span><span class="f">${fProb(proj.p2)}</span></small></span>`;
-      ov = fProb(proj.ov[2]); am = fProb(proj.btts);
+      oddH = fOdd(proj.p1); oddA = fOdd(proj.p2);
+      chance = `<div class="barra3"><span style="width:${proj.p1 * 100}%"></span><span style="width:${proj.px * 100}%"></span><span style="width:${proj.p2 * 100}%"></span></div>
+        <small><span class="c">${fProb(proj.p1)}</span><span>${fProb(proj.px)}</span><span class="f">${fProb(proj.p2)}</span></small>`;
       if (TEM_ODDS) {
         const o = oddsDo(code, p);
         const cel = (odd, prob) => (odd ? `<span class="${temValor(odd, prob) ? "valor" : ""}">${fNum(odd, 2)}</span>` : "<span>–</span>");
-        casas = `<span class="jl-od" title="${o ? `Média de ${o.n} casas · melhor: ${fNum(o.mc, 2)} / ${fNum(o.mf, 2)}` : "Sem odds das casas para este jogo"}">${o ? cel(o.c, proj.p1) + cel(o.f, proj.p2) : ""}</span>`;
+        casas = `<span class="odds casas" title="${o ? `Média de ${o.n} casas · melhor: ${fNum(o.mc, 2)} / ${fNum(o.mf, 2)}` : "Sem odds das casas para este jogo"}">${o ? cel(o.c, proj.p1) + cel(o.f, proj.p2) : ""}</span>`;
       }
-    } else chance = '<span class="jl-ch"></span>';
+    } else if (TEM_ODDS) casas = '<span class="odds casas"></span>';
     const vH = fim && p.fh > p.fa, vA = fim && p.fa > p.fh;
-    const cls = (v, outro) => (v ? "venc" : fim && outro ? "apagado" : "");
+    const perdeu = (v, outro) => (fim && !v && outro ? "apagado" : "");
+    const placar = (g, g1) => (fim || vivo ? `<b>${g ?? "–"}</b>${g1 != null ? ` <span>(${g1})</span>` : ""}` : "");
     const marcaFav = (tid) => (favTimes.has(String(tid)) ? `<i class="fav-time" title="Time favorito">${ESTRELA_SVG(12)}</i>` : "");
-    const al = vivo ? alertaPressao(p) : null;
-    const st = vivo ? `<b class="vivo-min">${h(p.s === "PAUSED" ? "Int." : (p.vv && p.vv.min) || "Vivo")}</b>${al ? `<i class="alerta-lista n${al.nivel} ${al.l === "h" ? "c" : "f"}" title="${h(nomeTime(al.tid))} pressionando forte">${al.nivel === 2 ? "🔥" : "⚡"}</i>` : ""}`
-      : fim ? `<span class="fim">Fim</span>` : ["POSTPONED", "CANCELLED", "SUSPENDED"].includes(p.s) ? `<span class="fim">${h(STATUS[p.s])}</span>` : `<span>${hora(p.d)}</span>`;
-    const gol = (g) => (fim || vivo ? (g ?? "–") : "");
-    return `<div class="jl${vivo ? " ao-vivo" : ""}" role="link" tabindex="0" data-ir="jogo/${code}/${p.i}">
-      <span class="jl-st">${st}</span>
-      <span class="jl-t c ${cls(vH, vA)}"><span class="nm">${h(nomeTime(p.h))}</span>${marcaFav(p.h)}${escudo(p.h)}</span>
-      <span class="jl-pl${fim || vivo ? "" : " sem"}"><b>${gol(p.fh)}</b><i>${fim || vivo ? ":" : "×"}</i><b>${gol(p.fa)}</b></span>
-      <span class="jl-t f ${cls(vA, vH)}">${escudo(p.a)}<span class="nm">${h(nomeTime(p.a))}</span>${marcaFav(p.a)}</span>
-      ${chance}<span class="jl-n">${ov}</span><span class="jl-n">${am}</span>${casas}
-      ${botaoEstrela("data-fav", k, fav, "este jogo", 16)}
+    return `<div class="jogo-v2" role="link" tabindex="0" data-ir="jogo/${code}/${p.i}">
+      ${botaoEstrela("data-fav", k, fav, "este jogo")}
+      <span class="quando">${vivo && p.vv && p.vv.min ? `<span>${hora(p.d)}</span><b class="vivo-min">${h(p.vv.min)}</b>${(() => { const al = alertaPressao(p); return al ? `<i class="alerta-lista n${al.nivel} ${al.l === "h" ? "c" : "f"}" title="${h(nomeTime(al.tid))} pressionando forte">${al.nivel === 2 ? "🔥" : "⚡"}</i>` : ""; })()}` : `<span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b>`}</span>
+      <span class="situacao">${ROT_STATUS(p)}</span>
+      <span class="equipes">
+        <span class="${vH ? "venc" : perdeu(vH, vA)}">${escudo(p.h)}<span>${h(nomeTime(p.h))}</span>${marcaFav(p.h)}</span>
+        <span class="${vA ? "venc" : perdeu(vA, vH)}">${escudo(p.a)}<span>${h(nomeTime(p.a))}</span>${marcaFav(p.a)}</span>
+      </span>
+      <span class="chance" title="Chance de vitória do mandante, empate e visitante">${chance}</span>
+      <span class="odds" title="Odd justa: 1 ÷ chance calculada. Não é a odd da casa de apostas.">${oddH ? `<span>${oddH}</span><span>${oddA}</span>` : ""}</span>
+      ${casas}
+      <span class="gols"><span>${placar(p.fh, p.hh)}</span><span>${placar(p.fa, p.ha)}</span></span>
     </div>`;
   }
 
-  // destaques do dia: o que a projeção do site achou de mais forte nos jogos (cartões no topo da Hoje)
   function destaquesDoDia(doDia) {
     let validos = doDia.filter((x) => x.p.h && x.p.a);
     const abertos = validos.filter((x) => !encerrada(x.p));
     if (abertos.length) validos = abertos;
     if (!validos.length) return "";
     validos = validos.map((x) => ({ ...x, ...projecaoDo(x.code, x.p) }));
-    const melhor = (fn) => validos.reduce((m, x) => (!m || fn(x) > fn(m) ? x : m), null);
-    const nomeJ = (x) => `${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}`;
-    const cartao = (tipo, num, x, porque) => `<button type="button" class="destaque" data-ir="jogo/${x.code}/${x.p.i}">
-        <span class="d-tipo">${tipo}</span><span class="d-num">${num}</span><span class="d-jogo">${nomeJ(x)}</span><span class="d-porque">${porque} · ${hora(x.p.d)}</span></button>`;
-    const fav = melhor((x) => Math.max(x.proj.p1, x.proj.p2));
-    const casaFav = fav.proj.p1 >= fav.proj.p2;
-    const gols = melhor((x) => x.proj.ov[2]);
-    const ambas = melhor((x) => x.proj.btts);
-    const ht = melhor((x) => x.proj.ht05);
-    let valor = "";
-    if (TEM_ODDS) {
-      const comValor = validos.map((x) => {
-        const o = oddsDo(x.code, x.p);
-        if (!o) return null;
-        const op = [[o.c, x.proj.p1, nomeTime(x.p.h)], [o.e, x.proj.px, "Empate"], [o.f, x.proj.p2, nomeTime(x.p.a)]]
-          .map(([odd, pr, rot]) => ({ odd, pr, rot, v: pctValor(odd, pr) })).filter((y) => y.v != null && y.v > 0).sort((a, b) => b.v - a.v)[0];
-        return op ? { ...x, op } : null;
-      }).filter(Boolean).sort((a, b) => b.op.v - a.op.v)[0];
-      if (comValor) valor = cartao("Valor nas odds", `+${Math.round(comValor.op.v)}%`, comValor, `${h(comValor.op.rot)} a ${fNum(comValor.op.odd, 2)} (justa ${fOdd(comValor.op.pr)})`);
-    }
-    return `<div class="secao-cab"><h2>Destaques do dia</h2><span class="sub">o que o site achou nos jogos ${estado.dia === hoje() ? "de hoje" : "deste dia"}</span></div>
-      <div class="destaques-grade">
-        ${cartao("Favorito forte", fProb(Math.max(fav.proj.p1, fav.proj.p2)), fav, `vitória do ${h(nomeTime(casaFav ? fav.p.h : fav.p.a))}`)}
-        ${cartao("Mais chance de gols", fProb(gols.proj.ov[2]), gols, `mais de 2,5 gols · ${fNum(gols.proj.lh + gols.proj.la, 1)} gols esperados`)}
-        ${cartao("Ambas marcam", fProb(ambas.proj.btts), ambas, "os dois times marcam")}
-        ${cartao("Gol no 1º tempo", fProb(ht.proj.ht05), ht, "pelo menos um gol antes do intervalo")}
-        ${valor}
-      </div>`;
+    const top = (fn, n = 4) => [...validos].sort((a, b) => fn(b) - fn(a)).slice(0, n);
+    const item = (x, valor) => `<li><span class="data">${hora(x.p.d)}</span>${seloComp(x.code)}
+      <button type="button" data-ir="jogo/${x.code}/${x.p.i}">${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button>
+      <span class="res">${valor}</span></li>`;
+    const bloco = (titulo, lista) => `<div class="painel"><div class="painel-cab"><h3>${titulo}</h3></div>
+      <div class="painel-corpo"><ul class="lista-mini">${lista}</ul></div></div>`;
+    return `
+      ${bloco("Maiores favoritos", top((x) => Math.max(x.proj.p1, x.proj.p2)).map((x) => {
+        const casa = x.proj.p1 >= x.proj.p2;
+        return item(x, `${casa ? escudo(x.p.h) : escudo(x.p.a)} ${fProb(casa ? x.proj.p1 : x.proj.p2)}`);
+      }).join(""))}
+      ${TEM_ODDS ? (() => {
+        const comValor = validos.map((x) => {
+          const o = oddsDo(x.code, x.p);
+          if (!o) return null;
+          const opcoes = [["c", o.c, x.proj.p1, nomeTime(x.p.h)], ["e", o.e, x.proj.px, "Empate"], ["f", o.f, x.proj.p2, nomeTime(x.p.a)]]
+            .map(([k, odd, pr, rot]) => ({ k, odd, pr, rot, v: pctValor(odd, pr) })).filter((y) => y.v != null && y.v > 0);
+          if (!opcoes.length) return null;
+          opcoes.sort((a, b) => b.v - a.v);
+          return { ...x, melhor: opcoes[0] };
+        }).filter(Boolean).sort((a, b) => b.melhor.v - a.melhor.v).slice(0, 4);
+        return comValor.length ? bloco("Maior valor nas odds", comValor.map((x) => item(x, `<span class="valor-tag" title="${h(x.melhor.rot)}: odd média ${fNum(x.melhor.odd, 2)} contra odd justa ${fOdd(x.melhor.pr)}">${h(x.melhor.rot)} +${Math.round(x.melhor.v)}%</span>`)).join("")) : "";
+      })() : ""}
+      ${bloco("Mais gols esperados", top((x) => x.proj.lh + x.proj.la).map((x) => item(x, fNum(x.proj.lh + x.proj.la, 1))).join(""))}
+      ${bloco("Ambas marcam", top((x) => x.proj.btts).map((x) => item(x, fProb(x.proj.btts))).join(""))}`;
   }
 
   // ------------------------------------------------------------ JOGO (página)
+  // beta 5: abas com tipos de gol, períodos e extras (só quando a fonte tem minuto dos gols e estatísticas)
+  const ABAS_JOGO = B5 ? [
+    ["inteiro", "Jogo inteiro"], ["tempos", "1º/2º tempo"], ["gtipos", "Tipos de gols"], ["periodos", "Períodos"], ["overs", "Overs"],
+    ["extras", "Extras"], ["proj", "Projeções"], ["tabela", "Classificação e artilharia"], ["rank", "Power Ranking"],
+  ] : [
+    ["inteiro", "Jogo inteiro"], ["tempos", "1º/2º tempo"], ["overs", "Overs"],
+    ["proj", "Projeções"], ["tabela", "Classificação e artilharia"], ["rank", "Power Ranking"],
+  ];
+
   // linhas das tabelas centrais: [rótulo, contagem(b), base(b), direção] ou [rótulo, soma(b), base(b), direção, "med"]
   const L = {
     jogos: ["Total de partidas", (b) => b.j, null, 0, "num"],
@@ -1268,8 +1244,6 @@
   }
 
   function controleUltimos() {
-    return ""; // beta 6: "Últimos 5 / Temporada" fica no topo da aba, junto do Casa × Fora
-    // eslint-disable-next-line no-unreachable
     return `<div class="alternar" role="group" aria-label="Quantidade de jogos">
           <button type="button" data-ultimos="5" aria-pressed="${estado.ultimos === 5}">Últimos 5</button>
           <button type="button" data-ultimos="0" aria-pressed="${!estado.ultimos}">Todos</button></div>`;
@@ -1411,18 +1385,47 @@
     </div>`;
   }
 
-  // ------------------------------------------------------------ JOGO (beta 6): página própria com 5 abas
-  estado.sel = null; // (beta 5 abria o jogo ao lado da lista no PC; na beta 6 o jogo é sempre uma página)
-  const ladoALado = () => false;
-  function atualizarPainelJogo() {}
+  // modo lado a lado: no PC o jogo abre à direita da lista
+  const LARGURA_LADO = 1024;
+  const ladoALado = () => window.innerWidth >= LARGURA_LADO;
+  estado.sel = null; // { code, id } do jogo aberto no painel
 
   function telaJogo(code, id) {
     const p = acharPartida(code, id);
-    if (!p) { ir("jogos"); return; }
-    estado.sel = null;
+    if (!p) { estado.sel = null; telaJogos(); return; }
     const dia = diaDe(p.d);
-    if (dia >= diaMin() && dia <= diaMax()) estado.dia = dia;
-    app.innerHTML = `<section class="jogo-pagina">${htmlJogo(code, p)}</section>`;
+    if (ladoALado() && dia >= diaMin() && dia <= diaMax()) {
+      const mesmaTela = document.querySelector(".jogos-pagina") && estado.dia === dia;
+      estado.dia = dia; estado.sel = { code, id: String(id) };
+      // jogo aberto ao lado da lista: atualiza as duas partes (antes só o painel, e a lista ficava com placar velho)
+      if (mesmaTela) { renderListaJogos(); atualizarPainelJogo(); } else telaJogos();
+      return;
+    }
+    estado.sel = null;
+    estado.dia = dia;
+    const r = htmlJogo(code, p);
+    const voltar = `<button class="botao-q texto voltar-v2" type="button" data-voltar>‹ Jogos de ${dataCurta(p.d)}</button>`;
+    app.innerHTML = `${voltar}<section class="painel jogo-pagina">${r}</section>`;
+  }
+
+  function atualizarPainelJogo() {
+    const pagina = document.querySelector(".jogos-pagina");
+    const aside = document.getElementById("destaques");
+    if (!pagina || !aside) return;
+    const sel = estado.sel && acharPartida(estado.sel.code, estado.sel.id);
+    pagina.classList.toggle("com-jogo", !!sel);
+    document.querySelectorAll(".jogo-v2[aria-current]").forEach((el) => el.removeAttribute("aria-current"));
+    if (sel) {
+      const linha = document.querySelector(`.jogo-v2[data-ir="jogo/${estado.sel.code}/${sel.i}"]`);
+      if (linha) linha.setAttribute("aria-current", "true");
+      aside.className = "painel jogo-pagina detalhe-lado";
+      aside.setAttribute("aria-label", "Jogo selecionado");
+      aside.innerHTML = `<button class="fechar-jogo" type="button" data-voltar title="Fechar o jogo e voltar aos destaques" aria-label="Fechar o jogo">✕</button>${htmlJogo(estado.sel.code, sel)}`;
+    } else {
+      aside.className = "destaques";
+      aside.setAttribute("aria-label", "Destaques do dia");
+      aside.innerHTML = destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia));
+    }
   }
 
   // fase do jogo como a ESPN escreve ("Quarterfinals - Leg 1") em português
@@ -1442,17 +1445,14 @@
     const lin = (tid) => xg[tid] || xg[String(tid)];
     const a = lin(p.h), b = lin(p.a);
     if (!a && !b) return "";
-    const por = (x, i) => (x && x[2] ? x[i] / x[2] : null);
-    const linhas = [
-      ["xG feito por jogo", por(a, 0), por(b, 0), 2], ["xG sofrido por jogo", por(a, 1), por(b, 1), 2],
-      ["Saldo de xG na temporada", a ? a[0] - a[1] : null, b ? b[0] - b[1] : null, 1], ["Pontos esperados", a ? a[3] : null, b ? b[3] : null, 1],
-    ];
-    return `<div class="esp-secao">xG na temporada (FotMob)</div>${linhas.map(([rot, x, y, d]) => linhaEspelho(rot, x != null ? fNum(x, d) : "–", y != null ? fNum(y, d) : "–", "", "", Math.abs(x || 0), Math.abs(y || 0))).join("")}
-      <p class="sub nota">xG: gols esperados pela qualidade das chances. Temporada inteira na competição, sem separar casa e fora.</p>`;
+    const por = (x, i) => (x && x[2] ? fNum(x[i] / x[2], 2) : "–");
+    const linha = (rot, i, dir) => `<tr><td class="n"></td><td class="p">${por(a, i)}</td><td class="rot">${rot}</td><td class="p">${por(b, i)}</td><td class="n"></td></tr>`;
+    return `<table class="stats-central xg-tab"><tbody><tr class="secao"><td colspan="5">xG na temporada (FotMob)</td></tr>
+      ${linha("xG feito por jogo", 0)}${linha("xG sofrido por jogo", 1)}
+      <tr><td class="n"></td><td class="p">${a ? fNum(a[0] - a[1], 1) : "–"}</td><td class="rot">Saldo de xG na temporada</td><td class="p">${b ? fNum(b[0] - b[1], 1) : "–"}</td><td class="n"></td></tr>
+      <tr><td class="n"></td><td class="p">${a ? fNum(a[3], 1) : "–"}</td><td class="rot">Pontos esperados</td><td class="p">${b ? fNum(b[3], 1) : "–"}</td><td class="n"></td></tr>
+      </tbody></table><p class="sub nota">xG: gols esperados pela qualidade das chances. Temporada inteira na competição, sem separar casa e fora.</p>`;
   }
-
-  const ABAS_JOGO = [["resumo", "Resumo"], ["numeros", "Números"], ["mercados", "Mercados"]];
-  const ABA_ANTIGA = { inteiro: "numeros", tempos: "numeros", gtipos: "numeros", periodos: "numeros", extras: "numeros", overs: "mercados", proj: "mercados", tabela: "resumo", rank: "resumo" };
 
   function htmlJogo(code, p) {
     const comp = DADOS.competicoes[code];
@@ -1460,270 +1460,91 @@
     const rodada = p.r ? `Rodada ${p.r}` : FASES[p.f] || traduzFase(p.fn) || "";
     const grupo = p.g ? " · " + p.g.replace("GROUP_", "Grupo ") : "";
     const pj = temTimes ? projecaoDo(code, p) : null;
+    const posH = temTimes ? posicaoNaTabela(code, p.h) : null, posA = temTimes ? posicaoNaTabela(code, p.a) : null;
     const k = chaveFav(code, p), fav = favoritos.has(k);
-    const infoTime = (tid) => {
-      const pos = posicaoNaTabela(code, tid), elo = posElo(code, tid);
-      return [pos ? `${pos.pos}º na tabela` : "", elo ? `Elo ${Math.round(elo.elo)}` : ""].filter(Boolean).join(" · ");
-    };
-    const lado = (tid, cls) => `<div class="jg-time ${cls}">
-        <span class="jg-cor" aria-hidden="true"></span>${escudo(tid, "esc esc-m")}
-        <div class="jg-nome"><div class="jg-nome-l"><a href="#time/${code}/${tid}">${h(nomeLongo(tid))}</a>${estrelaTime(tid, 16)}</div><span class="sub">${h(infoTime(tid))}</span></div></div>`;
+    const estrela = (extra) => `<span class="fav-jogo">${botaoEstrela("data-fav", k, fav, "este jogo", 18, extra)}<span class="sub">favoritar jogo</span></span>`;
+    const oddsJ = oddsDo(code, p);
+    const ladoTime = (tid, pos, prob, cls, oddCasa) => `<div class="cab-time ${cls}">
+        <div class="cab-time-nome"><a href="#time/${code}/${tid}"><h2>${h(nomeLongo(tid))}</h2></a>${estrelaTime(tid, 18)}</div>
+        <div class="cab-time-linha">${pos ? `<span class="posicao">${pos.pos}º</span>` : ""}${escudo(tid, "esc esc-g")}</div>
+        ${oddCasa ? `<span class="sub odd-casa ${temValor(oddCasa, prob) ? "valor" : ""}" title="Média das casas de apostas">casas <b>${fNum(oddCasa, 2)}</b>${temValor(oddCasa, prob) ? " · valor" : ""}</span>` : ""}
+        ${prob != null ? `<span class="sub" title="1 ÷ chance calculada pela projeção. Não é a odd da casa de apostas."><span>chance ${fProb(prob)}</span><i class="ponto"> · </i><span>odd justa <b>${fOdd(prob)}</b></span></span>` : ""}</div>`;
     let centro;
     if (fim || vivo) {
-      centro = `<div class="jg-placar">${p.fh ?? "–"}<i>:</i>${p.fa ?? "–"}</div>
-        <span class="jg-sit ${vivo ? "vivo" : ""}">${vivo ? (p.s === "PAUSED" ? "Intervalo" : h((p.vv && p.vv.min) || "Ao vivo")) : STATUS[p.s] || p.s}</span>
-        ${p.hh != null ? `<span class="sub">(${p.hh}:${p.ha}) no 1º tempo</span>` : ""}
-        ${p.du && p.du !== "REGULAR" ? `<span class="sub">decidido na prorrogação/pênaltis</span>` : ""}`;
+      centro = `<span class="situacao-g ${vivo ? "vivo" : ""}">${vivo && p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : STATUS[p.s] || p.s}</span>
+        <div class="placar-num">${p.fh ?? "–"}<span class="sep">x</span>${p.fa ?? "–"}</div>
+        ${p.hh != null ? `<div class="sub">(${p.hh}x${p.ha}) no 1º tempo</div>` : ""}
+        ${p.du && p.du !== "REGULAR" ? `<div class="sub">decidido na prorrogação/pênaltis</div>` : ""}`;
     } else {
-      centro = `<div class="jg-placar hora">${hora(p.d)}</div><span class="jg-sit">${h(DIA_CURTO(p.d))}${p.s !== "SCHEDULED" && p.s !== "TIMED" ? " · " + h(STATUS[p.s] || p.s) : ""}</span>`;
+      centro = `<span class="situacao-g">${STATUS[p.s] || p.s}</span><div class="placar-hora">${hora(p.d)}</div>
+        ${pj ? `<div class="sub">empate ${fProb(pj.proj.px)} · odd justa ${fOdd(pj.proj.px)}</div>` : ""}`;
     }
-    const cab = `<div class="jg-cab">
-        <div class="jg-meta"><button class="botao-q icone" type="button" data-voltar aria-label="Voltar para a lista de jogos" title="Voltar">‹</button>
-          ${estrelaLiga(code, 15)}${seloComp(code)}<button class="link-liga" type="button" data-ir="ligas/${code}/tabela">${h(comp.nome || nomeComp(code))}</button>
-          <span class="sub">${h([rodada + grupo, dataLonga(p.d), hora(p.d)].filter(Boolean).join(" · "))}</span>
-          <span class="fav-jogo">${botaoEstrela("data-fav", k, fav, "este jogo", 17)}</span></div>
-        ${temTimes ? `<div class="jg-grade">${lado(p.h, "c")}<div class="jg-centro">${centro}</div>${lado(p.a, "f")}</div>` : `<div class="jg-centro">${centro}</div>`}
+    const cab = `
+      <div class="cab-jogo">
+        <div class="cab-meta">${estrelaLiga(code, 16)}${seloComp(code)}<span>${h(comp.nome || nomeComp(code))} · ${rodada}${grupo} · ${h(dataLonga(p.d))} · ${hora(p.d)}</span></div>
+        <div class="cab-grade">
+          ${ladoTime(p.h, posH, pj ? pj.proj.p1 : null, "c", oddsJ && oddsJ.c)}
+          <div class="cab-centro">${centro}${estrela("")}</div>
+          ${ladoTime(p.a, posA, pj ? pj.proj.p2 : null, "f", oddsJ && oddsJ.f)}
+        </div>
       </div>`;
     if (!temTimes) return cab;
     const semPar = p.semEspn && !temAoVivo(p) ? `<div class="aviso-fonte">Este jogo não foi encontrado na ESPN, então ele fica sem placar ao vivo, lances e escalações. O placar vem da football-data, que atrasa alguns minutos.</div>` : "";
 
-    const listaAbas = temAoVivo(p) ? [...ABAS_JOGO, ["aovivo", vivo ? '<i class="ponto-vivo" aria-hidden="true"></i>Ao vivo' : "Ao vivo"], ["escalacoes", "Escalações"]] : ABAS_JOGO;
+    const listaAbas = temAoVivo(p) ? [...ABAS_JOGO, ["escalacoes", "Escalações"], ["aovivo", vivo ? '<span class="vivo-min">Ao vivo</span>' : "Ao vivo"]] : ABAS_JOGO;
     const chaveJogo = code + ":" + p.i;
     if (estado.abaDoJogo !== chaveJogo) { estado.abaDoJogo = chaveJogo; estado.abaManual = false; }
-    const pedida = ABA_ANTIGA[estado.abaJogo] || estado.abaJogo;
-    let aba = listaAbas.some((a) => a[0] === pedida) ? pedida : "resumo";
+    let aba = listaAbas.some((a) => a[0] === estado.abaJogo) ? estado.abaJogo : "inteiro";
     if (!estado.abaManual && vivo && temAoVivo(p)) aba = "aovivo";
     estado.abaVista = aba;
     const abas = `<nav class="abas-jogo" aria-label="Seções do jogo">${listaAbas.map(([id, rot]) =>
       `<button type="button" data-abajogo="${id}" aria-current="${id === aba}">${rot}</button>`).join("")}</nav>`;
 
     let conteudo;
-    if (aba === "aovivo") conteudo = abaAoVivo(p, code);
-    else if (aba === "escalacoes") conteudo = abaEscalacoes(p);
-    else if (aba === "mercados") conteudo = abaMercados(code, p, pj);
-    else if (aba === "numeros") conteudo = abaNumeros(code, p);
-    else conteudo = abaResumo(code, p, pj);
-    return `${cab}${abas}${semPar}<div class="aba-conteudo">${conteudo}</div>`;
-  }
-
-  // ---------- barras espelhadas (mandante à esquerda, visitante à direita)
-  function linhaEspelho(rot, vH, vA, sH, sA, nH, nA, escala) {
-    const max = escala || Math.max(nH || 0, nA || 0) || 1;
-    const w = (n) => Math.max(0, Math.min(100, ((n || 0) / max) * 100)).toFixed(1);
-    return `<div class="esp-linha"><span class="esp-v c">${vH}${sH ? `<small>${sH}</small>` : ""}</span><span class="esp-b c"><i style="width:${w(nH)}%"></i></span>
-      <span class="esp-rot">${rot}</span><span class="esp-b f"><i style="width:${w(nA)}%"></i></span><span class="esp-v f">${vA}${sA ? `<small>${sA}</small>` : ""}</span></div>`;
-  }
-  function tabelaEspelho(chaves, bH, bA) {
-    let html = "";
-    for (const k of chaves) {
-      if (k === "|") { html += `<div class="esp-sep"></div>`; continue; }
-      if (k[0] === "#") { html += `<div class="esp-secao">${k.slice(1)}</div>`; continue; }
-      const [rot, cont, base, , tipo] = L[k];
-      const cel = (b) => {
-        const n = cont(b), d = base ? base(b) : null;
-        if (tipo === "num") return [String(n ?? "–"), "", n || 0, 0];
-        if (tipo === "med") {
-          const especial = k === "poF" || k === "pgMin";
-          const v = d ? n / d : null;
-          return [v == null ? "–" : fNum(v, especial ? 1 : 2), "", v || 0, k === "poF" ? 100 : 0];
-        }
-        const pct = d ? (100 * n) / d : null;
-        return [fPct(pct), d ? `${n}/${d}` : "", pct || 0, 100];
-      };
-      const [vH, sH, nH, eH] = cel(bH), [vA, sA, nA] = cel(bA);
-      html += linhaEspelho(rot, vH, vA, sH, sA, nH, nA, eH || 0);
-    }
-    return `<div class="espelho">${html}</div>`;
-  }
-
-  // jogos do time antes da data do jogo (temporada inteira, sem o corte de "últimos 5")
-  function jogosAntesTodos(code, tid, iso, lado) {
-    const t = preps[code].times[tid];
-    if (!t) return [];
-    return t.jogos.filter((j) => j.p.d < iso && (lado === "casa" ? j.casa : lado === "fora" ? !j.casa : true)).map((j) => j.p);
-  }
-
-  // ---------- RESUMO: chances, o scan do jogo, forma, Elo, tabela e confronto direto
-  function fatosDoJogo(code, p) {
-    const fatos = [];
-    const lados = [[p.h, "casa", "em casa"], [p.a, "fora", "fora de casa"]];
-    for (const [tid, ladoX, onde] of lados) {
-      const jogos = jogosAntesTodos(code, tid, p.d, ladoX).filter(encerrada);
-      if (jogos.length < 4) continue;
-      const b = M.bucketDeJogos(jogos, tid), nome = h(nomeTime(tid));
-      const pct = (n, d) => (d ? (100 * n) / d : null);
-      const add = (valor, txt, forca) => { if (valor != null) fatos.push({ valor, txt, forca }); };
-      const fp = (n, d, txt, alvo) => { const v = pct(n, d); if (v == null || d < 4) return; add(`${Math.round(v)}%`, `${txt} (${n} de ${d})`, Math.abs(v - (alvo ?? 50)) + (v >= 75 || v <= 15 ? 10 : 0)); };
-      fp(b.v, b.j, `de vitórias do ${nome} ${onde}`, 45);
-      fp(b.d, b.j, `de derrotas do ${nome} ${onde}`, 35);
-      fp(b.j - b.sm, b.j, `dos jogos ${onde} com gol do ${nome}`, 70);
-      fp(b.cs, b.j, `dos jogos do ${nome} ${onde} sem sofrer gol`, 30);
-      fp(b.btts, b.j, `dos jogos do ${nome} ${onde} tiveram gol dos dois times`, 50);
-      fp(b.ov[2], b.j, `dos jogos do ${nome} ${onde} tiveram mais de 2,5 gols`, 50);
-      if (b.j1) fp(b.ht05, b.j1, `dos jogos do ${nome} ${onde} tiveram gol no 1º tempo`, 70);
-      if (b.j - b.pdes >= 4) fp(b.mp, b.j - b.pdes, `dos jogos ${onde} com o ${nome} abrindo o placar`, 50);
-      if (b.tm && b.tm.n >= 6) {
-        const bp = (b.tm.e || 0) + (b.tm.b || 0) + (b.tm.f || 0) + (b.tm.p || 0);
-        fp(bp, b.tm.n, `dos gols do ${nome} ${onde} saíram de bola parada`, 25);
-        fp(b.tm.c || 0, b.tm.n, `dos gols do ${nome} ${onde} foram de cabeça`, 15);
-      }
-      if (b.pm && b.pm.reduce((s, x) => s + x, 0) >= 6) {
-        const tot = b.pm.reduce((s, x) => s + x, 0), i = b.pm.indexOf(Math.max(...b.pm));
-        fp(b.pm[i], tot, `dos gols do ${nome} ${onde} saem entre ${PERIODOS[i]}`, 17);
-      }
-      if (b.je >= 4) {
-        const esc = (b.escF + b.escC) / b.je;
-        add(fNum(esc, 1), `escanteios por jogo nos jogos do ${nome} ${onde}`, Math.abs(esc - 9.5) * 4);
-      }
-      if (b.vir >= 2) add(String(b.vir), `viradas a favor do ${nome} ${onde} na temporada`, b.vir * 5);
-    }
-    fatos.sort((a, b) => b.forca - a.forca);
-    return fatos.slice(0, 6);
-  }
-  function miniTabela(code, p) {
-    const comp = DADOS.competicoes[code];
-    let tabs = (comp.classificacao || []).filter((t) => t.tipo === "TOTAL" && t.tabela.length);
-    if (!tabs.length) tabs = [{ tabela: M.tabela(preps[code], "TOTAL") }];
-    const tb = tabs.find((t) => t.tabela.some((l) => String(l.t) === String(p.h) || String(l.t) === String(p.a))) || tabs[0];
-    const linhas = tb.tabela;
-    if (!linhas || !linhas.length) return "";
-    const idx = new Set([0]);
-    linhas.forEach((l, i) => { if (String(l.t) === String(p.h) || String(l.t) === String(p.a)) { idx.add(i); if (i > 0) idx.add(i - 1); if (i < linhas.length - 1) idx.add(i + 1); } });
-    const ord = [...idx].sort((a, b) => a - b);
-    let html = "", ant = -1;
-    for (const i of ord) {
-      if (ant >= 0 && i > ant + 1) html += `<div class="mt-gap">…</div>`;
-      const l = linhas[i], cls = String(l.t) === String(p.h) ? "c" : String(l.t) === String(p.a) ? "f" : "";
-      html += `<button type="button" class="mt-linha ${cls}" data-ir="time/${code}/${l.t}"><span class="mt-pos">${l.p}</span>${escudo(l.t)}<span class="mt-nome">${h(nomeTime(l.t))}</span><span class="mt-n">${l.j}</span><b class="mt-n">${l.pts}</b></button>`;
-      ant = i;
-    }
-    return `${tb.grupo ? `<p class="sub">${h(tb.grupo.replace("GROUP_", "Grupo "))}</p>` : ""}<div class="mini-tabela"><div class="mt-cab"><span>#</span><span></span><span>Time</span><span class="mt-n">J</span><span class="mt-n">Pts</span></div>${html}</div>`;
-  }
-  function abaResumo(code, p, pj) {
-    const { proj, previa } = pj;
-    const fim = encerrada(p);
-    const o = oddsDo(code, p);
-    const caixa = (rot, prob, odd, cls) => `<div class="ch-caixa ${cls}"><span class="sub">${rot}</span><b>${fProb(prob)}</b>
-      <span class="sub">odd justa <b>${fOdd(prob)}</b></span>${odd ? `<span class="sub">casas <b class="${temValor(odd, prob) ? "valor" : ""}">${fNum(odd, 2)}</b></span>` : ""}</div>`;
-    const plMax = proj.placares && proj.placares[0];
-    const fatos = fatosDoJogo(code, p);
-    const r = M.ranking(preps[code], 5);
-    const xh = r.find((x) => String(x.t) === String(p.h)), xa = r.find((x) => String(x.t) === String(p.a));
-    const formaLinha = (tid, ladoX, rot) => {
-      const t = preps[code].times[tid];
-      if (!t) return "";
-      const b = ladoX === "casa" ? t.casa : ladoX === "fora" ? t.fora : t.geral;
-      return `<div class="fm-linha"><span class="fm-nome">${h(nomeTime(tid))}</span><span class="sub">${rot}</span>${forma(b.forma.slice(-5))}</div>`;
-    };
-    return `<div class="resumo-grade">
-      <section class="cartao-r">
-        <h3 class="r-tit">Chances${previa ? ' <span class="sub">(antes do jogo)</span>' : ""}</h3>
-        <div class="barra3 grande" role="img" aria-label="${h(nomeTime(p.h))} ${fProb(proj.p1)}, empate ${fProb(proj.px)}, ${h(nomeTime(p.a))} ${fProb(proj.p2)}"><span style="width:${proj.p1 * 100}%"></span><span style="width:${proj.px * 100}%"></span><span style="width:${proj.p2 * 100}%"></span></div>
-        <div class="ch-grade">${caixa(h(nomeTime(p.h)), proj.p1, o && o.c, "c")}${caixa("Empate", proj.px, o && o.e, "")}${caixa(h(nomeTime(p.a)), proj.p2, o && o.f, "f")}</div>
-        <p class="sub">Gols esperados: ${h(nomeTime(p.h))} ${fNum(proj.lh, 2)} × ${fNum(proj.la, 2)} ${h(nomeTime(p.a))}.${plMax ? ` Placar mais provável: ${plMax.h}-${plMax.a} (${fProb(plMax.p)}).` : ""}${fim ? ` Resultado: ${p.fh}-${p.fa}.` : ""}</p>
-        <button class="link" type="button" data-abajogo="mercados">Ver todos os mercados</button>
-      </section>
-      <section class="cartao-r scan">
-        <h3 class="r-tit">O scan do jogo</h3>
-        ${fatos.length ? `<ul class="scan-lista">${fatos.map((f) => `<li><b>${f.valor}</b><span>${f.txt}</span></li>`).join("")}</ul>` : `<p class="sub">Os destaques aparecem quando os dois times tiverem pelo menos 4 jogos ${"em casa / fora"} na competição.</p>`}
-        <button class="link" type="button" data-abajogo="numeros">Ver todos os números</button>
-      </section>
-      <section class="cartao-r">
-        <h3 class="r-tit">Forma · últimos 5</h3>
-        ${formaLinha(p.h, "casa", "em casa")}${formaLinha(p.a, "fora", "fora")}${formaLinha(p.h, "geral", "geral")}${formaLinha(p.a, "geral", "geral")}
-        <p class="sub">V vitória · E empate · D derrota (o mais recente à direita).</p>
-      </section>
-      ${xh && xa ? `<section class="cartao-r">
-        <h3 class="r-tit">Power Ranking</h3>
-        <div class="rk-duelo">
-          <div class="c"><span>${h(nomeTime(p.h))}</span><b>${Math.round(xh.elo)}</b><small>${xh.pos}º · ${xh.var5 >= 0 ? "+" : "−"}${Math.abs(Math.round(xh.var5))} nos últimos 5</small></div>
-          <div class="dif"><small>diferença</small><b>${xh.elo - xa.elo >= 0 ? "+" : "−"}${Math.abs(Math.round(xh.elo - xa.elo))}</b></div>
-          <div class="f"><span>${h(nomeTime(p.a))}</span><b>${Math.round(xa.elo)}</b><small>${xa.pos}º · ${xa.var5 >= 0 ? "+" : "−"}${Math.abs(Math.round(xa.var5))} nos últimos 5</small></div></div>
-        <button class="link" type="button" data-ir="ligas/${code}/ranking">Ranking completo da liga</button>
-      </section>` : ""}
-      <section class="cartao-r">
-        <h3 class="r-tit">Na tabela</h3>${miniTabela(code, p)}
-        <button class="link" type="button" data-ir="ligas/${code}/tabela">Tabela e artilharia completas</button>
-      </section>
-      <section class="cartao-r">
-        <h3 class="r-tit">Confronto direto</h3>${confrontoDireto(p.h, p.a)}
-      </section>
-    </div>`;
-  }
-
-  // ---------- NÚMEROS: todas as estatísticas, um tema por vez
-  const TEMAS_NUM = [
-    ["resultados", "Resultados", "vitórias, empates, pontos", ["jogos", "vit", "emp", "der", "pts", "#Intervalo", "v1", "e1", "d1", "#Viradas", "vir", "ced"]],
-    ["gols", "Gols", "marcou, sofreu, ambas", ["marcou", "sofreu", "btts", "cs", "sm", "|", "gm", "gs", "gt"]],
-    ["primeiro", "Primeiro gol", "quem marca primeiro", ["mpx", "spx", "mpV", "mpNP", "spNP", "spV", "pgMin"], true],
-    ["tempos", "Por tempo", "1º e 2º tempo", null],
-    ["tipos", "Como saem os gols", "cabeça, bola parada…", null, true],
-    ["periodos", "Quando saem os gols", "de 15 em 15 min", null, true],
-    ["escanteios", "Escanteios", "a favor, contra, linhas", ["jex", "escF", "escC", "escT", "esc85", "esc95", "esc105", "escMais"], true],
-    ["cartoes", "Cartões", "amarelos e vermelhos", ["jex", "amF", "amC", "cartT", "cart35", "cart45", "vmF"], true],
-    ["chutes", "Chutes, posse e xG", "por jogo", ["jex", "chF", "chC", "cgF", "cgC", "poF", "faF"], true],
-  ].filter((t) => B5 || !t[4]);
-  estado.temaNum = ler("tema_num", "gols");
-  estado.tempo = 0;
-  function controlesRecorte() {
-    const ladoT = estado.recorte === "total";
-    return `<div class="recortes">
-      <div class="alternar" role="group" aria-label="Recorte"><button type="button" data-recorte="lado" aria-pressed="${!ladoT}">Casa × Fora</button><button type="button" data-recorte="total" aria-pressed="${ladoT}">Todos os jogos</button></div>
-      <div class="alternar" role="group" aria-label="Quantidade de jogos"><button type="button" data-ultimos="5" aria-pressed="${estado.ultimos === 5}">Últimos 5</button><button type="button" data-ultimos="0" aria-pressed="${!estado.ultimos}">Temporada</button></div></div>`;
-  }
-  function abaNumeros(code, p) {
-    const tema = TEMAS_NUM.find((t) => t[0] === estado.temaNum) || TEMAS_NUM[1];
-    const ladoT = estado.recorte === "total";
-    const ladoH = ladoT ? "total" : "casa", ladoA = ladoT ? "total" : "fora";
-    let jh = jogosAntes(code, p.h, p.d, ladoH), ja = jogosAntes(code, p.a, p.d, ladoA);
-    const tempo = tema[0] === "tempos" ? estado.tempo : 0;
-    if (tempo) { jh = jogosDoTempo(jh, tempo); ja = jogosDoTempo(ja, tempo); }
-    const bH = M.bucketDeJogos(jh, p.h), bA = M.bucketDeJogos(ja, p.a);
-    const chaves = tema[0] === "tempos" ? (tempo ? TABELAS_JOGO.tempo : TABELAS_JOGO.tempos)
-      : tema[0] === "tipos" ? TABELAS_JOGO.gtipos : tema[0] === "periodos" ? TABELAS_JOGO.periodos : tema[3];
-    const precisaGols = tema[0] === "tipos" || tema[0] === "periodos", precisaEst = ["escanteios", "cartoes", "chutes"].includes(tema[0]);
-    const semDetalhe = precisaGols ? !(bH.jg + bA.jg) : precisaEst ? !(bH.je + bA.je) : false;
-    const lateral = (tid, jogos, ladoX, cls) => (tema[0] === "tipos" ? painelTipos(tid, jogos, ladoX, cls)
-      : tema[0] === "periodos" ? painelPeriodos(tid, jogos, ladoX, cls)
-      : precisaEst ? painelExtras(code, tid, jogos, ladoX, cls)
-      : tema[0] === "gols" ? distribuicaoGols(jogos, tid, ladoX, cls)
-      : listaLateral(code, tid, jogos, ladoX, tempo));
-    const botoesTempo = tema[0] === "tempos" ? `<div class="alternar" role="group" aria-label="Tempo">
-        <button type="button" data-tempo="0" aria-pressed="${!tempo}">Resumo dos tempos</button>
-        <button type="button" data-tempo="1" aria-pressed="${tempo === 1}">Só o placar do 1º tempo</button>
-        <button type="button" data-tempo="2" aria-pressed="${tempo === 2}">Só o placar do 2º tempo</button></div>` : "";
-    const nomeLado = (tid, ladoX) => `${h(nomeTime(tid))}${ladoX === "casa" ? " em casa" : ladoX === "fora" ? " fora" : ""}`;
-    return `<div class="num-grade">
-      <nav class="temas" aria-label="Temas">${TEMAS_NUM.map(([id, rot, dica]) => `<button type="button" data-temanum="${id}" aria-current="${id === tema[0]}"><span>${rot}</span><small>${dica}</small></button>`).join("")}</nav>
-      <section class="num-corpo">
-        <div class="num-cab"><h3>${tema[1]}</h3>${controlesRecorte()}</div>
-        ${botoesTempo}
-        <div class="cartao-r">
-          <div class="esp-nomes"><span class="c">${nomeLado(p.h, ladoH)} <small>${bH.j} jogos</small></span><span class="f"><small>${bA.j} jogos</small> ${nomeLado(p.a, ladoA)}</span></div>
-          ${semDetalhe ? `<div class="vazio vazio-curto">Ainda sem ${precisaEst ? "estatísticas" : "detalhe dos gols"} destes jogos. Elas vão sendo baixadas aos poucos nas atualizações.</div>` : tabelaEspelho(chaves, bH, bA)}
-          ${tema[0] === "chutes" ? blocoXg(code, p) : ""}
-          <p class="sub nota">${tema[0] === "tipos" ? "Porcentagem sobre os gols com a narração do lance; um gol pode ter mais de um tipo (ex.: de cabeça após escanteio). " : tema[0] === "periodos" ? "Porcentagem sobre os gols de cada time; acréscimos contam no fim de cada tempo. " : ""}${tempo ? `Cada jogo conta só pelo placar do ${tempo}º tempo. ` : ""}${encerrada(p) ? "Números de antes desta partida. " : ""}Barra maior = número maior.</p>
+    if (TABELAS_JOGO[aba]) {
+      const lado = estado.recorte === "total";
+      const ladoH = lado ? "total" : "casa", ladoA = lado ? "total" : "fora";
+      let jh = jogosAntes(code, p.h, p.d, ladoH), ja = jogosAntes(code, p.a, p.d, ladoA);
+      const tempo = aba === "tempos" ? (estado.tempo === 2 ? 2 : 1) : 0;
+      if (tempo) { jh = jogosDoTempo(jh, tempo); ja = jogosDoTempo(ja, tempo); }
+      const bH = M.bucketDeJogos(jh, p.h), bA = M.bucketDeJogos(ja, p.a);
+      const titulos = { inteiro: "Jogo inteiro", tempos: `${tempo}º tempo`, overs: "Overs", gtipos: "Tipos de gols", periodos: "Períodos dos gols", extras: "Extras" };
+      const semDetalhe = (aba === "gtipos" || aba === "periodos") ? !(bH.jg + bA.jg) : aba === "extras" ? !(bH.je + bA.je) : false;
+      const lateral = (tid, jogos, ladoX, cls) => (aba === "overs" ? distribuicaoGols(jogos, tid, ladoX, cls)
+        : aba === "extras" ? painelExtras(code, tid, jogos, ladoX, cls)
+        : aba === "periodos" ? painelPeriodos(tid, jogos, ladoX, cls)
+        : aba === "gtipos" ? painelTipos(tid, jogos, ladoX, cls)
+        : listaLateral(code, tid, jogos, ladoX, tempo));
+      const botoesTempo = tempo ? `<div class="tempo-botoes" role="group" aria-label="Tempo">
+          <button type="button" data-tempo="1" aria-pressed="${tempo === 1}">1º tempo</button>
+          <button type="button" data-tempo="2" aria-pressed="${tempo === 2}">2º tempo</button></div>` : "";
+      conteudo = `<div class="tres-colunas">
+        ${lateral(p.h, jh, ladoH, "c")}
+        <div class="centro-stats">
+          <div class="centro-cab"><h3>${titulos[aba]}</h3>
+            <div class="alternar" role="group" aria-label="Recorte">
+              <button type="button" data-recorte="lado" aria-pressed="${!lado}">Casa-Fora</button>
+              <button type="button" data-recorte="total" aria-pressed="${lado}">Total</button></div></div>
+          <div class="centro-nomes"><span class="c">${h(nomeTime(p.h))}</span><span class="f">${h(nomeTime(p.a))}</span></div>
+          ${semDetalhe ? `<div class="vazio vazio-curto">Ainda sem ${aba === "extras" ? "estatísticas" : "detalhe dos gols"} destes jogos. ${B5 ? "Elas vão sendo baixadas aos poucos nas atualizações." : "Disponível com a fonte principal de dados."}</div>` : tabelaCentral(tempo ? "tempo" : aba, bH, bA)}
+          ${aba === "extras" ? blocoXg(code, p) : ""}
+          ${botoesTempo}
+          <p class="sub nota">${aba === "gtipos" ? "Porcentagem sobre os gols com a narração do lance; um gol pode ter mais de um tipo (ex.: de cabeça após escanteio). " : aba === "periodos" ? "Porcentagem sobre os gols de cada time; acréscimos contam no fim de cada tempo. " : ""}${tempo ? `Cada jogo conta só pelo placar do ${tempo}º tempo. ` : ""}${fim ? "Números de antes desta partida. " : ""}${estado.ultimos ? "Considerando os últimos 5 jogos" : "Considerando todos os jogos"} ${lado ? "no total" : "do mandante em casa e do visitante fora"}.</p>
         </div>
-        <div class="laterais">${lateral(p.h, jh, ladoH, "c")}${lateral(p.a, ja, ladoA, "f")}</div>
-      </section>
-    </div>`;
-  }
-
-  // ---------- MERCADOS: projeção (chances, odds justas, odds das casas, placares) + como foi nos jogos (overs)
-  function abaMercados(code, p, pj) {
-    const ladoT = estado.recorte === "total";
-    const ladoH = ladoT ? "total" : "casa", ladoA = ladoT ? "total" : "fora";
-    const jh = jogosAntes(code, p.h, p.d, ladoH), ja = jogosAntes(code, p.a, p.d, ladoA);
-    const bH = M.bucketDeJogos(jh, p.h), bA = M.bucketDeJogos(ja, p.a);
-    return `<div class="mercados-pagina">
-      <section class="cartao-r"><h3 class="r-tit">Projeção do site</h3>${abaProjecoes(code, p, pj)}</section>
-      <section class="cartao-r">
-        <div class="num-cab"><h3>Como foi nos jogos</h3>${controlesRecorte()}</div>
-        <div class="esp-nomes"><span class="c">${h(nomeTime(p.h))}${ladoT ? "" : " em casa"} <small>${bH.j} jogos</small></span><span class="f"><small>${bA.j} jogos</small> ${h(nomeTime(p.a))}${ladoT ? "" : " fora"}</span></div>
-        ${tabelaEspelho(TABELAS_JOGO.overs, bH, bA)}
-      </section>
-      <div class="laterais">${distribuicaoGols(jh, p.h, ladoH, "c")}${distribuicaoGols(ja, p.a, ladoA, "f")}</div>
-    </div>`;
+        ${lateral(p.a, ja, ladoA, "f")}
+      </div>`;
+    } else if (aba === "aovivo") {
+      conteudo = abaAoVivo(p, code);
+    } else if (aba === "escalacoes") {
+      conteudo = abaEscalacoes(p);
+    } else if (aba === "proj") {
+      conteudo = abaProjecoes(code, p, pj);
+    } else if (aba === "tabela") {
+      conteudo = abaClassificacao(code, p);
+    } else {
+      conteudo = abaRanking(code, p);
+    }
+    return `${cab}${semPar}${abas}<div class="aba-conteudo">${conteudo}</div>`;
   }
 
   function abaRanking(code, p) {
@@ -1915,68 +1736,14 @@
           <td class="ocultar-celular">${l.gp}</td><td class="ocultar-celular">${l.gc}</td><td>${l.sg > 0 ? "+" : ""}${l.sg}</td>
           <td class="esq ocultar-celular">${forma(formaDe(l.t))}</td></tr>`).join("")}</tbody></table></div>`).join("");
 
-    app.innerHTML = `${cabLiga(code, "tabela")}
-      <div class="liga-grade"><section class="painel">
+    app.innerHTML = `${chipsComp("classificacao", code)}
+      <section class="painel" style="margin-top:12px">
         <div class="painel-cab"><h2>Classificação · ${h(nomeComp(code))}</h2>
           <div class="alternar" role="group" aria-label="Recorte da tabela">
             ${[["TOTAL", "Geral"], ["HOME", "Em casa"], ["AWAY", "Fora"]].map(([k, r]) => `<button type="button" data-tabela="${k}" aria-pressed="${tipo === k}">${r}</button>`).join("")}
           </div></div>
         <div class="painel-corpo">${corpo}
           ${origem === "calc" ? `<p class="sub">Tabela calculada a partir dos jogos encerrados.</p>` : ""}</div>
-      </section>${asideLiga(code)}</div>`;
-  }
-
-  // lateral da tabela: artilharia (top 5) e quem está em alta no Power Ranking
-  function asideLiga(code) {
-    const art = (DADOS.competicoes[code].artilharia || []).slice(0, 5);
-    const r = M.ranking(preps[code], 5).filter((x) => x.var5 != null).sort((a, b) => b.var5 - a.var5);
-    const alta = r.slice(0, 3).concat(r.length > 4 ? r.slice(-1) : []);
-    return `<aside class="liga-lado">
-      ${art.length ? `<section class="painel"><div class="painel-cab"><h3>Artilharia</h3></div><div class="painel-corpo"><ul class="lista-mini">${art.map((x, i) => `<li><span class="data">${i + 1}</span>${escudo(x.t)}<span class="nm-art"><b>${h(x.nome)}</b> <span class="sub">${h(nomeTime(x.t))}</span></span><span class="res"><b>${x.gols ?? "–"}</b></span></li>`).join("")}</ul>
-        <button class="link" type="button" data-ir="ligas/${code}/artilharia">Ver artilharia completa</button></div></section>` : ""}
-      ${alta.length ? `<section class="painel"><div class="painel-cab"><h3>Em alta no Power Ranking</h3><span class="sub">últimos 5 jogos</span></div><div class="painel-corpo"><ul class="lista-mini alta">${alta.map((x) => `<li>${escudo(x.t)}<button type="button" data-ir="time/${code}/${x.t}">${h(nomeTime(x.t))}</button><span class="res"><span class="sub">${Math.round(x.elo)}</span> <b class="${x.var5 >= 0 ? "var-mais" : "var-menos"}">${x.var5 >= 0 ? "+" : "−"}${Math.abs(Math.round(x.var5))}</b></span></li>`).join("")}</ul>
-        <button class="link" type="button" data-ir="ligas/${code}/ranking">Ranking completo (ataque, defesa, evolução)</button></div></section>` : ""}
-    </aside>`;
-  }
-
-  // ------------------------------------------------------------ RODADAS (beta 6): jogos da liga rodada a rodada
-  estado.rodadaDe = {};
-  function gruposDeRodada(code) {
-    const ps = preps[code].partidas.filter((p) => p.h && p.a);
-    const semana = (iso) => { const d = new Date(iso); const seg = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)); return chaveDia(seg); };
-    const g = new Map();
-    for (const p of ps) {
-      const k = p.r ? "r" + String(p.r).padStart(3, "0") : "s" + semana(p.d) + "|" + (p.fn || p.f || "");
-      if (!g.has(k)) g.set(k, []);
-      g.get(k).push(p);
-    }
-    const lista = [...g.entries()].map(([k, l]) => {
-      l.sort((a, b) => (a.d < b.d ? -1 : 1));
-      const p0 = l[0];
-      const titulo = p0.r ? `Rodada ${p0.r}` : (traduzFase(p0.fn) || FASES[p0.f] || "Jogos") + ` · semana de ${dataCurta(p0.d)}`;
-      return { k, titulo, l, ini: p0.d };
-    });
-    lista.sort((a, b) => (a.k[0] === "r" && b.k[0] === "r" ? (a.k < b.k ? -1 : 1) : a.ini < b.ini ? -1 : 1));
-    return lista;
-  }
-  function telaRodadas(code) {
-    code = comps.includes(code) ? code : estado.comp;
-    estado.comp = code; guardar("comp", code);
-    const gr = gruposDeRodada(code);
-    if (!gr.length) { app.innerHTML = `${cabLiga(code, "rodadas")}<div class="painel"><div class="vazio"><strong>Sem jogos</strong></div></div>`; return; }
-    let i = estado.rodadaDe[code];
-    if (i == null) { i = gr.findIndex((x) => x.l.some((p) => !encerrada(p) && !["CANCELLED", "POSTPONED"].includes(p.s))); if (i < 0) i = gr.length - 1; }
-    i = Math.max(0, Math.min(gr.length - 1, i));
-    estado.rodadaDe[code] = i;
-    const r = gr[i];
-    app.innerHTML = `${cabLiga(code, "rodadas")}
-      <section class="painel rodadas">
-        <div class="rodada-nav">
-          <button class="botao-q icone" type="button" data-rodada="-1" aria-label="Rodada anterior" ${i === 0 ? "disabled" : ""}>‹</button>
-          <h2>${h(r.titulo)}</h2>
-          <button class="botao-q icone" type="button" data-rodada="1" aria-label="Próxima rodada" ${i === gr.length - 1 ? "disabled" : ""}>›</button>
-          <span class="sub">${i + 1} de ${gr.length}</span></div>
-        <div class="jl-grupo">${cabGrupo(code, r.l.length).replace(/data-recolher="[^"]*"/, "disabled")}${r.l.map((p) => linhaJogo(code, p).replace('<span class="jl-st">', `<span class="jl-st"><small>${h(DIA_CURTO(p.d))}</small>`)).join("")}</div>
       </section>`;
   }
 
@@ -2011,7 +1778,7 @@
           return `<li>${estrelaTime(id, 16)}${escudo(id)}<button type="button" data-ir="time/${c}/${id}"><b>${h(nomeLongo(id))}</b> <span class="sub">${h(nomeComp(c))}</span></button>
             <span class="res">${prox ? `<button type="button" class="link" data-ir="jogo/${prox.code}/${prox.p.i}">${dataCurta(prox.p.d)} ${hora(prox.p.d)} · ${String(prox.p.h) === String(id) ? "x" : "em"} ${h(nomeTime(String(prox.p.h) === String(id) ? prox.p.a : prox.p.h))}</button>` : '<span class="sub">sem jogo marcado</span>'}</span></li>`;
         }).join("")}</ul></section>` : "";
-    app.innerHTML = `${cabLiga(code, "times")}${blocoFav}
+    app.innerHTML = `${chipsComp("times", code)}${blocoFav}
       <section class="painel" style="margin-top:12px">
         <div class="painel-cab"><h2>${estrelaLiga(code, 18)} Times · ${h(nomeComp(code))}</h2><span class="sub">${ids.length} times · toque na estrela para favoritar</span></div>
         <div class="grade-times">${ids.map((id) => cartao(id, code)).join("")}</div>
@@ -2053,7 +1820,7 @@
     const encerrados = jogos.filter(encerrada).reverse();
     const proximos = jogos.filter((p) => !encerrada(p) && !["CANCELLED", "POSTPONED"].includes(p.s));
 
-    app.innerHTML = `${cabLiga(code, "time")}
+    app.innerHTML = `${chipsComp("times", code)}
       <section class="painel" style="margin-top:12px">
         <div class="time-cab">${escudo(tid, "esc esc-g")}
           <div><h1 class="titulo-fav">${h(nomeLongo(tid))} ${estrelaTime(tid, 22)}</h1><div class="sub">${h(nomeComp(code))}</div><div style="margin-top:6px">${forma(mg.forma)}</div></div>
@@ -2120,9 +1887,9 @@
     const maxA = Math.max(...r.map((x) => Math.max(x.ataque || 0, x.defesa || 0)), 1.5);
     const destaque = (k) => (ordem[0] === k || (k === "evol" && ordem[0] === "queda") ? "ordenada" : "");
     const th = (k, rot, extra = "", title = "") => `<th class="${extra} ${destaque(k)}" ${title ? `title="${title}"` : ""}><button type="button" class="th-ordenar" data-rkordem="${k === "evol" && ordem[0] === "evol" ? "queda" : k}">${rot}</button></th>`;
-    const chipsTodas = `<button class="chip" type="button" data-ir="ligas/todas/ranking" aria-pressed="${todas}">Todas as ligas</button>`;
+    const chipsTodas = `<button class="chip" type="button" data-ir="ranking/todas" aria-pressed="${todas}">Todas as ligas</button>`;
     const contagem = r.length === totalTimes ? `${r.length} times` : `${r.length} de ${totalTimes} times`;
-    app.innerHTML = `${cabLiga(todas ? "todas" : code, "ranking", chipsTodas)}
+    app.innerHTML = `${chipsComp("ranking", todas ? "" : code, chipsTodas)}
       <section class="painel" style="margin-top:12px">
         <div class="painel-cab"><h2>Power Ranking · ${todas ? "todas as ligas" : h(nomeComp(code))}</h2>
           <span class="sub">${todas ? "Com todas as ligas juntas, compare a evolução e a forma. O Elo só vale para comparar times da mesma liga." : "Elo calculado com os jogos desta competição: todos começam com 1500, vencer fora e por mais gols vale mais."}</span></div>
@@ -2164,7 +1931,7 @@
     code = comps.includes(code) ? code : estado.comp;
     estado.comp = code; guardar("comp", code);
     const lista = DADOS.competicoes[code].artilharia || [];
-    app.innerHTML = `${cabLiga(code, "artilharia")}
+    app.innerHTML = `${chipsComp("artilharia", code)}
       <section class="painel" style="margin-top:12px">
         <div class="painel-cab"><h2>Artilharia · ${h(nomeComp(code))}</h2></div>
         <div class="painel-corpo tabela-rolagem">${lista.length ? `<table class="dados">
@@ -2214,8 +1981,7 @@
         </div></div>`;
     }).join("");
 
-    app.innerHTML = `<div class="scanner-cab"><h1>Scanner</h1><p class="sub">Monte uma regra: o site mostra os próximos jogos que passam nela e como ela teria ido nos jogos que já aconteceram.</p></div>
-      <div class="filtros-grade">
+    app.innerHTML = `<div class="filtros-grade">
       <section class="painel" aria-label="Montar filtro">
         <div class="painel-cab"><h2>Montar filtro</h2></div>
         <div class="painel-corpo">
@@ -2232,7 +1998,7 @@
           <div class="campo"><span class="rotulo">Condições (todas precisam ser verdadeiras)</span>${conds || '<p class="sub">Sem condições: entram todos os jogos.</p>'}
             <button class="botao secundario" type="button" id="f-add">Adicionar condição</button></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="botao" type="button" id="f-rodar">Escanear</button>
+            <button class="botao" type="button" id="f-rodar">Rodar backtest</button>
             <button class="botao secundario" type="button" id="f-salvar">Salvar filtro</button>
           </div>
           <h3 style="margin:18px 0 8px">Filtros prontos e salvos</h3>
@@ -2281,12 +2047,7 @@
       <td class="ocultar-celular">${mercado.prob ? fProb(mercado.prob(e.proj)) : "–"}</td>
       <td>${e.green ? '<span class="ok">✓</span>' : '<span class="nok">✕</span>'}</td></tr>`).join("");
     alvo.innerHTML = `
-      <div class="painel scanner-hoje"><div class="painel-cab"><h3>Jogos que passam no filtro</h3><span class="sub">${prox.length} jogo(s)</span></div>
-        <div class="painel-corpo">${prox.length ? `<ul class="lista-mini">${prox.slice(0, 30).map((x) => `<li><span class="data">${dataCurta(x.p.d)} ${hora(x.p.d)}</span>${seloComp(x.comp)}
-          <button type="button" data-ir="jogo/${x.comp}/${x.p.i}">${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button>
-          <span class="res">${mercado.prob ? fProb(mercado.prob(x.proj)) + ` <span class="sub">odd ${fOdd(mercado.prob(x.proj))}</span>` : ""}</span></li>`).join("")}</ul>`
-          : `<p class="sub">Nenhum jogo agendado se encaixa agora.</p>`}</div></div>
-      <div class="painel"><div class="painel-cab"><h2>Backtest · ${h(filtro.nome || "Filtro sem nome")}</h2><span class="sub">${h(mercado.nome)} · ${compsDoFiltro().map(nomeComp).join(", ")}</span></div>
+      <div class="painel"><div class="painel-cab"><h2>${h(filtro.nome || "Filtro sem nome")}</h2><span class="sub">${h(mercado.nome)} · ${compsDoFiltro().map(nomeComp).join(", ")}</span></div>
         <div class="painel-corpo">
           ${r.n ? `<div class="resumo">
             <div><b>${r.n}</b><span>entradas</span></div>
@@ -2300,6 +2061,11 @@
           <p class="sub">Saldo em unidades apostando 1 unidade por entrada na odd média informada. Odd mínima = 1 ÷ taxa de acerto.</p>`
           : `<div class="vazio"><strong>Nenhum jogo passou no filtro</strong>Afrouxe alguma condição ou diminua o mínimo de jogos.</div>`}
         </div></div>
+      <div class="painel"><div class="painel-cab"><h3>Próximos jogos que passam no filtro</h3><span class="sub">${prox.length} jogo(s)</span></div>
+        <div class="painel-corpo">${prox.length ? `<ul class="lista-mini">${prox.slice(0, 30).map((x) => `<li><span class="data">${dataCurta(x.p.d)} ${hora(x.p.d)}</span>${seloComp(x.comp)}
+          <button type="button" data-ir="jogo/${x.comp}/${x.p.i}">${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button>
+          <span class="res">${mercado.prob ? fProb(mercado.prob(x.proj)) + ` <span class="sub">odd ${fOdd(mercado.prob(x.proj))}</span>` : ""}</span></li>`).join("")}</ul>`
+          : `<p class="sub">Nenhum jogo agendado se encaixa agora.</p>`}</div></div>
       ${r.n ? `<div class="painel"><div class="painel-cab"><h3>Entradas do backtest</h3><span class="sub">mais recentes primeiro</span></div>
         <div class="painel-corpo tabela-rolagem"><table class="dados"><thead><tr><th class="esq">Data</th><th class="esq"></th><th class="esq">Jogo</th><th>Placar</th>
           <th class="ocultar-celular">Projeção</th><th>Resultado</th></tr></thead><tbody id="bt-linhas">${linhasEntradas(false)}</tbody></table>
@@ -2324,7 +2090,7 @@
 
   // ------------------------------------------------------------ eventos
   app.addEventListener("click", (ev) => {
-    const alvo = ev.target.closest("[data-temanum],[data-rodada],[data-pvordem],[data-pvalerta],[data-tempo],#abrir-filtros,[data-fquem],#l-add,[data-lremover],[data-lpreset],[data-lsalvo],[data-lapagar],#l-salvar,#l-limpar,[data-rkordem],[data-rkn],[data-rkfiltro],[data-favtime],[data-favliga],[data-subclass],[data-fav],[data-ir],[data-dia],[data-passo],[data-recolher],[data-ultimos],[data-recorte],[data-abajogo],[data-voltar],#ocultar,#so-fav,#recolher,[data-tabela],[data-fcomp],[data-remover],[data-preset],[data-salvo],[data-apagar],#f-add,#f-rodar,#f-salvar");
+    const alvo = ev.target.closest("[data-tempo],#abrir-filtros,[data-fquem],#l-add,[data-lremover],[data-lpreset],[data-lsalvo],[data-lapagar],#l-salvar,#l-limpar,[data-rkordem],[data-rkn],[data-rkfiltro],[data-favtime],[data-favliga],[data-subclass],[data-fav],[data-ir],[data-dia],[data-passo],[data-recolher],[data-ultimos],[data-recorte],[data-abajogo],[data-voltar],#ocultar,#so-fav,#recolher,[data-tabela],[data-fcomp],[data-remover],[data-preset],[data-salvo],[data-apagar],#f-add,#f-rodar,#f-salvar");
     if (!alvo) return;
     const ds = alvo.dataset;
     const manterRolagem = (fn) => { const y = window.scrollY; fn(); window.scrollTo(0, y); };
@@ -2337,15 +2103,6 @@
       return;
     }
     if (ds.tempo) { estado.tempo = Number(ds.tempo); manterRolagem(render); return; }
-    if (ds.temanum) {
-      estado.temaNum = ds.temanum; guardar("tema_num", ds.temanum);
-      const exl = { escanteios: "esc", cartoes: "cart", chutes: "ch" }[ds.temanum];
-      if (exl) { estado.exLat = exl; guardar("ex_lat", exl); }
-      manterRolagem(render); return;
-    }
-    if (ds.rodada) { const code = estado.comp; estado.rodadaDe[code] = (estado.rodadaDe[code] || 0) + Number(ds.rodada); manterRolagem(render); return; }
-    if (ds.pvordem) { estado.pvOrdem = ds.pvordem; guardar("pv_ordem", ds.pvordem); manterRolagem(render); return; }
-    if (ds.pvalerta != null) { estado.pvAlerta = !estado.pvAlerta; guardar("pv_alerta", estado.pvAlerta); manterRolagem(render); return; }
     if (alvo.id === "abrir-filtros") {
       estado.painelFiltro = !estado.painelFiltro;
       const pf = document.getElementById("painel-filtros");
@@ -2461,11 +2218,10 @@
   function render() {
     const partes = decodeURIComponent(location.hash.slice(1)).split("/");
     const aba = partes[0] || "jogos";
-    // beta 6: 4 seções no menu (Hoje, Ao vivo, Ligas, Scanner); rotas antigas continuam funcionando
-    const MENU = { jogo: "jogos", jogos: "jogos", aovivo: "aovivo", ligas: "ligas", time: "ligas", times: "ligas", classificacao: "ligas", ranking: "ligas", artilharia: "ligas", rodadas: "ligas", scanner: "scanner", filtros: "scanner" };
-    const abaMenu = MENU[aba] || "jogos";
-    document.querySelectorAll(".nav-sec a").forEach((a) => a.toggleAttribute("aria-current", false));
-    document.querySelectorAll(`.nav-sec a[data-aba="${abaMenu}"]`).forEach((a) => a.setAttribute("aria-current", "page"));
+    const abaMenu = aba === "jogo" ? "jogos" : aba === "time" ? "times" : aba;
+    document.querySelectorAll("#abas a").forEach((a) => a.toggleAttribute("aria-current", false));
+    const link = document.querySelector(`#abas a[data-aba="${abaMenu}"]`);
+    if (link) link.setAttribute("aria-current", "page");
 
     if (!DADOS || !comps.length) {
       app.innerHTML = `<div class="painel"><div class="vazio"><strong>Ainda não há dados</strong>
@@ -2476,41 +2232,29 @@
       case "jogo": if (MODO_JANELA) telaJanela(partes[1], partes[2]); else telaJogo(partes[1], partes[2]); break;
       case "jogos": case "": estado.sel = null; telaJogos(); break;
       case "aovivo": telaPainelVivo(); break;
-      case "ligas": {
-        const sub = partes[2] || "tabela", code = partes[1] || estado.comp;
-        if (sub === "ranking") telaRanking(code);
-        else if (sub === "artilharia") telaArtilharia(code);
-        else if (sub === "times") telaTimes(code);
-        else if (sub === "rodadas") telaRodadas(code);
-        else telaClassificacao(code);
-        break;
-      }
       case "classificacao": telaClassificacao(partes[1]); break;
       case "times": telaTimes(partes[1]); break;
       case "time": telaTime(partes[1], partes[2]); break;
       case "ranking": telaRanking(partes[1]); break;
       case "artilharia": telaArtilharia(partes[1]); break;
-      case "rodadas": telaRodadas(partes[1]); break;
-      case "scanner": case "filtros": telaFiltros(); break;
+      case "filtros": estado.painelFiltro = true; telaJogos(); break; // backtest desligado por enquanto
       default: telaJogos();
     }
     contadorVivo();
     const chave = aba + "/" + (partes[1] || "") + "/" + (partes[2] || "");
-    if (ultimaAba !== chave) window.scrollTo(0, 0);
+    const noPainel = aba === "jogo" && estado.sel;
+    if (ultimaAba !== chave && !noPainel && !(aba === "jogos" && /^jogo\//.test(ultimaAba || "") && ladoALado())) window.scrollTo(0, 0);
     ultimaAba = chave;
     document.querySelectorAll("tr[data-ir]").forEach((tr) => tr.setAttribute("tabindex", "0"));
   }
   window.addEventListener("hashchange", render);
   // número de jogos rolando na aba "Ao vivo" do topo
   function contadorVivo() {
+    const el = document.getElementById("qtd-vivo");
+    if (!el) return;
     const n = comps.length ? todasPartidas().filter((x) => aoVivo(x.p)).length : 0;
-    for (const id of ["qtd-vivo", "qtd-vivo2"]) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      el.textContent = n ? String(n) : "";
-      el.hidden = !n;
-    }
-    document.documentElement.classList.toggle("tem-vivo", n > 0);
+    el.textContent = n ? String(n) : "";
+    el.hidden = !n;
   }
 
   // V4: contas e ao vivo
