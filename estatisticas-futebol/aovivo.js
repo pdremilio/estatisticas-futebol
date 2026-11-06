@@ -1,4 +1,4 @@
-/* ScanBall — modo ao vivo com dados públicos da ESPN (sem chave, sem servidor).
+/* ScanBall — modo ao vivo com dados públicos da ESPN (sem chave, sem servidor). PÁGINA DE TESTE.
  * O navegador de quem abre o site busca:
  *   - o placar das ligas com jogo na janela (a cada 20 s): minuto, placar e situação na lista de jogos;
  *   - o detalhe do jogo aberto: estatísticas, lances, escalações e a narração lance a lance,
@@ -41,8 +41,9 @@
   const elencos = new Map(); // "liga:idTime" -> { em, jog: {idAtleta: números}, temporada }
 
   // a ESPN organiza o placar pelo dia no horário dos EUA (Nova York): jogo às 21h30 de Brasília ainda é "hoje" lá
-  const diaESPN = (iso) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" })
-    .format(new Date(iso)).replace(/-/g, "");
+  // (o formatador é criado uma vez só: criar um por jogo a cada 20 s pesava no celular)
+  const FMT_NY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
+  const diaESPN = (iso) => FMT_NY.format(new Date(iso)).replace(/-/g, "");
 
   // jogo na janela: de 75 min antes até 3h30 depois do início; se a football-data ainda não deu o jogo como
   // encerrado, continua acompanhando por até 12 h (até o placar final chegar)
@@ -309,6 +310,137 @@
     pr.atual = i != null ? i : Math.min(Math.max(pr.ultimo, 0), ultimo);
   }
 
+  // ---------- narração do 365Scores no gráfico e na lista
+  // O 365Scores publica a MESMA narração da ESPN (mesmo texto, em inglês com lang=1), uns 30–60 s antes.
+  // Medido em 05/11/2026 (Cruzeiro x Bahia): escanteio registrado 00:51:30 → 365 +68 s, ESPN +107 s.
+  // O site junta as duas: o que a ESPN já tem fica da ESPN (minuto exato dos acréscimos); o que só o 365
+  // tem entra na hora. Quando a ESPN publica o mesmo lance, ele é trocado sem duplicar. Se o 365 falhar, fica só a ESPN.
+  const resumos = new Map(); // "code:idESPN" -> { com: narração da ESPN, ladoDe }
+  const pbp365 = new Map();  // "code:idESPN" -> { msgs, assin }
+  const chaveJogo = (p) => p.vv.espn.code + ":" + p.vv.espn.id;
+  const textoChave = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const outro = (l) => (l === "h" ? "a" : l === "a" ? "h" : null);
+  // tipo do lance (nomes do 365Scores) -> tipo da ESPN, para usar as mesmas regras
+  function tipo365(nome) {
+    const n = String(nome || "").toLowerCase().trim();
+    if (n === "goal") return "goal";
+    if (n === "own goal") return "own-goal";
+    if (/penalty/.test(n)) return /goal|scored/.test(n) ? "penalty---scored" : /saved/.test(n) ? "penalty---saved" : /miss/.test(n) ? "penalty---missed" : null;
+    if (n === "attempt saved") return "shot-on-target";
+    if (n === "attempt blocked") return "shot-blocked";
+    if (n === "miss") return "shot-off-target";
+    if (/post|woodwork|crossbar/.test(n)) return "shot-hit-woodwork";
+    if (n === "corner") return "corner-awarded";
+    if (n === "offside") return "offside";
+    if (/second ?yellow/.test(n)) return "yellow-red-card";
+    if (n === "yellow card") return "yellow-card";
+    if (n === "red card") return "red-card";
+    if (n === "substitution") return "substitution";
+    if (n === "free kick won" || n === "free kick lost") return "foul";
+    return null;
+  }
+  // de que time é o lance, pelo texto ("Corner, Bahia. Conceded by..." / "Fulano (Bahia) ...")
+  function ladoDoTexto(txt, p) {
+    let m = txt.match(/^(?:Corner|Offside),\s*(.+?)\.\s+(?:Conceded by|.+ is caught offside)/i) || txt.match(/^Substitution,\s*(.+?)\.\s+.+ replaces /i);
+    let nome = m && m[1], contra = false;
+    if (!nome && (m = txt.match(/^Own Goal by .+?,\s*(.+?)\.\s/i))) { nome = m[1]; contra = true; }
+    if (!nome && (m = txt.match(/\(([^()]+)\)/))) nome = m[1];
+    if (!nome) return null;
+    const T = dados.times || {}, n365 = p.vv.n365 || [];
+    const tk = tokens(nome);
+    const sh = parecido(tk, tokens([(T[p.h] || {}).n, (T[p.h] || {}).c, (T[p.h] || {}).t, n365[0]].join(" ")));
+    const sa = parecido(tk, tokens([(T[p.a] || {}).n, (T[p.a] || {}).c, (T[p.a] || {}).t, n365[1]].join(" ")));
+    const l = sh > sa ? "h" : sa > sh ? "a" : null;
+    return l ? { l, contra } : null;
+  }
+  // mensagem do 365Scores -> item no formato da narração da ESPN
+  function converter365(m, p) {
+    const txt = String(m.Comment || "");
+    const t = tipo365(m.TypeName);
+    if (!t || !txt || m.Timeline == null || m.Timeline === "") return null;
+    const per = Number(m.Period) || null;
+    const ad = String(m.TimeLineSecondaryText || "").match(/\d+/);
+    const tempo = String(m.Timeline).replace(/'/g, "") + "'" + (ad ? "+" + ad[0] + "'" : "");
+    const dt = ladoDoTexto(txt, p);
+    let l = dt ? dt.l : m.CompetitorNum === 1 ? "h" : m.CompetitorNum === 2 ? "a" : null;
+    if (!l) return null;
+    // mesmas convenções da ESPN: gol contra é do time beneficiado; "Fulano (Time) wins a free kick" é do time que fez a falta
+    if (t === "own-goal" && (!dt || dt.contra)) l = outro(l);
+    if (t === "foul" && /wins a free kick/i.test(txt)) l = outro(l);
+    let participants;
+    if (t === "substitution") {
+      const s = txt.match(/\.\s+(.+?) replaces (.+?)\.?\s*$/);
+      const pl = m.Players || [];
+      const ent = s ? s[1] : (pl[0] || {}).PlayerName, sai = s ? s[2] : (pl[1] || {}).PlayerName;
+      participants = [ent, sai].filter(Boolean).map((n) => ({ athlete: { displayName: n } }));
+    }
+    return {
+      _id: Number(m.Id) || 0, _365: true, text: txt, sequence: Number(m.Id) || 0, time: { displayValue: tempo },
+      play: { type: { type: t }, team: { lado: l }, period: { number: per }, clock: { displayValue: tempo }, participants },
+    };
+  }
+  // identidade do lance para achar o mesmo nas duas fontes: texto, e (se o texto mudou um pouco) tipo + lado + jogador.
+  // O minuto pode diferir em 1 (ex.: 365 "26", ESPN "27'"), então ele é comparado com folga.
+  function identidade(c, ladoDe) {
+    const pl = c.play || {};
+    let t = (pl.type && pl.type.type) || "";
+    if (/^goal(---|$)|^own-goal$|^penalty---scored$/.test(t)) t = "gol";
+    const m = String((c.time && c.time.displayValue) || "").match(/\d+/);
+    return {
+      tx: textoChave(c.text), min: m ? Number(m[0]) : null, per: (pl.period && pl.period.number) || null,
+      k: t ? [t, ladoDe(pl.team) || "", textoChave(jogadorDe(c.text))].join("|") : "",
+    };
+  }
+  const mesmoTempo = (a, b) => (a.per == null || b.per == null || a.per === b.per) && (a.min == null || b.min == null || Math.abs(a.min - b.min) <= 1);
+  // lances do 365Scores que a ESPN ainda não publicou
+  function soNo365(p, msgs, res) {
+    const ladoE = res ? res.ladoDe : (t) => (t && t.lado) || null;
+    const ladoC = (t) => (t && t.lado) || null;
+    let maxSeq = 0;
+    const espn = ((res && res.com) || []).map((c) => {
+      const s = Number(c.sequence) || 0;
+      maxSeq = Math.max(maxSeq, s);
+      return Object.assign(identidade(c, ladoE), { s, usado: false });
+    });
+    const conv = msgs.map((m) => converter365(m, p)).filter(Boolean).sort((a, b) => a._id - b._id)
+      .map((c) => ({ c, id: identidade(c, ladoC) }));
+    const achar = (x, campo) => espn.find((e) => !e.usado && e[campo] && e[campo] === x[campo] && mesmoTempo(e, x));
+    // 1º: mesmo texto (o caso normal); 2º: mesmo tipo + lado + jogador
+    let desloc = null;
+    const sobra = [];
+    for (const o of conv) {
+      const e = achar(o.id, "tx");
+      if (e) { e.usado = true; desloc = e.s - o.c._id; } else sobra.push(o);
+    }
+    const novos = [];
+    for (const o of sobra) {
+      const e = achar(o.id, "k");
+      if (e) { e.usado = true; continue; }
+      o.c.sequence = desloc != null ? o.c._id + desloc : maxSeq + o.c._id;
+      novos.push(o.c);
+    }
+    return novos;
+  }
+  function montarMisturado(p) {
+    const ch = chaveJogo(p), res = resumos.get(ch), pb = pbp365.get(ch);
+    const extra = pb ? soNo365(p, pb.msgs, res) : [];
+    const r = { commentary: ((res && res.com) || []).concat(extra) };
+    const ladoDe = res ? res.ladoDe : (t) => (t && t.lado) || null;
+    p.vv.lances365 = extra.length;
+    return { pr: montarPressao(r, ladoDe, p.vv), lances: montarLances(r, ladoDe) };
+  }
+  // chegou narração nova do 365Scores: refaz gráfico e lista sem esperar a ESPN
+  function aplicarMistura(p) {
+    const vv = p.vv;
+    const sig = () => JSON.stringify([vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.lances && vv.lances.length && vv.lances[vv.lances.length - 1].seq]);
+    const antes = sig();
+    const { pr, lances } = montarMisturado(p);
+    if (!pr && !vv.pr) return false;
+    vv.pr = pr; vv.lances = lances;
+    if (pr) recalcularAtual(p);
+    return antes !== sig();
+  }
+
   // ---------- detalhe do jogo
   const MAPA_EST = { possessionPct: "posse", totalShots: "chutes", shotsOnTarget: "alvo", wonCorners: "esc", foulsCommitted: "faltas",
     yellowCards: "amarelos", redCards: "vermelhos", offsides: "imped", saves: "defesas", totalPasses: "passes" };
@@ -320,7 +452,8 @@
       const l = c.homeAway === "home" ? "h" : "a";
       lado[c.team.id] = l; lado[c.team.displayName] = l; tid[l] = c.team.id;
     }
-    const ladoDe = (t) => (t ? lado[t.id] || lado[t.displayName] : null);
+    // t.lado: lances convertidos da narração do 365Scores já vêm com o lado
+    const ladoDe = (t) => (t ? t.lado || lado[t.id] || lado[t.displayName] : null);
     const vv = (p.vv = p.vv || {});
     vv.tid = tid;
     if (comp && comp.status) {
@@ -382,9 +515,10 @@
       };
     }
 
-    const pr = montarPressao(r, ladoDe, vv);
-    const lances = montarLances(r, ladoDe);
-    const antes = JSON.stringify([vv.ev, vv.es, vv.esc && Object.keys(vv.esc), vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.clk, vv.lances && vv.lances.length && vv.lances[vv.lances.length - 1].seq]);
+    // gráfico e lista: narração da ESPN + lances que o 365Scores já publicou e a ESPN ainda não
+    resumos.set(chaveJogo(p), { com: r.commentary || [], ladoDe });
+    const { pr, lances } = montarMisturado(p);
+    const antes =JSON.stringify([vv.ev, vv.es, vv.esc && Object.keys(vv.esc), vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.clk, vv.lances && vv.lances.length && vv.lances[vv.lances.length - 1].seq]);
     vv.ev = ev; vv.es = es; vv.esc = esc; vv.pr = pr; vv.lances = lances; vv.emDet = new Date().toISOString();
     if (pr) recalcularAtual(p);
     if (temGol1T || (p.s === "IN_PLAY" && vv.per >= 2) || p.s === "FINISHED") { p.hh = hh; p.ha = ha; }
@@ -422,8 +556,10 @@
         // se a busca falhar, tenta de novo em 1 minuto (sem apagar o que já tinha)
         e = j ? lerElenco(j) : Object.assign(e && e.jog ? e : { jog: {}, temporada: "" }, { em: Date.now() - ELENCO_VALIDADE + 60e3, buscando: false });
         elencos.set(chave, e);
-        if (!j && p.vv.elenco && p.vv.elenco[l] && Object.keys(p.vv.elenco[l].jog).length) continue;
+        if (!j && p.vv.elenco && p.vv.elenco[l] && Object.keys(p.vv.elenco[l].jog || {}).length) continue;
       }
+      // outra busca deste elenco ainda está no meio do caminho: espera ela terminar
+      if (!e || !e.jog) continue;
       p.vv.elenco = p.vv.elenco || {};
       const atual = p.vv.elenco[l];
       if (atual !== e && !(atual && Object.keys(atual.jog || {}).length && !Object.keys(e.jog || {}).length)) { p.vv.elenco[l] = e; mudou = true; }
@@ -513,6 +649,138 @@
     return lerDetalhe(r, p);
   }
   // painel ao vivo: detalhe de todos os jogos rolando (e dos que acabaram de terminar, uma vez)
+  // ---------- 365Scores: ataques, xG e estatísticas ao vivo (atualiza a cada ~6 s)
+  // API pública do app 365Scores (sem chave, em português). Testada em 05/11/2026: o contador de ataques
+  // muda em segundos. Ela dá o TOTAL de ataques; o site registra quantos entraram em cada minuto enquanto
+  // o jogo está aberto (e guarda na sessão, para não perder ao recarregar). Se falhar, fica tudo como antes (ESPN).
+  const S365 = "https://webws.365scores.com/web/";
+  const Q365 = "appTypeId=5&langId=31&timezoneName=America/Sao_Paulo&userCountryId=21";
+  const CICLO_365 = 6000;
+  let lista365 = null, lista365Em = 0;
+  const par365 = new Map(); // "code:idESPN" -> id do jogo no 365Scores (0 = não achou)
+  async function jogos365() {
+    if (lista365 && Date.now() - lista365Em < 90000) return lista365;
+    const r = await buscarJSON(`${S365}games/current/?${Q365}&sports=1`);
+    if (r && r.games) { lista365 = r.games; lista365Em = Date.now(); }
+    return lista365;
+  }
+  async function idDo365(p) {
+    const ch = p.vv.espn.code + ":" + p.vv.espn.id;
+    if (par365.has(ch)) return par365.get(ch);
+    const lista = await jogos365();
+    if (!lista) return 0;
+    const T = dados.times || {}, nome = (id) => [(T[id] || {}).n, (T[id] || {}).c, (T[id] || {}).t].join(" ");
+    const th = tokens(nome(p.h)), ta = tokens(nome(p.a)), quando = Date.parse(p.d);
+    let melhor = 0, nota = 0;
+    for (const g of lista) {
+      const dif = Math.abs(Date.parse(g.startTime) - quando);
+      if (!(dif <= 3 * 3600e3)) continue;
+      const hc = g.homeCompetitor || {}, ac = g.awayCompetitor || {};
+      const sh = parecido(th, tokens(hc.name + " " + (hc.shortName || "") + " " + (hc.symbolicName || "")));
+      const sa = parecido(ta, tokens(ac.name + " " + (ac.shortName || "") + " " + (ac.symbolicName || "")));
+      if (!sh || !sa) continue;
+      const n = sh + sa - dif / 86400e3;
+      if (n > nota) { melhor = g.id; nota = n; }
+    }
+    // só guarda "não achou" quando a lista já tem jogos daquele horário (evita desistir cedo demais)
+    if (melhor || Date.now() > quando + 30 * 60e3) par365.set(ch, melhor);
+    return melhor;
+  }
+  const num365 = (v) => { const m = String(v == null ? "" : v).replace(",", ".").match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : null; };
+  const EST_365 = { "Gols esperados (xG)": "xg", "Ataque": "atk", "Chances perigosas criadas": "cp", "Posse de Bola": "posse", "Total de chutes": "chutes",
+    "Chutes no gol": "alvo", "Escanteios": "esc", "Trave": "trave", "Faltas": "faltas", "Cartões amarelos": "amarelos", "Cartões vermelhos": "vermelhos",
+    "Impedimentos": "imped", "Defesas do goleiro": "defesas", "Total de passes": "passes" };
+  function chaveSessao(gid) { return "sb365_" + gid; }
+  function lerSessao(gid) { try { return JSON.parse(sessionStorage.getItem(chaveSessao(gid)) || "null"); } catch (e) { return null; } }
+  function gravarSessao(gid, atk) { try { sessionStorage.setItem(chaveSessao(gid), JSON.stringify(atk)); } catch (e) {} }
+  const ultimo365 = new Map();
+  async function atualizar365(p, forcar) {
+    if (!p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
+    const ch = p.vv.espn.code + ":" + p.vv.espn.id;
+    if (!forcar && Date.now() - (ultimo365.get(ch) || 0) < CICLO_365 - 500) return false;
+    ultimo365.set(ch, Date.now());
+    const gid = await idDo365(p);
+    if (!gid) return false;
+    const r = await buscarJSON(`${S365}game/stats/?${Q365}&games=${gid}`);
+    if (!r || !r.statistics) return false;
+    const g = (r.games || [])[0] || {};
+    const idCasa = (g.homeCompetitor || {}).id;
+    const es = {};
+    for (const x of r.statistics) {
+      const k = EST_365[x.name];
+      if (!k) continue;
+      const v = num365(x.value);
+      if (v == null) continue;
+      es[k] = es[k] || [null, null];
+      es[k][x.competitorId === idCasa ? 0 : 1] = v;
+    }
+    const vv = p.vv;
+    const antes = JSON.stringify([vv.es365, vv.atk && vv.atk.ult]);
+    vv.es365 = es;
+    vv.id365 = gid;
+    vv.temAtk = !!es.atk; // algumas ligas (ex.: Brasileirão) não têm o contador de ataques no 365Scores
+    vv.n365 = [(g.homeCompetitor || {}).name || "", (g.awayCompetitor || {}).name || ""];
+    vv.em365 = new Date().toISOString();
+    // ataques por minuto: a diferença entre uma leitura e outra entra no minuto atual
+    const atk = (vv.atk = vv.atk || lerSessao(gid) || { h: {}, a: {}, ult: null, desde: new Date().toISOString() });
+    const tot = es.atk ? [es.atk[0] || 0, es.atk[1] || 0] : null;
+    const s = slotDe(g.gameTimeDisplay || vv.clk, vv.per);
+    if (tot && s) {
+      const k = chaveSlot(s);
+      if (atk.ult) {
+        for (const [i, l] of [[0, "h"], [1, "a"]]) {
+          const d = tot[i] - atk.ult[i];
+          if (d > 0 && d < 20) atk[l][k] = (atk[l][k] || 0) + d;
+        }
+      }
+      atk.ult = tot;
+      gravarSessao(gid, atk);
+    }
+    return antes !== JSON.stringify([vv.es365, vv.atk && vv.atk.ult]);
+  }
+  // narração do 365Scores (lances), a cada 10 s com o jogo aberto
+  const CICLO_PBP = 10000;
+  const feed365 = new Map(); // id 365 -> { url, em } (url null = jogo sem narração; tenta de novo em 5 min)
+  const ultimoPbp = new Map();
+  async function atualizarPbp(p, forcar) {
+    if (!p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
+    const ch = chaveJogo(p);
+    if (!forcar && Date.now() - (ultimoPbp.get(ch) || 0) < CICLO_PBP - 1500) return false;
+    ultimoPbp.set(ch, Date.now());
+    const gid = await idDo365(p);
+    if (!gid) return false;
+    let f = feed365.get(gid);
+    if (!f || (!f.url && Date.now() - f.em > 5 * 60e3)) {
+      const g = await buscarJSON(`${S365}game/?${Q365}&gameId=${gid}`);
+      if (!g) return false;
+      const u = g.game && g.game.playByPlay && g.game.playByPlay.feedURL;
+      // lang=1: a narração em inglês tem o mesmo texto da ESPN (é assim que o site acha o mesmo lance nas duas)
+      f = { url: u ? String(u).replace(/^http:/, "https:").replace(/([?&]lang=)\d+/, (x, a) => a + "1") : null, em: Date.now() };
+      feed365.set(gid, f);
+    }
+    if (!f.url) return false;
+    const r = await buscarJSON(f.url + "&_=" + Math.floor(Date.now() / 5000));
+    if (!r || !Array.isArray(r.Messages)) return false;
+    const assin = r.Messages.map((m) => m.Id + "@" + m.LastModified).join(",");
+    const ant = pbp365.get(ch);
+    p.vv.emPbp = new Date().toISOString();
+    if (ant && ant.assin === assin) return false;
+    pbp365.set(ch, { msgs: r.Messages, assin });
+    p.vv.pbp365 = true;
+    return aplicarMistura(p);
+  }
+
+  let timer365 = null;
+  function ciclo365() {
+    clearTimeout(timer365);
+    const seguir = () => { timer365 = setTimeout(ciclo365, 3000); }; // cada busca respeita o próprio intervalo
+    if (document.hidden) return seguir();
+    const p = jogoAberto();
+    if (!p || p.vv.st !== "in") return seguir();
+    Promise.all([atualizar365(p, false).catch(() => false), atualizarPbp(p, false).catch(() => false)])
+      .then((m) => { if (m.some(Boolean)) redesenhar(); }).catch(() => {}).finally(seguir);
+  }
+
   async function atualizarPainel(forcar) {
     if (!painelAberto()) return false;
     const lista = [];
@@ -521,7 +789,9 @@
       if (p.vv.st === "in" || (p.vv.st === "post" && !p.vv.pr && naJanela(p, Date.now()))) lista.push(p);
     }
     const res = await Promise.all(lista.map((p) => atualizarDetalhe(p, forcar && !ultimoDetalhe.has(p.vv.espn.code + ":" + p.vv.espn.id))));
-    return res.some(Boolean);
+    // painel: ataques do 365Scores de todos os jogos rolando (no ritmo do painel, a cada 20 s)
+    const r365 = await Promise.all(lista.filter((p) => p.vv.st === "in").map((p) => Promise.all([atualizar365(p, true).catch(() => false), atualizarPbp(p, true).catch(() => false)]).then((x) => x.some(Boolean))));
+    return res.some(Boolean) || r365.some(Boolean);
   }
 
   function agendar(ms) { clearTimeout(timer); timer = setTimeout(ciclo, ms); }
@@ -566,10 +836,18 @@
     if ((rodando && parado > CICLO_TRAVADO) || (!rodando && parado > CICLO_CALMO + 15000)) ciclo();
   }
   // voltou para a aba, desbloqueou o celular ou a internet voltou: atualiza na hora
-  function acordar() { if (!document.hidden && Date.now() - inicioCiclo > 3000) ciclo(); }
+  function acordar() {
+    if (document.hidden) return;
+    if (oculto) redesenhar();
+    if (Date.now() - inicioCiclo > 3000) ciclo();
+  }
 
   let pendente = false;
+  let oculto = false;
   function redesenhar() {
+    // aba escondida (outra aba aberta, celular bloqueado): não desenha nada; desenha uma vez ao voltar
+    if (document.hidden) { oculto = true; return; }
+    oculto = false;
     const el = document.activeElement;
     const campo = el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) ? el : null;
     // só segura o redesenho em janelas abertas, no painel de filtros ou em campos sem id (seriam perdidos)
@@ -597,8 +875,9 @@
       const a = await atualizarDetalhe(p, true);
       const b = p ? await atualizarElencos(p) : false;
       if (p) atualizarMinutos(p);
+      const d = p && p.vv.st === "in" ? (await Promise.all([atualizar365(p, true).catch(() => false), atualizarPbp(p, true).catch(() => false)])).some(Boolean) : false;
       const c = await atualizarPainel(true);
-      if (a || b || c) redesenhar();
+      if (a || b || c || d) redesenhar();
     }, 60);
   }
 
@@ -611,13 +890,14 @@
     window.addEventListener("online", acordar);
     window.addEventListener("focus", acordar);
     setInterval(vigia, 15000);
+    ciclo365();
     window.addEventListener("hashchange", aoNavegar);
     document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-ir^="jogo/"], [data-abajogo="escalacoes"]')) aoNavegar(); });
     ciclo();
   }
 
   window.AoVivo = {
-    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe,
+    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe,
     _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); },
   };
 })();

@@ -35,15 +35,15 @@
 <div id="aviso"></div>
 <main id="app" tabindex="-1"></main>
 <footer class="rodape">
-  ScanBall · Dados: ESPN (jogos, estatísticas, placar e lances ao vivo) e FotMob (xG e rodadas); football-data.org como reserva. Projeções calculadas a partir dos placares; use como referência, não como garantia.
+  ScanBall · Dados: ESPN (jogos, estatísticas, placar e lances ao vivo), 365Scores (ataques e lances ao vivo) e FotMob (xG e rodadas); football-data.org como reserva. Projeções calculadas a partir dos placares; use como referência, não como garantia.
 </footer>
 
 <!-- base principal: ESPN + FotMob (dados5.js). Se não carregar ou estiver parada há mais de 12 h, usa a football-data (reserva). -->
-<script>window.DADOS5_TENTOU = true; document.write('<script src="dados5.js?v=' + Date.now() + '"><\/script>');</script>
+<script>window.DADOS5_TENTOU = true; document.write('<script src="dados5.js?v=' + VER + '"><\/script>');</script>
 <script>(function () {
   var d = window.DADOS5, ok = !!(d && d.competicoes && Object.keys(d.competicoes).length && d.ok_em && (Date.now() - Date.parse(d.ok_em) < 12 * 3600e3));
   window.DADOS5_OK = ok;
-  if (!ok) document.write('<script src="dados.js?v=' + Date.now() + '"><\/script>');
+  if (!ok) document.write('<script src="dados.js?v=' + VER + '"><\/script>');
 })();</script>
 <script>["config.js", "contas.js", "aovivo.js", "dados-demo.js", "motor.js", "app.js"].forEach(function (f) { document.write('<script src="' + f + '?v=' + VER + '"><\/script>'); });</script>
 </body>

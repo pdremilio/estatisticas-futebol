@@ -85,7 +85,53 @@
   const fOdd = (p) => (p > 0.001 ? virgula(1 / p, 2) : "–");
   const pad = (n) => String(n).padStart(2, "0");
   const chaveDia = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
-  const diaDe = (iso) => chaveDia(new Date(iso));
+  // o dia de cada jogo é pedido milhares de vezes a cada atualização ao vivo: guarda o resultado
+  const memoDia = new Map();
+  const diaDe = (iso) => { let d = memoDia.get(iso); if (d === undefined) { d = chaveDia(new Date(iso)); if (memoDia.size > 20000) memoDia.clear(); memoDia.set(iso, d); } return d; };
+
+  // troca o conteúdo de um bloco mexendo só no que mudou (em vez de apagar e recriar tudo):
+  // é bem mais leve no celular e não perde rolagem, foco, seleção nem o "passar o mouse"
+  const compativel = (v, n) => v.nodeType === n.nodeType && v.nodeName === n.nodeName && (v.nodeType !== 1 || v.id === n.id);
+  function sincronizarNo(v, n, prof) {
+    if (!compativel(v, n)) { v.replaceWith(n); return; }
+    if (n.nodeType === 3 || n.nodeType === 8) { if (v.data !== n.data) v.data = n.data; return; }
+    if (n.nodeType !== 1) { v.replaceWith(n); return; }
+    if (v.isEqualNode(n)) return;
+    if (!prof || /^(INPUT|SELECT|TEXTAREA|OPTION|svg)$/i.test(n.nodeName)) { v.replaceWith(n); return; }
+    for (const a of [...v.attributes]) if (!n.hasAttribute(a.name)) v.removeAttribute(a.name);
+    for (const a of n.attributes) if (v.getAttribute(a.name) !== a.value) v.setAttribute(a.name, a.value);
+    sincronizarFilhos(v, [...n.childNodes], prof - 1);
+  }
+  function sincronizarFilhos(el, novos, prof) {
+    const velhos = [...el.childNodes], nv = velhos.length, nn = novos.length;
+    if (nv === nn) { for (let i = 0; i < nn; i++) sincronizarNo(velhos[i], novos[i], prof); return; }
+    // entrou ou saiu um bloco: aproveita o que bate no começo e no fim e troca só o meio
+    const max = Math.min(nv, nn);
+    let i = 0, j = 0;
+    while (i < max && compativel(velhos[i], novos[i])) i++;
+    while (j < max - i && compativel(velhos[nv - 1 - j], novos[nn - 1 - j])) j++;
+    const ref = j ? velhos[nv - j] : null;
+    for (let k = i; k < nv - j; k++) velhos[k].remove();
+    for (let k = i; k < nn - j; k++) el.insertBefore(novos[k], ref);
+    for (let k = 0; k < i; k++) sincronizarNo(velhos[k], novos[k], prof);
+    for (let k = 1; k <= j; k++) sincronizarNo(velhos[nv - k], novos[nn - k], prof);
+  }
+  function morfar(el, html) {
+    // nada mudou desde a última vez (e ninguém mexeu no bloco por fora): não faz nada
+    if (el.__html === html && el.__marca === el.firstChild && el.firstChild) return false;
+    const t = document.createElement("template");
+    t.innerHTML = html;
+    if (el.__html == null || !el.firstChild) el.replaceChildren(t.content);
+    else sincronizarFilhos(el, [...t.content.childNodes], 12);
+    el.__html = html; el.__marca = el.firstChild;
+    return true;
+  }
+  // telas que se atualizam sozinhas (jogo, painel ao vivo, janela): mesma tela = só o que mudou; outra tela = tudo novo
+  function pintarApp(chave, html) {
+    if (app.__chave === chave && app.__marca === app.firstChild && app.firstChild) morfar(app, html);
+    else { app.innerHTML = html; app.__html = html; app.__marca = app.firstChild; }
+    app.__chave = chave;
+  }
   const hora = (iso) => { const d = new Date(iso); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
   const dataCurta = (iso) => { const d = new Date(iso); return pad(d.getDate()) + "/" + pad(d.getMonth() + 1); };
   const SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
@@ -237,7 +283,7 @@
     esc: "escanteio", amarelo: "cartão amarelo", vermelho: "cartão vermelho", "2amarelo": "2º amarelo (expulso)", sub: "substituição" };
   const PRIOR = { gol: 9, vermelho: 8, "2amarelo": 8, trave: 7, alvo: 6, amarelo: 5, fora: 4, bloq: 3, sub: 2, esc: 1 };
   const grupoMarca = (k) => (k === "amarelo" || k === "vermelho" || k === "2amarelo" ? "cartao" : k);
-  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "minuto", som: false };
+  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "tendencia", som: false };
   estado.prOpc = Object.assign({}, OPC_PADRAO, ler("pr_opc", {}));
   estado.prConfig = false;
   let infoPressao = "";
@@ -652,7 +698,7 @@
           <div class="radar-times"><span class="c">${h(nomeTime(p.h))} ➜</span><span class="f">⬅ ${h(nomeTime(p.a))}</span></div></div>
         <ul class="radar-lista" aria-live="polite">${itens}</ul>
       </div>
-      <p class="sub nota">Lances da narração da ESPN (chegam 1 a 2 min depois). Não inclui ataques perigosos, laterais e posse lance a lance.</p>
+      <p class="sub nota">Lances da narração da ESPN e do 365Scores (chegam cerca de 1 a 2 min depois). Não inclui ataques perigosos, laterais e posse lance a lance.</p>
     </div>`;
   }
   const botaoJanela = (code, p, cls = "") => `<button type="button" class="botao-janela ${cls}" data-janela="${h(code)}/${h(p.i)}" title="Abrir este jogo numa janela pequena" aria-label="Abrir este jogo numa janela pequena">
@@ -684,13 +730,13 @@
     document.title = `${nomeTime(p.h)} × ${nomeTime(p.a)} · ScanBall`;
     const vivo = aoVivo(p), fim = encerrada(p);
     const situacao = vivo ? (p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : '<span class="vivo">Ao vivo</span>') : fim ? "Encerrado" : `${DIA_CURTO(p.d)} · ${hora(p.d)}`;
-    app.innerHTML = `<section class="janela-jogo">
+    pintarApp("janela/" + code + "/" + p.i, `<section class="janela-jogo">
       <div class="pv-topo">${seloComp(code)}<span class="sub">${h(nomeComp(code))}</span><span class="pv-min">${situacao}</span></div>
       <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span><span class="pv-gols">${vivo || fim ? `${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}` : "<i>×</i>"}</span><span class="pv-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
       ${p.hh != null && (vivo || fim) ? `<p class="sub janela-1t">(${p.hh}x${p.ha}) no 1º tempo</p>` : ""}
       ${temAoVivo(p) ? abaAoVivo(p) : `<div class="painel-corpo"><div class="vazio vazio-curto">${p.semEspn ? "Este jogo não foi encontrado na ESPN." : "Os dados ao vivo aparecem quando o jogo estiver perto de começar."}</div></div>`}
       <p class="janela-rodape"><a href="${location.pathname}#jogo/${h(code)}/${h(p.i)}" target="_blank" rel="noopener">Abrir no ScanBall</a></p>
-    </section>`;
+    </section>`);
   }
 
   // ---------- aba "Ao vivo" do topo: todos os jogos rolando, para quem não consegue assistir
@@ -723,15 +769,15 @@
     };
     const linhaProx = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">${hora(x.p.d)}</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button></li>`;
     const linhaFim = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">Fim</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} <b>${x.p.fh}×${x.p.fa}</b> ${h(nomeTime(x.p.a))}</button></li>`;
-    app.innerHTML = `<section class="painel-vivo">
+    pintarApp("aovivo", `<section class="painel-vivo">
       ${avisoFonte()}<div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${vivos.length ? `${vivos.length} ${vivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho a cada 20 s` : ""}</span></div>
       ${vivos.length ? `<div class="pv-grade">${vivos.map(card).join("")}</div>` : `<div class="painel"><div class="vazio"><strong>Nenhum jogo rolando agora</strong>Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas.</div></div>`}
       ${proximos.length || encerradosHoje.length ? `<div class="pv-listas">
         ${proximos.length ? `<div class="painel"><div class="painel-cab"><h3>Próximos jogos</h3></div><ul class="lista-simples pv-lista">${proximos.map(linhaProx).join("")}</ul></div>` : ""}
         ${encerradosHoje.length ? `<div class="painel"><div class="painel-cab"><h3>Terminaram há pouco</h3></div><ul class="lista-simples pv-lista">${encerradosHoje.map(linhaFim).join("")}</ul></div>` : ""}
       </div>` : ""}
-      <p class="sub nota">Placar e minuto: ESPN (a cada 20 s). Gráfico e lances: narração da ESPN, que chega 1 a 2 minutos depois do lance. Toque num jogo para ver tudo.</p>
-    </section>`;
+      <p class="sub nota">Placar e minuto: ESPN (a cada 20 s). Gráfico e lances: ataques e narração do 365Scores (quando a liga tem) junto com a narração da ESPN. Toque num jogo para ver tudo.</p>
+    </section>`);
   }
   function blocoAoVivo(p) {
     const v = p.vv;
@@ -977,10 +1023,10 @@
     const lista = jogosVisiveis();
     const totalDia = todasPartidas().filter((x) => x.dia === estado.dia).length;
     const rec = document.getElementById("recolher");
-    if (rec) { const t = recolhidas.size ? "Expandir jogos" : "Recolher jogos"; rec.title = t; rec.setAttribute("aria-label", t); rec.innerHTML = iconeRecolher(); }
+    if (rec) { const t = recolhidas.size ? "Expandir jogos" : "Recolher jogos"; rec.title = t; rec.setAttribute("aria-label", t); morfar(rec, iconeRecolher()); }
     const filtrando = lista.length !== totalDia;
     const tbc = document.getElementById("tb-contagem");
-    if (tbc) tbc.innerHTML = totalDia ? `${filtrando ? `${lista.length} de ${totalDia} jogos` : `${totalDia} jogo${totalDia > 1 ? "s" : ""}`}${nFiltros(estado.filtro) ? ` · <button class="link" type="button" id="l-limpar2">limpar filtros</button>` : ""}` : "";
+    if (tbc) morfar(tbc, totalDia ? `${filtrando ? `${lista.length} de ${totalDia} jogos` : `${totalDia} jogo${totalDia > 1 ? "s" : ""}`}${nFiltros(estado.filtro) ? ` · <button class="link" type="button" id="l-limpar2">limpar filtros</button>` : ""}` : "");
     const contagem = "";
     if (!lista.length) {
       let dica = "";
@@ -991,7 +1037,7 @@
         else if (ant) dica = `<button class="link" type="button" data-dia="${ant.dia}">Ir para o último dia com jogos (${dataCurta(ant.p.d)})</button>`;
         else dica = "Não há jogos nos 3 dias antes nem nos 3 dias depois de hoje.";
       } else dica = "Os filtros estão escondendo todos os jogos deste dia.";
-      corpo.innerHTML = `${contagem}<div class="vazio"><strong>${totalDia ? "Nenhum jogo com esses filtros" : "Nenhum jogo neste dia"}</strong>${dica}</div>`;
+      morfar(corpo, `${contagem}<div class="vazio"><strong>${totalDia ? "Nenhum jogo com esses filtros" : "Nenhum jogo neste dia"}</strong>${dica}</div>`);
     } else {
       let html = "";
       if (estado.ordem === "comp") {
@@ -1008,14 +1054,14 @@
           if (!recolhidas.has(x.code)) html += linhaJogo(x.code, x.p);
         }
       }
-      corpo.innerHTML = `${contagem}<div class="tabela-jogos ${TEM_ODDS ? "com-odds" : ""}">${CAB_COLUNAS}${html}</div>${NOTA_ODD}`;
+      morfar(corpo, `${contagem}<div class="tabela-jogos ${TEM_ODDS ? "com-odds" : ""}">${CAB_COLUNAS}${html}</div>${NOTA_ODD}`);
     }
     const l2 = document.getElementById("l-limpar2");
-    if (l2) l2.addEventListener("click", () => { estado.filtro = copiaFiltro(FILTRO_VAZIO); salvarFiltro(); telaJogos(); });
+    if (l2) l2.onclick = () => { estado.filtro = copiaFiltro(FILTRO_VAZIO); salvarFiltro(); telaJogos(); };
     const dest = document.getElementById("destaques");
     if (dest) {
       if (estado.sel) atualizarPainelJogo();
-      else dest.innerHTML = destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia));
+      else morfar(dest, destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia)));
     }
   }
 
@@ -1398,14 +1444,14 @@
       const mesmaTela = document.querySelector(".jogos-pagina") && estado.dia === dia;
       estado.dia = dia; estado.sel = { code, id: String(id) };
       // jogo aberto ao lado da lista: atualiza as duas partes (antes só o painel, e a lista ficava com placar velho)
-      if (mesmaTela) { renderListaJogos(); atualizarPainelJogo(); } else telaJogos();
+      if (mesmaTela) renderListaJogos(); else telaJogos(); // a lista já atualiza o painel do jogo
       return;
     }
     estado.sel = null;
     estado.dia = dia;
     const r = htmlJogo(code, p);
     const voltar = `<button class="botao-q texto voltar-v2" type="button" data-voltar>‹ Jogos de ${dataCurta(p.d)}</button>`;
-    app.innerHTML = `${voltar}<section class="painel jogo-pagina">${r}</section>`;
+    pintarApp("jogo/" + code + "/" + p.i, `${voltar}<section class="painel jogo-pagina">${r}</section>`);
   }
 
   function atualizarPainelJogo() {
@@ -1420,11 +1466,11 @@
       if (linha) linha.setAttribute("aria-current", "true");
       aside.className = "painel jogo-pagina detalhe-lado";
       aside.setAttribute("aria-label", "Jogo selecionado");
-      aside.innerHTML = `<button class="fechar-jogo" type="button" data-voltar title="Fechar o jogo e voltar aos destaques" aria-label="Fechar o jogo">✕</button>${htmlJogo(estado.sel.code, sel)}`;
+      morfar(aside, `<button class="fechar-jogo" type="button" data-voltar title="Fechar o jogo e voltar aos destaques" aria-label="Fechar o jogo">✕</button>${htmlJogo(estado.sel.code, sel)}`);
     } else {
       aside.className = "destaques";
       aside.setAttribute("aria-label", "Destaques do dia");
-      aside.innerHTML = destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia));
+      morfar(aside, destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia)));
     }
   }
 
@@ -2278,13 +2324,22 @@
     const m = location.hash.match(/^#jogo\/([^/]+)\/([^/]+)/);
     return m ? { code: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) } : null;
   }
+  // atualização ao vivo (placar a cada 20 s, lances e estatísticas a cada poucos segundos)
+  const ROLAVEIS = "#lista-jogos-corpo, .detalhe-lado, .radar-lista, .ev-lista, .tabela-rolagem, .esc-lado, .abas-jogo, .chips";
   function aoVivoAtualizado() {
     todasPartidas.cache = null;
-    const rolaveis = [...document.querySelectorAll(".detalhe-lado, .detalhe-lado *")].filter((el) => el.scrollTop > 0).map((el) => [el.className, el.scrollTop]);
+    // guarda só a rolagem de quem rola de verdade (antes varria todos os elementos do painel: ~40 ms por atualização)
+    const rol = [...document.querySelectorAll(ROLAVEIS)].map((el, i) => (el.scrollTop || el.scrollLeft ? [i, el.scrollTop, el.scrollLeft] : null)).filter(Boolean);
     const y = window.scrollY;
-    render();
-    for (const [cls, top] of rolaveis) { const el = cls && document.getElementsByClassName(cls)[0]; if (el) el.scrollTop = top; }
-    window.scrollTo(0, y);
+    const aba = decodeURIComponent(location.hash.slice(1)).split("/")[0] || "jogos";
+    // na lista de jogos só a lista e o painel ao lado mudam: a barra de ferramentas (busca, filtros, data) fica como está
+    if (aba === "jogos" && !MODO_JANELA && document.getElementById("lista-jogos-corpo")) { renderListaJogos(); contadorVivo(); }
+    else render();
+    if (rol.length) {
+      const els = document.querySelectorAll(ROLAVEIS);
+      for (const [i, t, l] of rol) { const el = els[i]; if (el && (el.scrollTop !== t || el.scrollLeft !== l)) { el.scrollTop = t; el.scrollLeft = l; } }
+    }
+    if (window.scrollY !== y) window.scrollTo(0, y);
   }
 
   montarTopo();

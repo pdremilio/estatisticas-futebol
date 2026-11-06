@@ -41,8 +41,9 @@
   const elencos = new Map(); // "liga:idTime" -> { em, jog: {idAtleta: números}, temporada }
 
   // a ESPN organiza o placar pelo dia no horário dos EUA (Nova York): jogo às 21h30 de Brasília ainda é "hoje" lá
-  const diaESPN = (iso) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" })
-    .format(new Date(iso)).replace(/-/g, "");
+  // (o formatador é criado uma vez só: criar um por jogo a cada 20 s pesava no celular)
+  const FMT_NY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
+  const diaESPN = (iso) => FMT_NY.format(new Date(iso)).replace(/-/g, "");
 
   // jogo na janela: de 75 min antes até 3h30 depois do início; se a football-data ainda não deu o jogo como
   // encerrado, continua acompanhando por até 12 h (até o placar final chegar)
@@ -555,8 +556,10 @@
         // se a busca falhar, tenta de novo em 1 minuto (sem apagar o que já tinha)
         e = j ? lerElenco(j) : Object.assign(e && e.jog ? e : { jog: {}, temporada: "" }, { em: Date.now() - ELENCO_VALIDADE + 60e3, buscando: false });
         elencos.set(chave, e);
-        if (!j && p.vv.elenco && p.vv.elenco[l] && Object.keys(p.vv.elenco[l].jog).length) continue;
+        if (!j && p.vv.elenco && p.vv.elenco[l] && Object.keys(p.vv.elenco[l].jog || {}).length) continue;
       }
+      // outra busca deste elenco ainda está no meio do caminho: espera ela terminar
+      if (!e || !e.jog) continue;
       p.vv.elenco = p.vv.elenco || {};
       const atual = p.vv.elenco[l];
       if (atual !== e && !(atual && Object.keys(atual.jog || {}).length && !Object.keys(e.jog || {}).length)) { p.vv.elenco[l] = e; mudou = true; }
@@ -833,10 +836,18 @@
     if ((rodando && parado > CICLO_TRAVADO) || (!rodando && parado > CICLO_CALMO + 15000)) ciclo();
   }
   // voltou para a aba, desbloqueou o celular ou a internet voltou: atualiza na hora
-  function acordar() { if (!document.hidden && Date.now() - inicioCiclo > 3000) ciclo(); }
+  function acordar() {
+    if (document.hidden) return;
+    if (oculto) redesenhar();
+    if (Date.now() - inicioCiclo > 3000) ciclo();
+  }
 
   let pendente = false;
+  let oculto = false;
   function redesenhar() {
+    // aba escondida (outra aba aberta, celular bloqueado): não desenha nada; desenha uma vez ao voltar
+    if (document.hidden) { oculto = true; return; }
+    oculto = false;
     const el = document.activeElement;
     const campo = el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) ? el : null;
     // só segura o redesenho em janelas abertas, no painel de filtros ou em campos sem id (seriam perdidos)

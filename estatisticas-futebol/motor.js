@@ -249,7 +249,10 @@
     const partidas = (comp.partidas || []).slice().sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
     const times = {};
     const T = (id) => (times[id] || (times[id] = novoTime()));
-    const fotos = {};
+    // "foto" de cada time ANTES de cada jogo (é o que o backtest e a prévia usam). Antes era copiada na hora para
+    // todos os jogos (milhares de cópias ao abrir o site); agora só guarda quantos jogos o time tinha e monta a foto
+    // quando alguém pede (e guarda para a próxima vez). O resultado é o mesmo.
+    const marcas = new Map();
     let liga = { gh: 0, ga: 0, n: 0 };
     const ligaMed = () => ({
       mh: liga.n >= 10 ? liga.gh / liga.n : 1.4,
@@ -262,7 +265,7 @@
       const th = T(p.h), ta = T(p.a);
       if (!encerrada(p)) continue;
       // foto ANTES do jogo: é isso que o backtest usa, sem olhar o resultado
-      fotos[p.i] = { h: fotoTime(th), a: fotoTime(ta), liga: ligaMed() };
+      marcas.set(String(p.i), { th, ta, nh: th.jogos.length, na: ta.jogos.length, liga: ligaMed() });
       somarNoBucket(th.geral, p.fh, p.fa, p.hh, p.ha, p, true);
       somarNoBucket(th.casa, p.fh, p.fa, p.hh, p.ha, p, true);
       somarNoBucket(ta.geral, p.fa, p.fh, p.ha, p.hh, p, false);
@@ -272,7 +275,31 @@
       ta.jogos.push({ p, casa: false, elo: ta.elo, delta: -delta });
       liga.gh += p.fh; liga.ga += p.fa; liga.n++;
     }
+    const prontas = new Map();
+    const fotos = new Proxy({}, {
+      get(_, k) {
+        if (typeof k !== "string") return undefined;
+        if (prontas.has(k)) return prontas.get(k);
+        const m = marcas.get(k);
+        if (!m) return undefined;
+        const f = { h: fotoAntes(m.th, m.nh), a: fotoAntes(m.ta, m.na), liga: m.liga };
+        prontas.set(k, f);
+        return f;
+      },
+      has(_, k) { return marcas.has(String(k)); },
+    });
     return { code: comp.code, partidas, times, fotos, liga: ligaMed(), encerradas: liga.n };
+  }
+
+  // números do time somando só os n primeiros jogos dele (a "foto" de antes do jogo n+1)
+  function fotoAntes(t, n) {
+    const g = bucketVazio(), c = bucketVazio(), f = bucketVazio();
+    for (let i = 0; i < n; i++) {
+      const j = t.jogos[i], p = j.p;
+      if (j.casa) { somarNoBucket(g, p.fh, p.fa, p.hh, p.ha, p, true); somarNoBucket(c, p.fh, p.fa, p.hh, p.ha, p, true); }
+      else { somarNoBucket(g, p.fa, p.fh, p.ha, p.hh, p, false); somarNoBucket(f, p.fa, p.fh, p.ha, p.hh, p, false); }
+    }
+    return { geral: g, casa: c, fora: f, elo: t.eloHist[n] };
   }
 
   // estado atual do time para jogos futuros

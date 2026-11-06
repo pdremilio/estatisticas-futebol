@@ -85,7 +85,53 @@
   const fOdd = (p) => (p > 0.001 ? virgula(1 / p, 2) : "–");
   const pad = (n) => String(n).padStart(2, "0");
   const chaveDia = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
-  const diaDe = (iso) => chaveDia(new Date(iso));
+  // o dia de cada jogo é pedido milhares de vezes a cada atualização ao vivo: guarda o resultado
+  const memoDia = new Map();
+  const diaDe = (iso) => { let d = memoDia.get(iso); if (d === undefined) { d = chaveDia(new Date(iso)); if (memoDia.size > 20000) memoDia.clear(); memoDia.set(iso, d); } return d; };
+
+  // troca o conteúdo de um bloco mexendo só no que mudou (em vez de apagar e recriar tudo):
+  // é bem mais leve no celular e não perde rolagem, foco, seleção nem o "passar o mouse"
+  const compativel = (v, n) => v.nodeType === n.nodeType && v.nodeName === n.nodeName && (v.nodeType !== 1 || v.id === n.id);
+  function sincronizarNo(v, n, prof) {
+    if (!compativel(v, n)) { v.replaceWith(n); return; }
+    if (n.nodeType === 3 || n.nodeType === 8) { if (v.data !== n.data) v.data = n.data; return; }
+    if (n.nodeType !== 1) { v.replaceWith(n); return; }
+    if (v.isEqualNode(n)) return;
+    if (!prof || /^(INPUT|SELECT|TEXTAREA|OPTION|svg)$/i.test(n.nodeName)) { v.replaceWith(n); return; }
+    for (const a of [...v.attributes]) if (!n.hasAttribute(a.name)) v.removeAttribute(a.name);
+    for (const a of n.attributes) if (v.getAttribute(a.name) !== a.value) v.setAttribute(a.name, a.value);
+    sincronizarFilhos(v, [...n.childNodes], prof - 1);
+  }
+  function sincronizarFilhos(el, novos, prof) {
+    const velhos = [...el.childNodes], nv = velhos.length, nn = novos.length;
+    if (nv === nn) { for (let i = 0; i < nn; i++) sincronizarNo(velhos[i], novos[i], prof); return; }
+    // entrou ou saiu um bloco: aproveita o que bate no começo e no fim e troca só o meio
+    const max = Math.min(nv, nn);
+    let i = 0, j = 0;
+    while (i < max && compativel(velhos[i], novos[i])) i++;
+    while (j < max - i && compativel(velhos[nv - 1 - j], novos[nn - 1 - j])) j++;
+    const ref = j ? velhos[nv - j] : null;
+    for (let k = i; k < nv - j; k++) velhos[k].remove();
+    for (let k = i; k < nn - j; k++) el.insertBefore(novos[k], ref);
+    for (let k = 0; k < i; k++) sincronizarNo(velhos[k], novos[k], prof);
+    for (let k = 1; k <= j; k++) sincronizarNo(velhos[nv - k], novos[nn - k], prof);
+  }
+  function morfar(el, html) {
+    // nada mudou desde a última vez (e ninguém mexeu no bloco por fora): não faz nada
+    if (el.__html === html && el.__marca === el.firstChild && el.firstChild) return false;
+    const t = document.createElement("template");
+    t.innerHTML = html;
+    if (el.__html == null || !el.firstChild) el.replaceChildren(t.content);
+    else sincronizarFilhos(el, [...t.content.childNodes], 12);
+    el.__html = html; el.__marca = el.firstChild;
+    return true;
+  }
+  // telas que se atualizam sozinhas (jogo, painel ao vivo, janela): mesma tela = só o que mudou; outra tela = tudo novo
+  function pintarApp(chave, html) {
+    if (app.__chave === chave && app.__marca === app.firstChild && app.firstChild) morfar(app, html);
+    else { app.innerHTML = html; app.__html = html; app.__marca = app.firstChild; }
+    app.__chave = chave;
+  }
   const hora = (iso) => { const d = new Date(iso); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
   const dataCurta = (iso) => { const d = new Date(iso); return pad(d.getDate()) + "/" + pad(d.getMonth() + 1); };
   const SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
@@ -217,14 +263,15 @@
   const ROT_STATUS = (p) => (aoVivo(p) ? (p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : `<span class="vivo">${STATUS[p.s]}</span>`) : STATUS[p.s] || p.s);
 
   // ---------- ao vivo: estatísticas, lances, pressão e escalações (dados da ESPN, ver aovivo.js)
-  const EST_VIVO = [["posse", "Posse de bola", "%"], ["xg", "Gols esperados (xG)"], ["chutes", "Finalizações"], ["alvo", "No alvo"],
+  const EST_VIVO = [["posse", "Posse de bola", "%"], ["xg", "Gols esperados (xG)"], ["atk", "Ataques"], ["cp", "Chances perigosas"], ["chutes", "Finalizações"], ["alvo", "No alvo"], ["trave", "Na trave"],
     ["esc", "Escanteios"], ["faltas", "Faltas"], ["amarelos", "Cartões amarelos"], ["vermelhos", "Cartões vermelhos"], ["imped", "Impedimentos"],
     ["defesas", "Defesas do goleiro"], ["passes", "Passes"]];
   const temAoVivo = (p) => !!(p.vv && p.vv.espn);
   // aviso quando a ESPN não responde há alguns ciclos (o placar volta a ser o da football-data)
   const avisoFonte = () => (window.AoVivo && window.AoVivo.indisponivel && window.AoVivo.indisponivel()
     ? `<div class="aviso-fonte" role="status"><b>Dados ao vivo temporariamente indisponíveis.</b> A ESPN não está respondendo; tentando de novo a cada 20 s. Enquanto isso, o placar vem da football-data, que atrasa alguns minutos.</div>` : "");
-  const horaAtualizacao = (p) => { const v = p.vv || {}, t = v.emDet || v.em; if (!t) return ""; const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+  const horaCurta = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const horaAtualizacao = (p) => { const v = p.vv || {}, t = [v.emDet || v.em, v.emPbp].filter(Boolean).sort().pop(); if (!t) return ""; const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 
   // ---------- gráfico de pressão: uma barra por minuto (para cima o mandante, para baixo o visitante)
   // a barra do minuto atual vai crescendo conforme os lances chegam; minuto sem lance fica sem barra
@@ -236,13 +283,26 @@
     esc: "escanteio", amarelo: "cartão amarelo", vermelho: "cartão vermelho", "2amarelo": "2º amarelo (expulso)", sub: "substituição" };
   const PRIOR = { gol: 9, vermelho: 8, "2amarelo": 8, trave: 7, alvo: 6, amarelo: 5, fora: 4, bloq: 3, sub: 2, esc: 1 };
   const grupoMarca = (k) => (k === "amarelo" || k === "vermelho" || k === "2amarelo" ? "cartao" : k);
-  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "minuto" };
+  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "tendencia", som: false };
   estado.prOpc = Object.assign({}, OPC_PADRAO, ler("pr_opc", {}));
   estado.prConfig = false;
   let infoPressao = "";
   const iconeMarca = (k) => (k === "gol" ? "⚽" : k === "sub" ? "⇄" : "");
 
-  function valoresPressao(pr, modo) {
+  // peso de cada ataque (365Scores) na barra do minuto; os lances da ESPN (chutes, escanteios, gols) continuam valendo
+  const PESO_ATAQUE = 0.45;
+  function somarAtaques(pr, atk) {
+    if (!atk) return pr;
+    const h = pr.h.slice(), a = pr.a.slice();
+    pr.slots.forEach((s, i) => {
+      const k = s.per + ":" + s.b + ":" + s.ad;
+      if (atk.h[k]) h[i] = Math.round((h[i] + atk.h[k] * PESO_ATAQUE) * 10) / 10;
+      if (atk.a[k]) a[i] = Math.round((a[i] + atk.a[k] * PESO_ATAQUE) * 10) / 10;
+    });
+    return Object.assign({}, pr, { h, a });
+  }
+  function valoresPressao(pr0, modo, atk) {
+    const pr = somarAtaques(pr0, atk);
     if (modo !== "tendencia") return { h: pr.h, a: pr.a };
     // tendência: cada minuto carrega um pouco dos anteriores (o lance "esfria" aos poucos)
     const h = [], a = [];
@@ -254,6 +314,74 @@
     return { h, a };
   }
 
+  // ---------- alerta de pressão: quem está dominando os últimos minutos (lances da ESPN + ataques do 365Scores)
+  // nível 1 "pressão forte": ≥ 68% da pressão das últimas 8 barras; nível 2 "gol pode sair": ≥ 75% e
+  // pelo menos 3 lances perigosos (chute no gol, trave ou escanteio) nesse período.
+  function alertaPressao(p) {
+    const pr = p.vv && p.vv.pr;
+    if (!pr || pr.fim || pr.intervalo || p.s !== "IN_PLAY") return null;
+    const atual = pr.atual == null ? pr.ultimo : pr.atual;
+    if (atual < 6) return null;
+    const val = valoresPressao(pr, "minuto", p.vv.atk);
+    const ini = Math.max(0, atual - 7);
+    let sh = 0, sa = 0;
+    for (let i = ini; i <= atual; i++) { sh += val.h[i] || 0; sa += val.a[i] || 0; }
+    const l = sh >= sa ? "h" : "a", forte = Math.max(sh, sa), total = sh + sa;
+    if (!total) return null;
+    const share = forte / total;
+    const perigo = pr.ev.filter((e) => e.l === l && e.i >= ini && ["alvo", "trave", "esc"].includes(e.k)).length;
+    // há quantos minutos o time está por cima (média de 3 barras)
+    let mins = 0;
+    for (let i = atual; i >= 2; i--) {
+      const mh = (val.h[i] || 0) + (val.h[i - 1] || 0) + (val.h[i - 2] || 0), ma = (val.a[i] || 0) + (val.a[i - 1] || 0) + (val.a[i - 2] || 0);
+      if ((l === "h" ? mh - ma : ma - mh) > 0.5) mins++; else break;
+    }
+    // gol do próprio time há menos de 2 minutos: a pressão "virou" gol, não alerta
+    if (pr.ev.some((e) => e.k === "gol" && e.l === l && e.i >= atual - 1)) return null;
+    let nivel = 0;
+    if (share >= 0.75 && forte >= 9 && perigo >= 3) nivel = 2;
+    else if (share >= 0.68 && forte >= 6) nivel = 1;
+    if (!nivel) return null;
+    return { nivel, l, mins: Math.max(mins, 3), share: Math.round(share * 100), perigo, tid: l === "h" ? p.h : p.a };
+  }
+  const textoAlerta = (a) => a.nivel === 2
+    ? `<b>${h(nomeTime(a.tid))}</b> com pressão absurda há ${a.mins} min · ${a.perigo} lances perigosos · gol pode estar próximo`
+    : `<b>${h(nomeTime(a.tid))}</b> pressionando forte há ${a.mins} min (${a.share}% da pressão)`;
+  function blocoAlerta(p, compacto) {
+    const a = alertaPressao(p);
+    avisarSom(p, a);
+    if (!a) return "";
+    return `<div class="alerta-pressao n${a.nivel} ${a.l === "h" ? "c" : "f"}${compacto ? " mini" : ""}" role="status"><span class="alerta-ic" aria-hidden="true">${a.nivel === 2 ? "🔥" : "⚡"}</span><span>${textoAlerta(a)}</span></div>`;
+  }
+  // som do alerta (opcional, ligado no "Exibir"): toca quando o alerta aparece ou sobe de nível
+  const nivelAvisado = {};
+  let audio = null;
+  function avisarSom(p, a) {
+    const ch = String(p.i), nivel = a ? a.nivel : 0, antes = nivelAvisado[ch] || 0;
+    nivelAvisado[ch] = nivel;
+    if (!estado.prOpc.som || nivel <= antes) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const tocar = (t0, freq) => { const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = freq; o.type = "sine";
+        g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+        o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + 0.25); };
+      const t = audio.currentTime + 0.02;
+      tocar(t, 880); tocar(t + 0.3, nivel === 2 ? 1175 : 880);
+      if (nivel === 2) tocar(t + 0.6, 1175);
+    } catch (e) {}
+  }
+
+  // de onde vêm os dados do gráfico (aparece embaixo dele)
+  function notaPressao(p) {
+    const v = p.vv || {}, partes = [];
+    if (horaAtualizacao(p)) partes.push(`Atualizado às ${horaAtualizacao(p)}.`);
+    if (v.temAtk && v.atk) partes.push(`Ataques: 365Scores, a cada ~6 s (registrados desde ${horaCurta(v.atk.desde)}, quando o jogo foi aberto).`);
+    else if (v.id365 && v.st === "in") partes.push("Esta liga não tem o contador de ataques do 365Scores: as barras vêm só dos lances.");
+    partes.push(v.pbp365
+      ? "Chutes, escanteios e gols: narração do 365Scores (consultada a cada 10 s; chega cerca de 1 minuto depois do lance), com a ESPN de reserva."
+      : "Chutes, escanteios e gols: narração da ESPN, que chega 1 a 2 minutos depois do lance.");
+    return partes.join(" ");
+  }
   function graficoPressao(p, compacto) {
     const pr = p.vv && p.vv.pr;
     if (!pr) {
@@ -263,7 +391,7 @@
     const opc = compacto ? Object.assign({}, OPC_PADRAO, { alvo: false, fora: false, bloq: false, trave: false, cartao: true, sub: false, modo: estado.prOpc.modo }) : estado.prOpc;
     const n = pr.slots.length, L = 6, W = n * L, H = 100, meio = H / 2;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
-    const val = valoresPressao(pr, opc.modo);
+    const val = valoresPressao(pr, opc.modo, p.vv.atk);
     let max = opc.modo === "tendencia" ? 8 : 6;
     for (let i = 0; i <= atual && i < n; i++) max = Math.max(max, val.h[i] || 0, val.a[i] || 0);
     const alt = (v) => Math.max((v || 0) / max * (meio - 3), v ? 2 : 0);
@@ -314,7 +442,7 @@
     const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${faixa}
           <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/>${linhas}${barras}</svg>`;
     if (compacto) {
-      return `<div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}</div></div>`;
+      return `${blocoAlerta(p, true)}<div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}</div></div>`;
     }
     const simb = TIPOS_MARCA.filter(([k]) => opc[k] && k !== "esc").map(([k]) => {
       const ex = k === "cartao" ? '<i class="mk-ex mk-amarelo"></i><i class="mk-ex mk-vermelho"></i>' : `<i class="mk-ex mk-${k}">${iconeMarca(k)}</i>`;
@@ -326,10 +454,12 @@
           <button type="button" class="chip" data-prmodo="minuto" aria-pressed="${opc.modo !== "tendencia"}">Só o minuto</button>
           <button type="button" class="chip" data-prmodo="tendencia" aria-pressed="${opc.modo === "tendencia"}">Tendência</button>
           <button type="button" class="chip" data-propc="padrao">Restaurar padrão</button></div>
+        <div class="pc-linha"><span class="sub">Alerta</span><button type="button" class="chip" data-propc="som" aria-pressed="${!!opc.som}">🔔 Som quando um time pressionar forte</button></div>
         <p class="sub">"Só o minuto": cada barra mostra só o que aconteceu naquele minuto. "Tendência": cada barra carrega um pouco dos minutos anteriores.</p>
       </div>` : "";
     return `<div class="pressao">
-      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">chutes, escanteios e gols por minuto</span>
+      ${blocoAlerta(p)}
+      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${p.vv.temAtk ? "ataques, chutes, escanteios e gols por minuto" : "chutes, escanteios e gols por minuto"}</span>
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Exibir</button></div>
       ${config}
@@ -338,7 +468,7 @@
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
       <div class="pressao-simb">${simb}</div>
       <p class="pressao-info" aria-live="polite">${infoPressao ? h(infoPressao) : "Toque numa marca para ver o lance."}</p>
-      <p class="sub nota">${horaAtualizacao(p) ? `Atualizado às ${horaAtualizacao(p)} · ` : ""}Fonte: narração da ESPN, que chega 1 a 2 minutos depois do lance.</p>
+      <p class="sub nota">${notaPressao(p)}</p>
     </div>`;
   }
   document.addEventListener("click", (e) => {
@@ -568,7 +698,7 @@
           <div class="radar-times"><span class="c">${h(nomeTime(p.h))} ➜</span><span class="f">⬅ ${h(nomeTime(p.a))}</span></div></div>
         <ul class="radar-lista" aria-live="polite">${itens}</ul>
       </div>
-      <p class="sub nota">Lances da narração da ESPN (chegam 1 a 2 min depois). Não inclui ataques perigosos, laterais e posse lance a lance.</p>
+      <p class="sub nota">Lances da narração da ESPN e do 365Scores (chegam cerca de 1 a 2 min depois). Não inclui ataques perigosos, laterais e posse lance a lance.</p>
     </div>`;
   }
   const botaoJanela = (code, p, cls = "") => `<button type="button" class="botao-janela ${cls}" data-janela="${h(code)}/${h(p.i)}" title="Abrir este jogo numa janela pequena" aria-label="Abrir este jogo numa janela pequena">
@@ -600,13 +730,13 @@
     document.title = `${nomeTime(p.h)} × ${nomeTime(p.a)} · ScanBall`;
     const vivo = aoVivo(p), fim = encerrada(p);
     const situacao = vivo ? (p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : '<span class="vivo">Ao vivo</span>') : fim ? "Encerrado" : `${DIA_CURTO(p.d)} · ${hora(p.d)}`;
-    app.innerHTML = `<section class="janela-jogo">
+    pintarApp("janela/" + code + "/" + p.i, `<section class="janela-jogo">
       <div class="pv-topo">${seloComp(code)}<span class="sub">${h(nomeComp(code))}</span><span class="pv-min">${situacao}</span></div>
       <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span><span class="pv-gols">${vivo || fim ? `${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}` : "<i>×</i>"}</span><span class="pv-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
       ${p.hh != null && (vivo || fim) ? `<p class="sub janela-1t">(${p.hh}x${p.ha}) no 1º tempo</p>` : ""}
       ${temAoVivo(p) ? abaAoVivo(p) : `<div class="painel-corpo"><div class="vazio vazio-curto">${p.semEspn ? "Este jogo não foi encontrado na ESPN." : "Os dados ao vivo aparecem quando o jogo estiver perto de começar."}</div></div>`}
       <p class="janela-rodape"><a href="${location.pathname}#jogo/${h(code)}/${h(p.i)}" target="_blank" rel="noopener">Abrir no ScanBall</a></p>
-    </section>`;
+    </section>`);
   }
 
   // ---------- aba "Ao vivo" do topo: todos os jogos rolando, para quem não consegue assistir
@@ -639,26 +769,28 @@
     };
     const linhaProx = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">${hora(x.p.d)}</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button></li>`;
     const linhaFim = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">Fim</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} <b>${x.p.fh}×${x.p.fa}</b> ${h(nomeTime(x.p.a))}</button></li>`;
-    app.innerHTML = `<section class="painel-vivo">
+    pintarApp("aovivo", `<section class="painel-vivo">
       ${avisoFonte()}<div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${vivos.length ? `${vivos.length} ${vivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho a cada 20 s` : ""}</span></div>
       ${vivos.length ? `<div class="pv-grade">${vivos.map(card).join("")}</div>` : `<div class="painel"><div class="vazio"><strong>Nenhum jogo rolando agora</strong>Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas.</div></div>`}
       ${proximos.length || encerradosHoje.length ? `<div class="pv-listas">
         ${proximos.length ? `<div class="painel"><div class="painel-cab"><h3>Próximos jogos</h3></div><ul class="lista-simples pv-lista">${proximos.map(linhaProx).join("")}</ul></div>` : ""}
         ${encerradosHoje.length ? `<div class="painel"><div class="painel-cab"><h3>Terminaram há pouco</h3></div><ul class="lista-simples pv-lista">${encerradosHoje.map(linhaFim).join("")}</ul></div>` : ""}
       </div>` : ""}
-      <p class="sub nota">Placar e minuto: ESPN (a cada 20 s). Gráfico e lances: narração da ESPN, que chega 1 a 2 minutos depois do lance. Toque num jogo para ver tudo.</p>
-    </section>`;
+      <p class="sub nota">Placar e minuto: ESPN (a cada 20 s). Gráfico e lances: ataques e narração do 365Scores (quando a liga tem) junto com a narração da ESPN. Toque num jogo para ver tudo.</p>
+    </section>`);
   }
   function blocoAoVivo(p) {
     const v = p.vv;
-    if (!v || (!(v.ev && v.ev.length) && !v.es && !(v.lances && v.lances.length))) return "";
+    if (!v || (!(v.ev && v.ev.length) && !v.es && !v.es365 && !(v.lances && v.lances.length))) return "";
+    // estatísticas: as do 365Scores (mais rápidas e com ataques/xG) por cima das da ESPN
+    const esTodas = v.es || v.es365 ? Object.assign({}, v.es || {}, v.es365 || {}) : null;
     const icone = (t) => (t === "gol" ? "⚽" : t === "amarelo" ? '<i class="ic amarelo"></i>' : t === "vermelho" ? '<i class="ic vermelho"></i>' : t === "sub" ? "⇄" : t === "var" ? "VAR" : "");
     const txt = (e) => `<span class="${e.t === "gol" ? "gol" : ""}">${e.l === "h" ? "" : icone(e.t) + " "}${h(e.j || "")}${e.x ? ` <small>${h(e.x)}</small>` : ""}${e.l === "h" ? " " + icone(e.t) : ""}</span>`;
     const minNum = (m) => { const [a, b] = String(m).split("+"); return Number(a) + (Number(b) || 0) / 100; };
     const evs = (v.ev || []).slice().sort((a, b) => minNum(b.m) - minNum(a.m)).map((e) => `<li><span class="c">${e.l === "h" ? txt(e) : ""}</span><span class="m">${h(e.m)}'</span><span>${e.l === "a" ? txt(e) : ""}</span></li>`).join("");
     const num = (x) => (x == null ? null : Number(String(x).replace("%", "")));
-    const est = v.es ? EST_VIVO.filter(([k]) => v.es[k] && (num(v.es[k][0]) != null || num(v.es[k][1]) != null)).map(([k, rot, suf = ""]) => {
-      const a = num(v.es[k][0]) || 0, b = num(v.es[k][1]) || 0, t = a + b || 1;
+    const est = esTodas ? EST_VIVO.filter(([k]) => esTodas[k] && (num(esTodas[k][0]) != null || num(esTodas[k][1]) != null)).map(([k, rot, suf = ""]) => {
+      const a = num(esTodas[k][0]) || 0, b = num(esTodas[k][1]) || 0, t = a + b || 1;
       const f = (x) => (k === "xg" ? fNum(x, 2) : x) + suf;
       return `<div class="est-linha"><span class="v">${f(a)}</span><span class="rot">${rot}</span><span class="v">${f(b)}</span>
         <span class="est-trilho"><span style="width:${(a / t) * 100}%"></span><span style="width:${(b / t) * 100}%"></span></span></div>`;
@@ -891,10 +1023,10 @@
     const lista = jogosVisiveis();
     const totalDia = todasPartidas().filter((x) => x.dia === estado.dia).length;
     const rec = document.getElementById("recolher");
-    if (rec) { const t = recolhidas.size ? "Expandir jogos" : "Recolher jogos"; rec.title = t; rec.setAttribute("aria-label", t); rec.innerHTML = iconeRecolher(); }
+    if (rec) { const t = recolhidas.size ? "Expandir jogos" : "Recolher jogos"; rec.title = t; rec.setAttribute("aria-label", t); morfar(rec, iconeRecolher()); }
     const filtrando = lista.length !== totalDia;
     const tbc = document.getElementById("tb-contagem");
-    if (tbc) tbc.innerHTML = totalDia ? `${filtrando ? `${lista.length} de ${totalDia} jogos` : `${totalDia} jogo${totalDia > 1 ? "s" : ""}`}${nFiltros(estado.filtro) ? ` · <button class="link" type="button" id="l-limpar2">limpar filtros</button>` : ""}` : "";
+    if (tbc) morfar(tbc, totalDia ? `${filtrando ? `${lista.length} de ${totalDia} jogos` : `${totalDia} jogo${totalDia > 1 ? "s" : ""}`}${nFiltros(estado.filtro) ? ` · <button class="link" type="button" id="l-limpar2">limpar filtros</button>` : ""}` : "");
     const contagem = "";
     if (!lista.length) {
       let dica = "";
@@ -905,7 +1037,7 @@
         else if (ant) dica = `<button class="link" type="button" data-dia="${ant.dia}">Ir para o último dia com jogos (${dataCurta(ant.p.d)})</button>`;
         else dica = "Não há jogos nos 3 dias antes nem nos 3 dias depois de hoje.";
       } else dica = "Os filtros estão escondendo todos os jogos deste dia.";
-      corpo.innerHTML = `${contagem}<div class="vazio"><strong>${totalDia ? "Nenhum jogo com esses filtros" : "Nenhum jogo neste dia"}</strong>${dica}</div>`;
+      morfar(corpo, `${contagem}<div class="vazio"><strong>${totalDia ? "Nenhum jogo com esses filtros" : "Nenhum jogo neste dia"}</strong>${dica}</div>`);
     } else {
       let html = "";
       if (estado.ordem === "comp") {
@@ -922,14 +1054,14 @@
           if (!recolhidas.has(x.code)) html += linhaJogo(x.code, x.p);
         }
       }
-      corpo.innerHTML = `${contagem}<div class="tabela-jogos ${TEM_ODDS ? "com-odds" : ""}">${CAB_COLUNAS}${html}</div>${NOTA_ODD}`;
+      morfar(corpo, `${contagem}<div class="tabela-jogos ${TEM_ODDS ? "com-odds" : ""}">${CAB_COLUNAS}${html}</div>${NOTA_ODD}`);
     }
     const l2 = document.getElementById("l-limpar2");
-    if (l2) l2.addEventListener("click", () => { estado.filtro = copiaFiltro(FILTRO_VAZIO); salvarFiltro(); telaJogos(); });
+    if (l2) l2.onclick = () => { estado.filtro = copiaFiltro(FILTRO_VAZIO); salvarFiltro(); telaJogos(); };
     const dest = document.getElementById("destaques");
     if (dest) {
       if (estado.sel) atualizarPainelJogo();
-      else dest.innerHTML = destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia));
+      else morfar(dest, destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia)));
     }
   }
 
@@ -968,7 +1100,7 @@
     const marcaFav = (tid) => (favTimes.has(String(tid)) ? `<i class="fav-time" title="Time favorito">${ESTRELA_SVG(12)}</i>` : "");
     return `<div class="jogo-v2" role="link" tabindex="0" data-ir="jogo/${code}/${p.i}">
       ${botaoEstrela("data-fav", k, fav, "este jogo")}
-      <span class="quando">${vivo && p.vv && p.vv.min ? `<span>${hora(p.d)}</span><b class="vivo-min">${h(p.vv.min)}</b>` : `<span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b>`}</span>
+      <span class="quando">${vivo && p.vv && p.vv.min ? `<span>${hora(p.d)}</span><b class="vivo-min">${h(p.vv.min)}</b>${(() => { const al = alertaPressao(p); return al ? `<i class="alerta-lista n${al.nivel} ${al.l === "h" ? "c" : "f"}" title="${h(nomeTime(al.tid))} pressionando forte">${al.nivel === 2 ? "🔥" : "⚡"}</i>` : ""; })()}` : `<span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b>`}</span>
       <span class="situacao">${ROT_STATUS(p)}</span>
       <span class="equipes">
         <span class="${vH ? "venc" : perdeu(vH, vA)}">${escudo(p.h)}<span>${h(nomeTime(p.h))}</span>${marcaFav(p.h)}</span>
@@ -1312,14 +1444,14 @@
       const mesmaTela = document.querySelector(".jogos-pagina") && estado.dia === dia;
       estado.dia = dia; estado.sel = { code, id: String(id) };
       // jogo aberto ao lado da lista: atualiza as duas partes (antes só o painel, e a lista ficava com placar velho)
-      if (mesmaTela) { renderListaJogos(); atualizarPainelJogo(); } else telaJogos();
+      if (mesmaTela) renderListaJogos(); else telaJogos(); // a lista já atualiza o painel do jogo
       return;
     }
     estado.sel = null;
     estado.dia = dia;
     const r = htmlJogo(code, p);
     const voltar = `<button class="botao-q texto voltar-v2" type="button" data-voltar>‹ Jogos de ${dataCurta(p.d)}</button>`;
-    app.innerHTML = `${voltar}<section class="painel jogo-pagina">${r}</section>`;
+    pintarApp("jogo/" + code + "/" + p.i, `${voltar}<section class="painel jogo-pagina">${r}</section>`);
   }
 
   function atualizarPainelJogo() {
@@ -1334,11 +1466,11 @@
       if (linha) linha.setAttribute("aria-current", "true");
       aside.className = "painel jogo-pagina detalhe-lado";
       aside.setAttribute("aria-label", "Jogo selecionado");
-      aside.innerHTML = `<button class="fechar-jogo" type="button" data-voltar title="Fechar o jogo e voltar aos destaques" aria-label="Fechar o jogo">✕</button>${htmlJogo(estado.sel.code, sel)}`;
+      morfar(aside, `<button class="fechar-jogo" type="button" data-voltar title="Fechar o jogo e voltar aos destaques" aria-label="Fechar o jogo">✕</button>${htmlJogo(estado.sel.code, sel)}`);
     } else {
       aside.className = "destaques";
       aside.setAttribute("aria-label", "Destaques do dia");
-      aside.innerHTML = destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia));
+      morfar(aside, destaquesDoDia(todasPartidas().filter((x) => x.dia === estado.dia)));
     }
   }
 
@@ -2192,13 +2324,22 @@
     const m = location.hash.match(/^#jogo\/([^/]+)\/([^/]+)/);
     return m ? { code: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) } : null;
   }
+  // atualização ao vivo (placar a cada 20 s, lances e estatísticas a cada poucos segundos)
+  const ROLAVEIS = "#lista-jogos-corpo, .detalhe-lado, .radar-lista, .ev-lista, .tabela-rolagem, .esc-lado, .abas-jogo, .chips";
   function aoVivoAtualizado() {
     todasPartidas.cache = null;
-    const rolaveis = [...document.querySelectorAll(".detalhe-lado, .detalhe-lado *")].filter((el) => el.scrollTop > 0).map((el) => [el.className, el.scrollTop]);
+    // guarda só a rolagem de quem rola de verdade (antes varria todos os elementos do painel: ~40 ms por atualização)
+    const rol = [...document.querySelectorAll(ROLAVEIS)].map((el, i) => (el.scrollTop || el.scrollLeft ? [i, el.scrollTop, el.scrollLeft] : null)).filter(Boolean);
     const y = window.scrollY;
-    render();
-    for (const [cls, top] of rolaveis) { const el = cls && document.getElementsByClassName(cls)[0]; if (el) el.scrollTop = top; }
-    window.scrollTo(0, y);
+    const aba = decodeURIComponent(location.hash.slice(1)).split("/")[0] || "jogos";
+    // na lista de jogos só a lista e o painel ao lado mudam: a barra de ferramentas (busca, filtros, data) fica como está
+    if (aba === "jogos" && !MODO_JANELA && document.getElementById("lista-jogos-corpo")) { renderListaJogos(); contadorVivo(); }
+    else render();
+    if (rol.length) {
+      const els = document.querySelectorAll(ROLAVEIS);
+      for (const [i, t, l] of rol) { const el = els[i]; if (el && (el.scrollTop !== t || el.scrollLeft !== l)) { el.scrollTop = t; el.scrollLeft = l; } }
+    }
+    if (window.scrollY !== y) window.scrollTo(0, y);
   }
 
   montarTopo();
