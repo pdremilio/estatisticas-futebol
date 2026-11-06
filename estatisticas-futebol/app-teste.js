@@ -225,7 +225,7 @@
   const avisoFonte = () => (window.AoVivo && window.AoVivo.indisponivel && window.AoVivo.indisponivel()
     ? `<div class="aviso-fonte" role="status"><b>Dados ao vivo temporariamente indisponíveis.</b> A ESPN não está respondendo; tentando de novo a cada 20 s. Enquanto isso, o placar vem da football-data, que atrasa alguns minutos.</div>` : "");
   const horaCurta = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-  const horaAtualizacao = (p) => { const v = p.vv || {}, t = v.emDet || v.em; if (!t) return ""; const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+  const horaAtualizacao = (p) => { const v = p.vv || {}, t = [v.emDet || v.em, v.emPbp].filter(Boolean).sort().pop(); if (!t) return ""; const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 
   // ---------- gráfico de pressão: uma barra por minuto (para cima o mandante, para baixo o visitante)
   // a barra do minuto atual vai crescendo conforme os lances chegam; minuto sem lance fica sem barra
@@ -325,6 +325,17 @@
     } catch (e) {}
   }
 
+  // de onde vêm os dados do gráfico (aparece embaixo dele)
+  function notaPressao(p) {
+    const v = p.vv || {}, partes = [];
+    if (horaAtualizacao(p)) partes.push(`Atualizado às ${horaAtualizacao(p)}.`);
+    if (v.temAtk && v.atk) partes.push(`Ataques: 365Scores, a cada ~6 s (registrados desde ${horaCurta(v.atk.desde)}, quando o jogo foi aberto).`);
+    else if (v.id365 && v.st === "in") partes.push("Esta liga não tem o contador de ataques do 365Scores: as barras vêm só dos lances.");
+    partes.push(v.pbp365
+      ? "Chutes, escanteios e gols: narração do 365Scores (consultada a cada 10 s; chega cerca de 1 minuto depois do lance), com a ESPN de reserva."
+      : "Chutes, escanteios e gols: narração da ESPN, que chega 1 a 2 minutos depois do lance.");
+    return partes.join(" ");
+  }
   function graficoPressao(p, compacto) {
     const pr = p.vv && p.vv.pr;
     if (!pr) {
@@ -402,7 +413,7 @@
       </div>` : "";
     return `<div class="pressao">
       ${blocoAlerta(p)}
-      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${p.vv.atk ? "ataques, chutes, escanteios e gols por minuto" : "chutes, escanteios e gols por minuto"}</span>
+      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${p.vv.temAtk ? "ataques, chutes, escanteios e gols por minuto" : "chutes, escanteios e gols por minuto"}</span>
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Exibir</button></div>
       ${config}
@@ -411,7 +422,7 @@
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
       <div class="pressao-simb">${simb}</div>
       <p class="pressao-info" aria-live="polite">${infoPressao ? h(infoPressao) : "Toque numa marca para ver o lance."}</p>
-      <p class="sub nota">${p.vv.atk ? `Ataques: 365Scores, a cada ~6 s (registrados desde ${horaCurta(p.vv.atk.desde)}, quando o jogo foi aberto). ` : ""}${horaAtualizacao(p) ? `Atualizado às ${horaAtualizacao(p)} · ` : ""}Chutes, escanteios e gols: narração da ESPN, que chega 1 a 2 minutos depois do lance.</p>
+      <p class="sub nota">${notaPressao(p)}</p>
     </div>`;
   }
   document.addEventListener("click", (e) => {
