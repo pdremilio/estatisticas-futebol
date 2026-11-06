@@ -3,44 +3,52 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0F6E5A">
+<meta name="theme-color" content="#0A0F1A">
 <meta name="description" content="ScanBall (página de teste).">
 <meta name="robots" content="noindex">
 <title>ScanBall · teste</title>
+<script>/* tema antes de pintar: escuro é o padrão; claro só se a pessoa escolheu */
+try { var t = JSON.parse(localStorage.getItem("ef5_tema") || localStorage.getItem("ef_tema") || "null"); if (t) document.documentElement.dataset.tema = t; } catch (e) {}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script>window.VER = Math.floor(Date.now() / 120000); document.write('<link rel="stylesheet" href="estilo-teste.css?v=' + VER + '">');</script>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230F6E5A'/%3E%3Cpath d='M16 16 L16.00 6.40 A9.6 9.6 0 0 1 24.31 11.20 Z' fill='%23F2C230'/%3E%3Ccircle cx='16' cy='16' r='9.6' fill='none' stroke='%23fff' stroke-width='2.1'/%3E%3Cpolygon points='16.00,12.40 19.42,14.89 18.12,18.91 13.88,18.91 12.58,14.89' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Ccircle cx='22' cy='22' r='20' fill='%23121A2A' stroke='%23233049' stroke-width='2'/%3E%3Ccircle cx='22' cy='22' r='12' fill='none' stroke='%23233049' stroke-width='2'/%3E%3Cpath d='M22 22 L22 2 A20 20 0 0 1 39.3 12 Z' fill='%2336D6F5'/%3E%3Ccircle cx='31' cy='15' r='3.2' fill='%23fff'/%3E%3C/svg%3E">
 </head>
 <body>
 <header class="topo">
   <div class="topo-linha">
-    <a class="marca" href="#jogos" aria-label="ScanBall, ir para Jogos">
-      <svg class="marca-icone" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0F6E5A"/><path d="M16 16 L16.00 6.40 A9.6 9.6 0 0 1 24.31 11.20 Z" fill="#F2C230"/><circle cx="16" cy="16" r="9.6" fill="none" stroke="#fff" stroke-width="2.1"/><polygon points="16.00,12.40 19.42,14.89 18.12,18.91 13.88,18.91 12.58,14.89" fill="#fff"/></svg>
-      <span class="marca-nome">ScanBall</span><small class="versao" style="background:var(--cartao);color:#15212B;border-color:var(--cartao)">teste · beta 5</small>
+    <a class="marca" href="#jogos" aria-label="ScanBall, ir para Hoje">
+      <svg class="marca-icone" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="20" fill="var(--superficie)" stroke="var(--linha)" stroke-width="2"/><circle cx="22" cy="22" r="12" fill="none" stroke="var(--linha)" stroke-width="2"/><path d="M22 22 L22 2 A20 20 0 0 1 39.3 12 Z" fill="var(--casa)" opacity=".9"/><circle cx="31" cy="15" r="3.2" fill="var(--tinta)"/></svg>
+      <span class="marca-nome">SCAN<b>BALL</b></span><small class="versao">teste · beta 6</small>
     </a>
+    <nav class="abas nav-sec" id="abas" aria-label="Seções">
+      <a href="#jogos" data-aba="jogos">Hoje</a>
+      <a href="#aovivo" data-aba="aovivo" class="aba-vivo"><i class="ponto-vivo" aria-hidden="true"></i>Ao vivo<span class="qtd-vivo" id="qtd-vivo" hidden></span></a>
+      <a href="#ligas" data-aba="ligas">Ligas</a>
+      <a href="#scanner" data-aba="scanner">Scanner</a>
+    </nav>
     <div class="topo-meta" id="topo-meta"></div>
     <button class="botao-conta" id="conta" type="button" hidden></button>
-    <button class="botao-icone" id="tema" type="button" aria-label="Alternar tema claro e escuro" title="Tema">
+    <button class="botao-icone" id="tema" type="button" aria-label="Alternar tema claro e escuro" title="Tema claro / escuro">
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.5 0-1-.1-1.4A5.5 5.5 0 0 1 13.4 3.1 9 9 0 0 0 12 3z"/></svg>
     </button>
   </div>
-  <nav class="abas" id="abas" aria-label="Seções">
-    <a href="#jogos" data-aba="jogos">Jogos</a>
-    <a href="#aovivo" data-aba="aovivo" class="aba-vivo">Ao vivo<span class="qtd-vivo" id="qtd-vivo" hidden></span></a>
-    <a href="#times" data-aba="times">Times</a>
-    <a href="#ranking" data-aba="ranking">Power Ranking</a>
-  </nav>
 </header>
-<div class="aviso"><div>Página de teste: aqui entram as novidades antes de irem para o site principal. O site normal continua em <a href="./">pdremilio.github.io/estatisticas-futebol</a>.</div></div>
+<div class="aviso"><div>Página de teste da <b>Beta 6</b> (visual e estrutura novos). O site normal continua em <a href="./">pdremilio.github.io/estatisticas-futebol</a>.</div></div>
 <div id="aviso"></div>
 <main id="app" tabindex="-1"></main>
 <footer class="rodape">
-  ScanBall · Dados: ESPN (jogos, estatísticas, placar e lances ao vivo) e FotMob (xG e rodadas); football-data.org como reserva. Projeções calculadas a partir dos placares; use como referência, não como garantia.
+  ScanBall · Dados: ESPN (jogos, estatísticas, placar e escalações), 365Scores (lances e ataques ao vivo) e FotMob (xG e rodadas); football-data.org como reserva. Projeções calculadas a partir dos placares; use como referência, não como garantia.
 </footer>
+<nav class="barra-baixo nav-sec" id="barra-baixo" aria-label="Seções">
+  <a href="#jogos" data-aba="jogos"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Hoje</a>
+  <a href="#aovivo" data-aba="aovivo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>Ao vivo<span class="qtd-vivo" id="qtd-vivo2" hidden></span></a>
+  <a href="#ligas" data-aba="ligas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v4a4 4 0 0 1-8 0zM5 5h3M16 5h3M12 12v4M8 20h8M10 16h4"/></svg>Ligas</a>
+  <a href="#scanner" data-aba="scanner"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 12V3.5"/><circle cx="12" cy="12" r="3"/></svg>Scanner</a>
+</nav>
 
-<!-- beta 5: base nova (ESPN + FotMob). Se não carregar ou estiver parada há mais de 12 h, usa a football-data (reserva). -->
+<!-- base: ESPN + FotMob (dados5.js). Se não carregar ou estiver parada há mais de 12 h, usa a football-data (reserva). -->
 <script>window.SB_TESTE = true;</script>
 <script>window.DADOS5_TENTOU = true; document.write('<script src="dados5.js?v=' + Date.now() + '"><\/script>');</script>
 <script>(function () {
