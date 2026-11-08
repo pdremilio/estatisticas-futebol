@@ -13,5 +13,5 @@ window.SB_CONFIG = {
   url: "https://gsotkmmpbdrlgxmfavoa.supabase.co",
   anonKey: "sb_publishable_uMvdvQJ_oFgb_Sw6H4kbMg_r8QB8RjG",
   aoVivo: false,
-  aoVivo5d: "",
+  aoVivo5d: "https://scanball-aovivo.pedroemilio-gnz.workers.dev",
 };
