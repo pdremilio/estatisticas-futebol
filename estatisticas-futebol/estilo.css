@@ -1103,3 +1103,10 @@ table.odds-tabela { margin-top: 14px; }
 @keyframes alerta-pulso { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 18%, transparent); } }
 @keyframes alerta-tremer { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
 .alerta-lista { font-style: normal; font-size: 12px; margin-left: 3px; }
+
+/* ================================================================ lances provisórios (contador do 365Scores, narração ainda não chegou) */
+.pressao .mk.mk-prov { opacity: .42; }
+.pressao .mk.mk-prov:hover, .pressao .mk.mk-prov:focus-visible { opacity: .9; }
+.pressao .p-gol.prov { opacity: .28; }
+.radar-lista li.prov { opacity: .7; }
+.radar-lista li.prov .t { font-style: italic; }

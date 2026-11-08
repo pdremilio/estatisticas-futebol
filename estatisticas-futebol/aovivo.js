@@ -21,6 +21,8 @@
   const lgDe = (code) => ((dados && dados.competicoes[code]) || {}).espn || ESPN[code];
   const codigos = () => Object.keys((dados && dados.competicoes) || {}).filter((c) => lgDe(c));
   const CICLO_VIVO = 20000, CICLO_CALMO = 60000, DETALHE_PRE = 120000, ELENCO_VALIDADE = 6 * 3600e3;
+  // jogo aberto rolando: a narração da ESPN é buscada a cada 10 s (a lista e o painel seguem a cada 20 s)
+  const DETALHE_VIVO = 10000;
 
   // ---------- nomes parecidos (mesma regra do atualizador de odds)
   const GENERICOS = new Set(["fc", "afc", "cf", "sc", "ec", "ac", "as", "ss", "club", "clube", "de", "da", "do", "del", "futebol", "football", "calcio", "cd", "ud", "fk", "sv", "sad", "the", "and", "esporte"]);
@@ -438,6 +440,7 @@
     if (!pr && !vv.pr) return false;
     vv.pr = pr; vv.lances = lances;
     if (pr) recalcularAtual(p);
+    conferirRapidos(p);
     return antes !== sig();
   }
 
@@ -521,6 +524,7 @@
     const antes =JSON.stringify([vv.ev, vv.es, vv.esc && Object.keys(vv.esc), vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.clk, vv.lances && vv.lances.length && vv.lances[vv.lances.length - 1].seq]);
     vv.ev = ev; vv.es = es; vv.esc = esc; vv.pr = pr; vv.lances = lances; vv.emDet = new Date().toISOString();
     if (pr) recalcularAtual(p);
+    conferirRapidos(p);
     if (temGol1T || (p.s === "IN_PLAY" && vv.per >= 2) || p.s === "FINISHED") { p.hh = hh; p.ha = ha; }
     return antes !== JSON.stringify([vv.ev, vv.es, vv.esc && Object.keys(vv.esc), vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.clk, vv.lances && vv.lances.length && vv.lances[vv.lances.length - 1].seq]);
   }
@@ -639,12 +643,12 @@
     const chave = p.vv.espn.code + ":" + p.vv.espn.id;
     const ultimo = ultimoDetalhe.get(chave) || 0;
     // jogo encerrado: busca mais uma vez para pegar os últimos lances e o resultado final
-    const intervalo = p.vv.st === "in" ? CICLO_VIVO - 1000 : p.vv.st === "pre" ? DETALHE_PRE : p.vv.st === "post" && !p.vv.detFinal ? 0 : Infinity;
+    const intervalo = p.vv.st === "in" ? DETALHE_VIVO - 1000 : p.vv.st === "pre" ? DETALHE_PRE : p.vv.st === "post" && !p.vv.detFinal ? 0 : Infinity;
     if (!forcar && Date.now() - ultimo < intervalo) return false;
     if (forcar && Date.now() - ultimo < 5000) return false;
     ultimoDetalhe.set(chave, Date.now());
     const r = await buscarJSON(`${BASE}${p.vv.espn.lg}/summary?event=${p.vv.espn.id}`);
-    if (!r) { ultimoDetalhe.set(chave, ultimo); return false; } // falhou: tenta de novo no próximo ciclo
+    if (!r) { ultimoDetalhe.set(chave, Date.now() - Math.max(0, intervalo - 5000)); return false; } // falhou: tenta de novo em ~5 s
     if (p.vv.st === "post") p.vv.detFinal = true;
     return lerDetalhe(r, p);
   }
@@ -736,7 +740,115 @@
       atk.ult = tot;
       gravarSessao(gid, atk);
     }
-    return antes !== JSON.stringify([vv.es365, vv.atk && vv.atk.ult]);
+    const rapMudou = contarRapidos(p, es, g, s, gid);
+    return rapMudou || antes !== JSON.stringify([vv.es365, vv.atk && vv.atk.ult]);
+  }
+
+  // ---------- lances rápidos: os CONTADORES do 365Scores (chutes, chutes no gol, trave, escanteios, placar)
+  // mudam antes da narração chegar. Quando um contador sobe, entra na hora uma marca "provisória" no minuto
+  // atual do gráfico; quando a narração (ESPN ou 365Scores) traz o mesmo lance, a provisória sai e fica o lance
+  // de verdade (com jogador e minuto exato). O site também mede quantos segundos o contador chegou antes.
+  const COMPAT_CHUTE = { alvo: 1, trave: 1, fora: 1, bloq: 1 };
+  const combina = (kp, kn) => kp === kn || (kp === "fora" && kn === "bloq") || (COMPAT_CHUTE[kp] && COMPAT_CHUTE[kn]);
+  const minutoDe = (sl) => (sl ? { per: sl.per, m: sl.b + sl.ad } : null);
+  const perto = (a, b) => a && b && Math.abs(a.m - b.m) <= 3 && (a.per === b.per || Math.abs(a.m - b.m) <= 1);
+  function lerRap(gid) { try { return JSON.parse(sessionStorage.getItem("sb365r_" + gid) || "null"); } catch (e) { return null; } }
+  function gravarRap(gid, rap) { try { sessionStorage.setItem("sb365r_" + gid, JSON.stringify(rap)); } catch (e) {} }
+  function registrarMedida(rap, k, seg) {
+    rap.med.push({ k, seg: Math.round(seg) });
+    if (rap.med.length > 80) rap.med.shift();
+  }
+  function contarRapidos(p, es, g, sl, gid) {
+    const vv = p.vv;
+    const rap = (vv.rap = vv.rap || lerRap(gid) || { ult: null, pend: [], med: [], vistos: {}, semPar: [], ok: false, id: 0, ini: Date.now() });
+    const num = (x) => (x == null || x === "" || isNaN(Number(x)) || Number(x) < 0 ? null : Number(x));
+    const gh = num((g.homeCompetitor || {}).score), ga = num((g.awayCompetitor || {}).score);
+    const cur = { gol: gh != null && ga != null ? [gh, ga] : null, alvo: es.alvo, chutes: es.chutes, trave: es.trave, esc: es.esc };
+    if (!rap.ult) { rap.ult = cur; conferirRapidos(p); gravarRap(gid, rap); return false; } // 1ª leitura: só marca o ponto de partida
+    const agora = Date.now(), mm = minutoDe(sl);
+    rap.semPar = rap.semPar.filter((x) => agora - x.t < 5 * 60e3);
+    let mudou = false;
+    [["h", 0], ["a", 1]].forEach(([l, i]) => {
+      const d = (k) => (cur[k] && rap.ult[k] && cur[k][i] != null && rap.ult[k][i] != null ? cur[k][i] - rap.ult[k][i] : 0);
+      const dg = d("gol"), da = d("alvo"), dc = d("chutes"), dt = d("trave"), de = d("esc");
+      if ([dg, da, dc, dt, de].some((x) => Math.abs(x) > 6)) return; // salto estranho (troca de jogo, correção grande): só reposiciona
+      // contador voltou (correção): tira a provisória mais nova daquele tipo
+      for (const [dx, ks] of [[dg, ["gol"]], [da, ["alvo"]], [dt, ["trave"]], [de, ["esc"]]]) {
+        for (let n = dx; n < 0; n++) {
+          const j = rap.pend.map((x) => x.l === l && ks.includes(x.k)).lastIndexOf(true);
+          if (j >= 0) { rap.pend.splice(j, 1); mudou = true; }
+        }
+      }
+      if (!mm) return;
+      const g0 = Math.max(dg, 0), a0 = Math.max(da, 0), t0 = Math.max(dt, 0);
+      const novos = [];
+      for (let n = 0; n < g0; n++) novos.push("gol");
+      for (let n = 0; n < Math.max(a0 - g0, 0); n++) novos.push("alvo");
+      for (let n = 0; n < t0; n++) novos.push("trave");
+      for (let n = 0; n < Math.max(dc - Math.max(a0, g0) - t0, 0); n++) novos.push("fora"); // chute para fora ou bloqueado
+      for (let n = 0; n < Math.max(de, 0); n++) novos.push("esc");
+      const golsNarr = vv.pr ? vv.pr.ev.filter((e) => e.l === l && e.k === "gol").length : 0;
+      for (const k of novos) {
+        // gol: o placar manda. Se a narração já tem todos os gols do placar, não precisa de marca
+        if (k === "gol") {
+          if (golsNarr >= cur.gol[i]) continue;
+          rap.pend.push({ id: ++rap.id, l, k, per: mm.per, m: mm.m, r: sl.ad ? sl.b + "+" + sl.ad : String(sl.b), t: agora });
+          mudou = true;
+          continue;
+        }
+        // a narração chegou ANTES do contador? então não cria marca: só anota a medida (negativa)
+        const j = rap.semPar.findIndex((x) => x.l === l && combina(k, x.k) && perto(x, mm));
+        if (j >= 0) { registrarMedida(rap, k, -(agora - rap.semPar[j].t) / 1000); rap.semPar.splice(j, 1); mudou = true; continue; }
+        rap.pend.push({ id: ++rap.id, l, k, per: mm.per, m: mm.m, r: sl.ad ? sl.b + "+" + sl.ad : String(sl.b), t: agora });
+        mudou = true;
+      }
+    });
+    for (const k in cur) if (cur[k]) rap.ult[k] = cur[k];
+    if (rap.pend.length > 40) rap.pend.splice(0, rap.pend.length - 40);
+    if (mudou) conferirRapidos(p);
+    gravarRap(gid, rap);
+    return mudou;
+  }
+  // confere a narração: cada lance novo (chute, escanteio, gol) "baixa" a provisória correspondente
+  function conferirRapidos(p) {
+    const vv = p.vv, pr = vv && vv.pr, rap = vv && vv.rap;
+    if (!rap) { if (vv) vv.prov = null; return; }
+    if (pr) {
+      // conta os lances da narração por time e tipo: quando a conta sobe, chegou lance novo (os mais recentes)
+      // (contar em vez de comparar nome/minuto evita "lance novo" falso quando a ESPN substitui a versão do 365Scores)
+      const agora = Date.now(), grupos = {};
+      for (const e of pr.ev) if (PESO[e.k] && e.k !== "falta" && e.k !== "imped") (grupos[e.l + e.k] = grupos[e.l + e.k] || []).push(e);
+      const vistos = rap.vistos && !Array.isArray(rap.vistos) ? rap.vistos : {};
+      for (const g in grupos) {
+        const lista = grupos[g].slice().sort((a, b) => a.i - b.i), antes = vistos[g] || 0;
+        vistos[g] = lista.length;
+        if (!rap.ok) continue;
+        for (const e of lista.slice(antes)) {
+          const me = minutoDe(pr.slots[e.i]);
+          // procura a provisória mais antiga do mesmo time e tipo (ou outro chute) perto desse minuto
+          let j = rap.pend.findIndex((x) => x.l === e.l && x.k === e.k && perto(x, me));
+          if (j < 0) j = rap.pend.findIndex((x) => x.l === e.l && combina(x.k, e.k) && perto(x, me));
+          if (j >= 0) { registrarMedida(rap, rap.pend[j].k, (agora - rap.pend[j].t) / 1000); rap.pend.splice(j, 1); }
+          // lance sem provisória: guarda por 5 min (o contador pode subir depois). Nos primeiros 30 s depois de
+          // abrir o jogo a narração ainda está "chegando de uma vez": esses só são contados
+          else if (e.k !== "gol" && agora - (rap.ini || 0) > 30000) rap.semPar.push({ l: e.l, k: e.k, per: me.per, m: me.m, t: agora });
+        }
+      }
+      for (const g in vistos) if (!grupos[g]) vistos[g] = 0;
+      rap.vistos = vistos;
+      rap.ok = true;
+    }
+    // provisórias que ainda esperam a narração, já na posição do gráfico
+    const atual = pr ? (pr.atual == null ? pr.ultimo : pr.atual) : -1;
+    vv.prov = pr ? rap.pend.map((x) => {
+      let i = pr.idx[x.per + ":" + (x.m > LIM[x.per] ? LIM[x.per] : x.m) + ":" + (x.m > LIM[x.per] ? x.m - LIM[x.per] : 0)];
+      if (i == null) i = Math.max(atual, 0);
+      return { i, l: x.l, k: x.k, j: "", x: "", min: x.r + "'", prov: true, t: x.t };
+    }) : null;
+    // medidor: quanto o contador chegou antes da narração (positivo = contador primeiro)
+    const seg = rap.med.map((x) => x.seg);
+    vv.medRap = seg.length ? { n: seg.length, media: Math.round(seg.reduce((a, b) => a + b, 0) / seg.length), min: Math.min(...seg), max: Math.max(...seg),
+      antes: seg.filter((x) => x > 0).length } : null;
   }
   // narração do 365Scores (lances), a cada 10 s com o jogo aberto
   const CICLO_PBP = 10000;
@@ -777,7 +889,7 @@
     if (document.hidden) return seguir();
     const p = jogoAberto();
     if (!p || p.vv.st !== "in") return seguir();
-    Promise.all([atualizar365(p, false).catch(() => false), atualizarPbp(p, false).catch(() => false)])
+    Promise.all([atualizarDetalhe(p, false).catch(() => false), atualizar365(p, false).catch(() => false), atualizarPbp(p, false).catch(() => false)])
       .then((m) => { if (m.some(Boolean)) redesenhar(); }).catch(() => {}).finally(seguir);
   }
 

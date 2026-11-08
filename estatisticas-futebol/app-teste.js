@@ -301,8 +301,21 @@
     });
     return Object.assign({}, pr, { h, a });
   }
-  function valoresPressao(pr0, modo, atk) {
-    const pr = somarAtaques(pr0, atk);
+  // lances "provisórios" (contador do 365Scores subiu e a narração ainda não chegou): mesmo peso dos lances
+  const PESO_PROV = { gol: 5, alvo: 3, trave: 2.5, fora: 1.5, bloq: 1.5, esc: 1.5 };
+  function somarProvisorios(pr, prov) {
+    if (!prov || !prov.length) return pr;
+    const h = pr.h.slice(), a = pr.a.slice();
+    for (const x of prov) {
+      const w = PESO_PROV[x.k];
+      if (!w || x.i == null || x.i >= pr.slots.length) continue;
+      const alvo = x.l === "h" ? h : a;
+      alvo[x.i] = Math.round(((alvo[x.i] || 0) + w) * 10) / 10;
+    }
+    return Object.assign({}, pr, { h, a });
+  }
+  function valoresPressao(pr0, modo, atk, prov) {
+    const pr = somarProvisorios(somarAtaques(pr0, atk), prov);
     if (modo !== "tendencia") return { h: pr.h, a: pr.a };
     // tendência: cada minuto carrega um pouco dos anteriores (o lance "esfria" aos poucos)
     const h = [], a = [];
@@ -322,14 +335,14 @@
     if (!pr || pr.fim || pr.intervalo || p.s !== "IN_PLAY") return null;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
     if (atual < 6) return null;
-    const val = valoresPressao(pr, "minuto", p.vv.atk);
+    const val = valoresPressao(pr, "minuto", p.vv.atk, p.vv.prov);
     const ini = Math.max(0, atual - 7);
     let sh = 0, sa = 0;
     for (let i = ini; i <= atual; i++) { sh += val.h[i] || 0; sa += val.a[i] || 0; }
     const l = sh >= sa ? "h" : "a", forte = Math.max(sh, sa), total = sh + sa;
     if (!total) return null;
     const share = forte / total;
-    const perigo = pr.ev.filter((e) => e.l === l && e.i >= ini && ["alvo", "trave", "esc"].includes(e.k)).length;
+    const perigo = pr.ev.concat(p.vv.prov || []).filter((e) => e.l === l && e.i >= ini && ["alvo", "trave", "esc"].includes(e.k)).length;
     // há quantos minutos o time está por cima (média de 3 barras)
     let mins = 0;
     for (let i = atual; i >= 2; i--) {
@@ -378,8 +391,13 @@
     if (v.temAtk && v.atk) partes.push(`Ataques: 365Scores, a cada ~6 s (registrados desde ${horaCurta(v.atk.desde)}, quando o jogo foi aberto).`);
     else if (v.id365 && v.st === "in") partes.push("Esta liga não tem o contador de ataques do 365Scores: as barras vêm só dos lances.");
     partes.push(v.pbp365
-      ? "Chutes, escanteios e gols: narração do 365Scores (consultada a cada 10 s; chega cerca de 1 minuto depois do lance), com a ESPN de reserva."
-      : "Chutes, escanteios e gols: narração da ESPN, que chega 1 a 2 minutos depois do lance.");
+      ? "Chutes, escanteios e gols: narração do 365Scores e da ESPN (consultadas a cada ~10 s)."
+      : "Chutes, escanteios e gols: narração da ESPN (consultada a cada ~10 s; chega 1 a 2 minutos depois do lance).");
+    if (v.rap) {
+      partes.push("Marcas claras: o contador do 365Scores já registrou o lance e a narração ainda não chegou.");
+      const m = v.medRap;
+      if (m) partes.push(`Medidor: em ${m.n} ${m.n === 1 ? "lance" : "lances"}, o contador chegou ${m.media >= 0 ? `em média ${m.media} s antes` : `em média ${-m.media} s depois`} da narração (de ${m.min} a ${m.max} s; ${m.antes} de ${m.n} antes).`);
+    }
     return partes.join(" ");
   }
   function graficoPressao(p, compacto) {
@@ -391,7 +409,9 @@
     const opc = compacto ? Object.assign({}, OPC_PADRAO, { alvo: false, fora: false, bloq: false, trave: false, cartao: true, sub: false, modo: estado.prOpc.modo }) : estado.prOpc;
     const n = pr.slots.length, L = 6, W = n * L, H = 100, meio = H / 2;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
-    const val = valoresPressao(pr, opc.modo, p.vv.atk);
+    const prov = p.vv.prov || [];
+    const val = valoresPressao(pr, opc.modo, p.vv.atk, prov);
+    const evs = prov.length ? pr.ev.concat(prov) : pr.ev; // narração + provisórias do contador
     let max = opc.modo === "tendencia" ? 8 : 6;
     for (let i = 0; i <= atual && i < n; i++) max = Math.max(max, val.h[i] || 0, val.a[i] || 0);
     const alt = (v) => Math.max((v || 0) / max * (meio - 3), v ? 2 : 0);
@@ -408,23 +428,23 @@
     let linhas = iniSeg > 0 ? `<line x1="${iniSeg * L}" x2="${iniSeg * L}" y1="0" y2="${H}" class="p-tempo"/>` : "";
     const iniProrr = pr.slots.findIndex((s) => s.per === 3);
     if (iniProrr > 0) linhas += `<line x1="${iniProrr * L}" x2="${iniProrr * L}" y1="0" y2="${H}" class="p-tempo"/>`;
-    if (opc.gol) for (const e of pr.ev) if (e.k === "gol") linhas += `<line x1="${e.i * L + L / 2}" x2="${e.i * L + L / 2}" y1="0" y2="${H}" class="p-gol ${e.l === "h" ? "c" : "f"}"/>`;
+    if (opc.gol) for (const e of evs) if (e.k === "gol") linhas += `<line x1="${e.i * L + L / 2}" x2="${e.i * L + L / 2}" y1="0" y2="${H}" class="p-gol ${e.l === "h" ? "c" : "f"}${e.prov ? " prov" : ""}"/>`;
 
     // marcas: tamanho fixo em pixels, empilhadas (até 2 por minuto e lado); toque mostra todas
     const bloco = compacto ? (window.innerWidth < 560 ? 4 : 3) : window.innerWidth < 560 ? 3 : window.innerWidth < 900 ? 2 : 1;
     const grupos = {};
-    for (const e of pr.ev) {
+    for (const e of evs) {
       if (!opc[grupoMarca(e.k)]) continue;
       const chave = e.l + Math.floor(e.i / bloco);
       (grupos[chave] = grupos[chave] || []).push(e);
     }
     const nomeLado = (l) => nomeTime(l === "h" ? p.h : p.a);
-    const descr = (x) => `${x.min || pr.slots[x.i].r + "'"} ${x.j ? x.j + " · " : ""}${NOME_MARCA[x.k]}${x.x ? " (" + x.x + ")" : ""}`;
+    const descr = (x) => `${x.min || pr.slots[x.i].r + "'"} ${x.j ? x.j + " · " : ""}${x.prov && x.k === "fora" ? "chute para fora ou bloqueado" : NOME_MARCA[x.k]}${x.x ? " (" + x.x + ")" : ""}${x.prov ? " (pelo contador, esperando a narração)" : ""}`;
     const marcas = Object.values(grupos).map((g) => {
       const ord = g.slice().sort((a, b) => PRIOR[b.k] - PRIOR[a.k]);
       const info = g.slice().sort((a, b) => a.i - b.i).map(descr).join(" | ") + ` — ${nomeLado(g[0].l)}`;
       const left = (((ord[0].i + 0.5) / n) * 100).toFixed(2);
-      return ord.slice(0, 2).map((e, j) => `<button type="button" class="mk mk-${e.k} ${e.l === "h" ? "mk-c" : "mk-f"} mk-n${j}${j === 1 && g.length > 2 ? " mk-mais" : ""}" style="left:${left}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${iconeMarca(e.k)}</button>`).join("");
+      return ord.slice(0, 2).map((e, j) => `<button type="button" class="mk mk-${e.k} ${e.l === "h" ? "mk-c" : "mk-f"}${e.prov ? " mk-prov" : ""} mk-n${j}${j === 1 && g.length > 2 ? " mk-mais" : ""}" style="left:${left}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${iconeMarca(e.k)}</button>`).join("");
     }).join("");
 
     // eixo de 5 em 5 minutos
@@ -437,7 +457,7 @@
     const ultimoSlot = pr.slots[n - 1];
     if (ultimoSlot.ad) eixo += `<span class="acr" style="left:100%">+${ultimoSlot.ad}</span>`;
 
-    const conta = (l, ks) => pr.ev.filter((x) => x.l === l && ks.includes(x.k)).length;
+    const conta = (l, ks) => evs.filter((x) => x.l === l && ks.includes(x.k)).length;
     const resumo = (l) => `${conta(l, ["gol", "alvo", "trave"])} no gol/trave · ${conta(l, ["fora", "bloq"])} fora/bloq.`;
     const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${faixa}
           <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/>${linhas}${barras}</svg>`;
@@ -798,9 +818,12 @@
     const em = v.emDet || v.em ? new Date(v.emDet || v.em) : null;
     const atual = em ? `<span class="atual">· atualizado ${pad(em.getHours())}:${pad(em.getMinutes())}:${pad(em.getSeconds())}</span>` : "";
     // lance a lance (narração da ESPN) ao lado das estatísticas; sem narração, ficam os lances principais
-    const narr = v.lances && v.lances.length ? (() => {
+    const prov = (v.prov || []).slice().sort((a, b) => b.t - a.t);
+    const NOME_PROV = { gol: "<b>GOL!</b>", alvo: "Chute no gol", trave: "<b>Na trave!</b>", fora: "Chute para fora ou bloqueado", esc: "Escanteio" };
+    const linhasProv = prov.map((e) => `<li class="prov ${e.l === "a" ? "f" : "c"}"><span class="m">${h(e.min)}</span><span class="ic-l">${ICONE_LANCE[e.k] || ""}</span><span class="t">${NOME_PROV[e.k] || ""} · ${h(nomeTime(e.l === "h" ? p.h : p.a))} <span class="sub">(pelo contador; detalhes chegando)</span></span></li>`).join("");
+    const narr = (v.lances && v.lances.length) || prov.length ? (() => {
       const visto = novosDoRadar(p);
-      return `<ul class="radar-lista narracao" aria-live="polite">${v.lances.slice().reverse().map((e, i) => `<li class="${e.seq > visto ? "novo" : ""} ${e.k === "marco" ? "marco" : e.l === "a" ? "f" : "c"}${i === 0 ? " atual" : ""}">
+      return `<ul class="radar-lista narracao" aria-live="polite">${linhasProv}${(v.lances || []).slice().reverse().map((e, i) => `<li class="${e.seq > visto ? "novo" : ""} ${e.k === "marco" ? "marco" : e.l === "a" ? "f" : "c"}${i === 0 && !prov.length ? " atual" : ""}">
         <span class="m">${h(e.min)}</span><span class="ic-l">${ICONE_LANCE[e.k] || ""}</span><span class="t">${textoLance(p, e)}</span></li>`).join("")}</ul>`;
     })() : "";
     return `<div class="vivo-painel">
