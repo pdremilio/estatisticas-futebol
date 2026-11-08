@@ -827,6 +827,7 @@ table.odds-tabela { margin-top: 14px; }
 .pressao-area { position: relative; height: 204px; }
 .pressao-area svg { position: absolute; left: 0; right: 0; top: 26px; bottom: 26px; width: 100%; height: calc(100% - 52px); display: block; overflow: visible; }
 .pressao .p-c { fill: var(--casa); } .pressao .p-f { fill: var(--fora); }
+.pressao .p-empate { fill: var(--tinta-3); fill-opacity: .55; }
 .pressao .p-atual { fill-opacity: .55; stroke: currentColor; }
 .pressao .p-c.p-atual { stroke: var(--casa); } .pressao .p-f.p-atual { stroke: var(--fora); }
 .pressao .p-atual { stroke-width: 1; vector-effect: non-scaling-stroke; }
@@ -1116,3 +1117,6 @@ table.odds-tabela { margin-top: 14px; }
 .pressao-posse .pp-barra { height: 6px; border-radius: 3px; background: var(--fora); overflow: hidden; display: block; }
 .pressao-posse .pp-barra i { display: block; height: 100%; background: var(--casa); }
 .pressao-posse small { grid-column: 1 / -1; text-align: center; margin-top: -2px; }
+.pressao-posse.vazio { display: flex; justify-content: center; gap: 6px; }
+.pressao-posse.mini { margin: 2px 2px 0; font-size: 12px; gap: 2px 8px; }
+.pressao-posse.mini .pp-barra { height: 4px; }

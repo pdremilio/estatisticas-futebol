@@ -283,7 +283,7 @@
     esc: "escanteio", amarelo: "cartão amarelo", vermelho: "cartão vermelho", "2amarelo": "2º amarelo (expulso)", sub: "substituição" };
   const PRIOR = { gol: 9, vermelho: 8, "2amarelo": 8, trave: 7, alvo: 6, amarelo: 5, fora: 4, bloq: 3, sub: 2, esc: 1 };
   const grupoMarca = (k) => (k === "amarelo" || k === "vermelho" || k === "2amarelo" ? "cartao" : k);
-  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "tendencia", som: false };
+  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "tendencia", saldo: true, som: false };
   estado.prOpc = Object.assign({}, OPC_PADRAO, ler("pr_opc", {}));
   estado.prConfig = false;
   let infoPressao = "";
@@ -328,18 +328,25 @@
     });
     return Object.assign({}, pr, { h, a });
   }
-  // "posse do momento": parte dos passes de cada time nos últimos 5 minutos
-  function posseMomento(p) {
-    const pr = p.vv && p.vv.pr, pas = p.vv && p.vv.pas;
-    if (!pr || !pas || pr.fim) return null;
+  // "pressão nos últimos 5 min": parte de cada time nos pontos do gráfico (lances, ataques, domínio de passes e
+  // lances provisórios) das 5 últimas barras. Funciona em todo jogo que tem o gráfico.
+  function pressaoMomento(p) {
+    const pr = p.vv && p.vv.pr;
+    if (!pr || pr.fim || p.s === "FINISHED") return null;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
-    let ph = 0, pa = 0;
-    for (let i = Math.max(0, atual - 4); i <= atual; i++) {
-      const s = pr.slots[i]; if (!s) continue;
-      const k = s.per + ":" + s.b + ":" + s.ad; ph += pas.h[k] || 0; pa += pas.a[k] || 0;
-    }
-    if (ph + pa < 10) return null;
-    return Math.round((ph / (ph + pa)) * 100);
+    if (atual < 0) return null;
+    const val = valoresPressao(pr, "minuto", p.vv.atk, p.vv.prov, p.vv.pas);
+    let sh = 0, sa = 0;
+    for (let i = Math.max(0, atual - 4); i <= atual; i++) { sh += val.h[i] || 0; sa += val.a[i] || 0; }
+    return { tot: sh + sa, h: sh + sa ? Math.round((sh / (sh + sa)) * 100) : 50 };
+  }
+  function blocoPressao5(p, compacto) {
+    const pm = pressaoMomento(p);
+    if (!pm) return "";
+    const rot = `<small class="sub">pressão nos últimos 5 min</small>`;
+    if (pm.tot < 0.5) return `<div class="pressao-posse vazio${compacto ? " mini" : ""}">${rot}<small class="sub">sem lances</small></div>`;
+    return `<div class="pressao-posse${compacto ? " mini" : ""}" title="Parte de cada time nos pontos do gráfico (chutes, escanteios, gols, ataques e domínio de passes) nos últimos 5 minutos">
+      <span>${compacto ? "" : h(nomeTime(p.h)) + " "}<b>${pm.h}%</b></span><span class="pp-barra"><i style="width:${pm.h}%"></i></span><span><b>${100 - pm.h}%</b>${compacto ? "" : " " + h(nomeTime(p.a))}</span>${rot}</div>`;
   }
   function valoresPressao(pr0, modo, atk, prov, pas) {
     const pr = somarPasses(somarProvisorios(somarAtaques(pr0, atk), prov), pas);
@@ -434,11 +441,20 @@
       const msg = p.vv && p.vv.st === "pre" ? "O gráfico de pressão começa quando a bola rolar." : "Gráfico de pressão indisponível para este jogo.";
       return compacto ? "" : `<div class="pressao vazio-p"><p class="sub">${msg}</p></div>`;
     }
-    const opc = compacto ? Object.assign({}, OPC_PADRAO, { alvo: false, fora: false, bloq: false, trave: false, cartao: true, sub: false, modo: estado.prOpc.modo }) : estado.prOpc;
+    const opc = compacto ? Object.assign({}, OPC_PADRAO, { alvo: false, fora: false, bloq: false, trave: false, cartao: true, sub: false, modo: estado.prOpc.modo, saldo: estado.prOpc.saldo }) : estado.prOpc;
     const n = pr.slots.length, L = 6, W = n * L, H = 100, meio = H / 2;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
     const prov = p.vv.prov || [];
-    const val = valoresPressao(pr, opc.modo, p.vv.atk, prov, p.vv.pas);
+    const val0 = valoresPressao(pr, opc.modo, p.vv.atk, prov, p.vv.pas);
+    // saldo: em cada minuto só aparece quem dominou, com a barra = a diferença entre os dois times;
+    // minuto equilibrado (os dois atacando parecido) vira um tracinho cinza no meio
+    const empate = [];
+    const val = !opc.saldo ? val0 : { h: [], a: [] };
+    if (opc.saldo) for (let i = 0; i < n; i++) {
+      const vh = val0.h[i] || 0, va = val0.a[i] || 0, d = Math.round((vh - va) * 10) / 10;
+      if (vh && va && Math.abs(d) < Math.max(0.5, 0.2 * Math.max(vh, va))) { empate[i] = true; val.h[i] = 0; val.a[i] = 0; continue; }
+      val.h[i] = d > 0 ? d : 0; val.a[i] = d < 0 ? -d : 0;
+    }
     const evs = prov.length ? pr.ev.concat(prov) : pr.ev; // narração + provisórias do contador
     // escala: o teto é o "minuto forte típico" do jogo (85% das barras ficam abaixo dele), não o maior pico.
     // Assim um minuto com gol não achata o resto; o que passa do teto encosta no limite
@@ -453,6 +469,7 @@
       const x = i * L + 0.6, eAgora = i === atual && !pr.fim && !pr.intervalo ? " p-atual" : "";
       if (val.h[i]) barras += `<rect class="p-c${eAgora}" x="${x}" y="${(meio - alt(val.h[i])).toFixed(1)}" width="${L - 1.2}" height="${alt(val.h[i]).toFixed(1)}"/>`;
       if (val.a[i]) barras += `<rect class="p-f${eAgora}" x="${x}" y="${meio}" width="${L - 1.2}" height="${alt(val.a[i]).toFixed(1)}"/>`;
+      if (empate[i]) barras += `<rect class="p-empate${eAgora}" x="${x}" y="${meio - 3}" width="${L - 1.2}" height="6"/>`;
     }
     // faixa do minuto atual (mostra onde a barra está "crescendo")
     const faixa = !pr.fim && !pr.intervalo && atual >= 0 ? `<rect class="p-faixa" x="${atual * L}" y="0" width="${L}" height="${H}"/>` : "";
@@ -495,7 +512,7 @@
     const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${faixa}
           <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/>${linhas}${barras}</svg>`;
     if (compacto) {
-      return `${blocoAlerta(p, true)}<div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}</div></div>`;
+      return `${blocoAlerta(p, true)}<div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}</div>${blocoPressao5(p, true)}</div>`;
     }
     const simb = TIPOS_MARCA.filter(([k]) => opc[k] && k !== "esc").map(([k]) => {
       const ex = k === "cartao" ? '<i class="mk-ex mk-amarelo"></i><i class="mk-ex mk-vermelho"></i>' : `<i class="mk-ex mk-${k}">${iconeMarca(k)}</i>`;
@@ -506,9 +523,10 @@
         <div class="pc-linha"><span class="sub">Barras</span>
           <button type="button" class="chip" data-prmodo="minuto" aria-pressed="${opc.modo !== "tendencia"}">Só o minuto</button>
           <button type="button" class="chip" data-prmodo="tendencia" aria-pressed="${opc.modo === "tendencia"}">Tendência</button>
+          <button type="button" class="chip" data-propc="saldo" aria-pressed="${!!opc.saldo}">Só o saldo</button>
           <button type="button" class="chip" data-propc="padrao">Restaurar padrão</button></div>
         <div class="pc-linha"><span class="sub">Alerta</span><button type="button" class="chip" data-propc="som" aria-pressed="${!!opc.som}">🔔 Som quando um time pressionar forte</button></div>
-        <p class="sub">"Só o minuto": cada barra mostra só o que aconteceu naquele minuto. "Tendência": cada barra carrega um pouco dos minutos anteriores.</p>
+        <p class="sub">"Só o minuto": cada barra mostra só o que aconteceu naquele minuto. "Tendência": cada barra carrega um pouco dos minutos anteriores. "Só o saldo": em cada minuto aparece só o time que dominou (barra = a diferença entre os dois); minuto equilibrado vira um tracinho cinza.</p>
       </div>` : "";
     return `<div class="pressao">
       ${blocoAlerta(p)}
@@ -518,7 +536,7 @@
       ${config}
       <div class="pressao-area">${svg}${marcas}</div>
       <div class="pressao-eixo" aria-hidden="true">${eixo}</div>
-      ${(() => { const pm = posseMomento(p); return pm == null ? "" : `<div class="pressao-posse" title="Parte dos passes de cada time nos últimos 5 minutos"><span>${h(nomeTime(p.h))} <b>${pm}%</b></span><span class="pp-barra"><i style="width:${pm}%"></i></span><span><b>${100 - pm}%</b> ${h(nomeTime(p.a))}</span><small class="sub">bola nos últimos 5 min</small></div>`; })()}
+      ${blocoPressao5(p)}
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
       <div class="pressao-simb">${simb}</div>
       <p class="pressao-info" aria-live="polite">${infoPressao ? h(infoPressao) : "Toque numa marca para ver o lance."}</p>
