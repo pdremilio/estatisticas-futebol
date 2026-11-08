@@ -1120,3 +1120,5 @@ table.odds-tabela { margin-top: 14px; }
 .pressao-posse.vazio { display: flex; justify-content: center; gap: 6px; }
 .pressao-posse.mini { margin: 2px 2px 0; font-size: 12px; gap: 2px 8px; }
 .pressao-posse.mini .pp-barra { height: 4px; }
+.pressao-config .pc-chave input { flex: 1 1 220px; min-width: 0; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--linha); background: var(--cartao); color: inherit; font: inherit; font-size: 13px; }
+.pressao-config .pc-chave small { flex-basis: 100%; }

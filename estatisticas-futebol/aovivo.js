@@ -900,6 +900,86 @@
     return aplicarMistura(p);
   }
 
+  // ---------- 5DollarFootballAPI (teste pessoal): ataques e ataques perigosos do jogo aberto.
+  // Só funciona com a chave salva NESTE navegador (nunca vai para o código do site). Plano Pro: 10 pedidos/min
+  // por conta -> estatísticas a cada ~8 s (7,5/min) + lista de jogos ao vivo a cada 2 min para achar o jogo.
+  const D5 = "https://api.5dollarfootballapi.com/v1/";
+  const chave5d = () => { try { return localStorage.getItem("sb_5d_chave") || ""; } catch (e) { return ""; } };
+  const d5Status = { msg: "", em: 0 };
+  let d5Lista = null, d5ListaEm = 0, d5Pausa = 0;
+  const d5Par = new Map(), d5Ult = new Map();
+  async function buscar5d(caminho) {
+    const k = chave5d();
+    if (!k || Date.now() < d5Pausa) return null;
+    try {
+      const r = await fetch(D5 + caminho, { headers: { Authorization: "Bearer " + k }, cache: "no-store" });
+      if (r.status === 429) { const seg = Number(r.headers.get("Retry-After")) || 30; d5Pausa = Date.now() + seg * 1000; d5Status.msg = `limite de pedidos atingido: esperando ${seg} s (tem outra aba do site aberta?)`; return null; }
+      if (r.status === 401 || r.status === 403) { d5Pausa = Date.now() + 5 * 60e3; d5Status.msg = `chave recusada (erro ${r.status}); confira a chave`; return null; }
+      if (!r.ok) { d5Status.msg = `erro ${r.status} na API`; return null; }
+      const j = await r.json();
+      d5Status.msg = "ok"; d5Status.em = Date.now();
+      return j && j.success ? j : null;
+    } catch (e) {
+      d5Pausa = Date.now() + 60e3;
+      d5Status.msg = "o navegador bloqueou o pedido (a API não aceita chamadas direto do site) ou sem conexão";
+      return null;
+    }
+  }
+  async function idDo5d(p) {
+    const ch = chaveJogo(p);
+    if (d5Par.get(ch)) return d5Par.get(ch);
+    if (!d5Lista || Date.now() - d5ListaEm > 120000) {
+      d5ListaEm = Date.now();
+      const r = await buscar5d("fixtures?status=live&per_page=500");
+      if (!r) return 0;
+      d5Lista = r.data || [];
+    }
+    const T = dados.times || {}, nome = (id) => [(T[id] || {}).n, (T[id] || {}).c, (T[id] || {}).t].join(" ");
+    const th = tokens(nome(p.h)), ta = tokens(nome(p.a)), quando = Date.parse(p.d);
+    let melhor = 0, nota = 0;
+    for (const g of d5Lista) {
+      const dif = Math.abs(Date.parse(g.kickoff_utc) - quando);
+      if (!(dif <= 3 * 3600e3)) continue;
+      const t = g.teams || {}, sh = parecido(th, tokens((t.home || {}).name)), sa = parecido(ta, tokens((t.away || {}).name));
+      if (!sh || !sa) continue;
+      const n = sh + sa - dif / 86400e3;
+      if (n > nota) { melhor = g.id; nota = n; }
+    }
+    if (melhor) d5Par.set(ch, melhor);
+    return melhor;
+  }
+  async function atualizar5d(p) {
+    if (!chave5d() || !p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
+    const ch = chaveJogo(p);
+    if (Date.now() - (d5Ult.get(ch) || 0) < 7500) return false;
+    d5Ult.set(ch, Date.now());
+    const vv = p.vv;
+    const id = await idDo5d(p);
+    if (!id) { const antes = vv.d5 && vv.d5.semJogo; vv.d5 = vv.d5 && vv.d5.id ? vv.d5 : { semJogo: true }; return !antes; }
+    const r = await buscar5d(`fixtures/${id}/statistics`);
+    const st = r && r.data && r.data.statistics;
+    if (!st) return false;
+    const par = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
+    const cur = { at: par(st.attacks), da: par(st.dangerous_attacks) };
+    const d5 = (vv.d5 = vv.d5 && vv.d5.id === id ? vv.d5 : lerSessao(id, "d5") || { id, at: { h: {}, a: {} }, da: { h: {}, a: {} }, ult: null, desde: new Date().toISOString() });
+    const sl = slotDe(vv.clk, vv.per);
+    let mudou = false;
+    if (d5.ult && sl) {
+      const k = chaveSlot(sl);
+      for (const q of ["at", "da"]) {
+        if (!cur[q] || !d5.ult[q]) continue;
+        for (const [i, l] of [[0, "h"], [1, "a"]]) {
+          const d = cur[q][i] - d5.ult[q][i];
+          if (d > 0 && d < 40) { d5[q][l][k] = (d5[q][l][k] || 0) + d; mudou = true; if (q === "da") d5.mudDa = Date.now(); }
+        }
+      }
+    }
+    d5.ult = { at: cur.at || (d5.ult && d5.ult.at), da: cur.da || (d5.ult && d5.ult.da) };
+    d5.em = Date.now();
+    gravarSessao(id, d5, "d5");
+    return mudou || !vv.d5Ok ? ((vv.d5Ok = true), true) : false;
+  }
+
   let timer365 = null;
   function ciclo365() {
     clearTimeout(timer365);
@@ -907,7 +987,7 @@
     if (document.hidden) return seguir();
     const p = jogoAberto();
     if (!p || p.vv.st !== "in") return seguir();
-    Promise.all([atualizarDetalhe(p, false).catch(() => false), atualizar365(p, false).catch(() => false), atualizarPbp(p, false).catch(() => false)])
+    Promise.all([atualizarDetalhe(p, false).catch(() => false), atualizar365(p, false).catch(() => false), atualizarPbp(p, false).catch(() => false), atualizar5d(p).catch(() => false)])
       .then((m) => { if (m.some(Boolean)) redesenhar(); }).catch(() => {}).finally(seguir);
   }
 
@@ -1027,7 +1107,7 @@
   }
 
   window.AoVivo = {
-    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe,
+    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status,
     _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); },
   };
 })();

@@ -335,7 +335,7 @@
     if (!pr || pr.fim || p.s === "FINISHED") return null;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
     if (atual < 0) return null;
-    const val = valoresPressao(pr, "minuto", p.vv.atk, p.vv.prov, p.vv.pas);
+    const val = valoresPressao(pr, "minuto", p.vv.atk, p.vv.prov, p.vv.pas, p.vv);
     let sh = 0, sa = 0;
     for (let i = Math.max(0, atual - 4); i <= atual; i++) { sh += val.h[i] || 0; sa += val.a[i] || 0; }
     return { tot: sh + sa, h: sh + sa ? Math.round((sh / (sh + sa)) * 100) : 50 };
@@ -348,8 +348,23 @@
     return `<div class="pressao-posse${compacto ? " mini" : ""}" title="Parte de cada time nos pontos do gráfico (chutes, escanteios, gols, ataques e domínio de passes) nos últimos 5 minutos">
       <span>${compacto ? "" : h(nomeTime(p.h)) + " "}<b>${pm.h}%</b></span><span class="pp-barra"><i style="width:${pm.h}%"></i></span><span><b>${100 - pm.h}%</b>${compacto ? "" : " " + h(nomeTime(p.a))}</span>${rot}</div>`;
   }
-  function valoresPressao(pr0, modo, atk, prov, pas) {
-    const pr = somarPasses(somarProvisorios(somarAtaques(pr0, atk), prov), pas);
+  // 5DollarFootballAPI (teste pessoal, só com a chave salva no navegador): cada ataque perigoso vale 0,6;
+  // os ataques comuns (0,12 cada) só entram quando o 365Scores não tem o contador de ataques dele
+  const PESO_DA = 0.6, PESO_AT5 = 0.12;
+  function somarD5(pr, d5, temAtk) {
+    if (!d5 || !d5.da) return pr;
+    const h = pr.h.slice(), a = pr.a.slice();
+    pr.slots.forEach((s, i) => {
+      const k = s.per + ":" + s.b + ":" + s.ad;
+      for (const [l, arr] of [["h", h], ["a", a]]) {
+        const v = (d5.da[l][k] || 0) * PESO_DA + (temAtk ? 0 : (d5.at[l][k] || 0) * PESO_AT5);
+        if (v) arr[i] = Math.round(((arr[i] || 0) + Math.min(v, 4)) * 10) / 10;
+      }
+    });
+    return Object.assign({}, pr, { h, a });
+  }
+  function valoresPressao(pr0, modo, atk, prov, pas, vv) {
+    const pr = somarD5(somarPasses(somarProvisorios(somarAtaques(pr0, atk), prov), pas), vv && vv.d5, vv && vv.temAtk);
     if (modo !== "tendencia") return { h: pr.h, a: pr.a };
     // tendência: cada minuto carrega um pouco dos anteriores (o lance "esfria" aos poucos)
     const h = [], a = [];
@@ -361,6 +376,7 @@
     return { h, a };
   }
 
+  const temChave5d = () => { try { return !!localStorage.getItem("sb_5d_chave"); } catch (e) { return false; } };
   // ---------- alerta de pressão: quem está dominando os últimos minutos (lances da ESPN + ataques do 365Scores)
   // nível 1 "pressão forte": ≥ 68% da pressão das últimas 8 barras; nível 2 "gol pode sair": ≥ 75% e
   // pelo menos 3 lances perigosos (chute no gol, trave ou escanteio) nesse período.
@@ -369,7 +385,7 @@
     if (!pr || pr.fim || pr.intervalo || p.s !== "IN_PLAY") return null;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
     if (atual < 6) return null;
-    const val = valoresPressao(pr, "minuto", p.vv.atk, p.vv.prov, p.vv.pas);
+    const val = valoresPressao(pr, "minuto", p.vv.atk, p.vv.prov, p.vv.pas, p.vv);
     const ini = Math.max(0, atual - 7);
     let sh = 0, sa = 0;
     for (let i = ini; i <= atual; i++) { sh += val.h[i] || 0; sa += val.a[i] || 0; }
@@ -424,6 +440,13 @@
     if (horaAtualizacao(p)) partes.push(`Atualizado às ${horaAtualizacao(p)}.`);
     if (v.temAtk && v.atk) partes.push(`Ataques: 365Scores, a cada ~6 s (registrados desde ${horaCurta(v.atk.desde)}, quando o jogo foi aberto).`);
     else if (v.id365 && v.st === "in") partes.push("Esta liga não tem o contador de ataques do 365Scores.");
+    if (temChave5d()) {
+      const st = (window.AoVivo && AoVivo.d5Status) || {}, d = v.d5;
+      if (d && d.ult && d.ult.da) partes.push(`5DollarFootballAPI: ataques perigosos ${d.ult.da[0]} × ${d.ult.da[1]}${d.ult.at ? `, ataques ${d.ult.at[0]} × ${d.ult.at[1]}` : ""} (lido a cada ~8 s desde ${horaCurta(d.desde)}; último ataque perigoso novo ${d.mudDa ? `há ${Math.round((Date.now() - d.mudDa) / 1000)} s` : "ainda não"}).`);
+      else if (d && d.semJogo) partes.push("5DollarFootballAPI: este jogo não está na lista ao vivo deles.");
+      if (st.msg && st.msg !== "ok") partes.push(`5DollarFootballAPI: ${st.msg}.`);
+      else if (!d) partes.push("5DollarFootballAPI: conectando…");
+    }
     if (v.temPas && v.pas) partes.push("Domínio: o time que trocou mais passes no minuto ganha barra pela diferença (365Scores, a cada ~6 s, desde que o jogo foi aberto).");
     partes.push(v.pbp365
       ? "Chutes, escanteios e gols: narração do 365Scores e da ESPN (consultadas a cada ~10 s)."
@@ -445,7 +468,7 @@
     const n = pr.slots.length, L = 6, W = n * L, H = 100, meio = H / 2;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
     const prov = p.vv.prov || [];
-    const val0 = valoresPressao(pr, opc.modo, p.vv.atk, prov, p.vv.pas);
+    const val0 = valoresPressao(pr, opc.modo, p.vv.atk, prov, p.vv.pas, p.vv);
     // saldo: em cada minuto só aparece quem dominou, com a barra = a diferença entre os dois times;
     // minuto equilibrado (os dois atacando parecido) vira um tracinho cinza no meio
     const empate = [];
@@ -525,12 +548,15 @@
           <button type="button" class="chip" data-prmodo="tendencia" aria-pressed="${opc.modo === "tendencia"}">Tendência</button>
           <button type="button" class="chip" data-propc="saldo" aria-pressed="${!!opc.saldo}">Só o saldo</button>
           <button type="button" class="chip" data-propc="padrao">Restaurar padrão</button></div>
+        <div class="pc-linha pc-chave"><span class="sub">5Dollar</span>${temChave5d()
+          ? `<span class="sub">chave salva neste navegador ✓</span><button type="button" class="chip" data-chave5d="remover">Remover chave</button>`
+          : `<input id="chave5d" type="password" autocomplete="off" placeholder="cole a chave da 5DollarFootballAPI" aria-label="Chave da 5DollarFootballAPI"><button type="button" class="chip" data-chave5d="salvar">Salvar</button><small class="sub">A chave fica só neste navegador; nunca vai para o site nem para o GitHub.</small>`}</div>
         <div class="pc-linha"><span class="sub">Alerta</span><button type="button" class="chip" data-propc="som" aria-pressed="${!!opc.som}">🔔 Som quando um time pressionar forte</button></div>
         <p class="sub">"Só o minuto": cada barra mostra só o que aconteceu naquele minuto. "Tendência": cada barra carrega um pouco dos minutos anteriores. "Só o saldo": em cada minuto aparece só o time que dominou (barra = a diferença entre os dois); minuto equilibrado vira um tracinho cinza.</p>
       </div>` : "";
     return `<div class="pressao">
       ${blocoAlerta(p)}
-      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${[p.vv.temPas && p.vv.pas ? "domínio (passes)" : "", p.vv.temAtk ? "ataques" : "", "chutes, escanteios e gols por minuto"].filter(Boolean).join(", ")}</span>
+      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${[p.vv.temPas && p.vv.pas ? "domínio (passes)" : "", p.vv.d5 && p.vv.d5.da ? "ataques perigosos" : "", p.vv.temAtk ? "ataques" : "", "chutes, escanteios e gols por minuto"].filter(Boolean).join(", ")}</span>
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Exibir</button></div>
       ${config}
@@ -544,8 +570,16 @@
     </div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig]");
+    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-chave5d]");
     if (!t) return;
+    if (t.dataset.chave5d) {
+      try {
+        if (t.dataset.chave5d === "salvar") { const v = ((document.getElementById("chave5d") || {}).value || "").trim(); if (v) localStorage.setItem("sb_5d_chave", v); }
+        else localStorage.removeItem("sb_5d_chave");
+      } catch (err) {}
+      aoVivoAtualizado();
+      return;
+    }
     if (t.classList.contains("mk")) {
       infoPressao = t.dataset.info || "";
       const caixa = t.closest(".pressao").querySelector(".pressao-info");
