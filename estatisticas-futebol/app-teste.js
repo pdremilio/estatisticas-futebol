@@ -435,30 +435,30 @@
   }
 
   // de onde vêm os dados do gráfico (aparece embaixo dele)
+  // rodapé do gráfico: só a hora; o resto (fontes, medidor, corrida) fica em "Informações técnicas"
   function notaPressao(p) {
-    const v = p.vv || {}, partes = [];
-    if (horaAtualizacao(p)) partes.push(`Atualizado às ${horaAtualizacao(p)}.`);
-    if (v.temAtk && v.atk) partes.push(`Ataques: 365Scores, a cada ~6 s (registrados desde ${horaCurta(v.atk.desde)}, quando o jogo foi aberto).`);
-    else if (v.id365 && v.st === "in") partes.push("Esta liga não tem o contador de ataques do 365Scores.");
+    const v = p.vv || {}, hora = horaAtualizacao(p);
+    const linhas = [];
+    const L = (rot, txt) => linhas.push(`<div class="dv-l"><dt>${rot}</dt><dd>${txt}</dd></div>`);
+    L("Lances", v.pbp365 ? "narração do 365Scores + ESPN, consultadas a cada ~10 s" : "narração da ESPN, consultada a cada ~10 s (chega 1 a 2 min depois do lance)");
+    L("Ataques (365Scores)", v.temAtk && v.atk ? `sim, a cada ~6 s (desde ${horaCurta(v.atk.desde)})` : v.id365 && v.st === "in" ? "esta liga não tem o contador" : "—");
+    L("Domínio de passes", v.temPas && v.pas ? "sim: quem trocou mais passes no minuto ganha barra pela diferença (a cada ~6 s)" : "—");
     if (temChave5d()) {
       const st = (window.AoVivo && AoVivo.d5Status) || {}, d = v.d5;
-      if (d && d.ult && d.ult.da) partes.push(`5DollarFootballAPI: ataques perigosos ${d.ult.da[0]} × ${d.ult.da[1]}${d.ult.at ? `, ataques ${d.ult.at[0]} × ${d.ult.at[1]}` : ""} (lido a cada ~8 s desde ${horaCurta(d.desde)}; último ataque perigoso novo ${d.mudDa ? `há ${Math.round((Date.now() - d.mudDa) / 1000)} s` : "ainda não"}).`);
-      else if (d && d.semJogo) partes.push("5DollarFootballAPI: este jogo não está na lista ao vivo deles.");
-      if (st.msg && st.msg !== "ok") partes.push(`5DollarFootballAPI: ${st.msg}.`);
-      else if (!d) partes.push("5DollarFootballAPI: conectando…");
+      const estado5 = st.msg && st.msg !== "ok" ? h(st.msg) : d && d.semJogo ? "este jogo não está na lista ao vivo deles" : !d ? "conectando…" : "ok, lido a cada ~8 s" + (d.desde ? ` (desde ${horaCurta(d.desde)})` : "");
+      L("5DollarFootballAPI", estado5);
+      if (d && d.ult && d.ult.da) L("Ataques perigosos", `${d.ult.da[0]} × ${d.ult.da[1]}${d.ult.at ? ` · ataques ${d.ult.at[0]} × ${d.ult.at[1]}` : ""} · último novo ${d.mudDa ? `há ${Math.round((Date.now() - d.mudDa) / 1000)} s` : "ainda não"}`);
     }
-    if (v.temPas && v.pas) partes.push("Domínio: o time que trocou mais passes no minuto ganha barra pela diferença (365Scores, a cada ~6 s, desde que o jogo foi aberto).");
-    partes.push(v.pbp365
-      ? "Chutes, escanteios e gols: narração do 365Scores e da ESPN (consultadas a cada ~10 s)."
-      : "Chutes, escanteios e gols: narração da ESPN (consultada a cada ~10 s; chega 1 a 2 minutos depois do lance).");
     if (v.rap) {
-      partes.push(`Marcas claras: o contador (${temChave5d() ? "365Scores ou 5Dollar" : "365Scores"}) já registrou o lance e a narração ainda não chegou.`);
+      L("Marcas claras", `o contador (${temChave5d() ? "365Scores ou 5Dollar" : "365Scores"}) já registrou o lance e a narração ainda não chegou`);
       const c = v.corrida;
-      if (c) partes.push(`Corrida dos contadores: o 5Dollar chegou primeiro em ${c.d5} de ${c.n} ${c.n === 1 ? "lance" : "lances"} e o 365Scores em ${c.n - c.d5} (diferença média de ${c.media} s).`);
+      if (c) L("Corrida dos contadores", `5Dollar primeiro em <b>${c.d5} de ${c.n}</b> · 365Scores em ${c.n - c.d5} · diferença média de ${c.media} s`);
       const m = v.medRap;
-      if (m) partes.push(`Medidor: em ${m.n} ${m.n === 1 ? "lance" : "lances"}, o contador chegou ${m.media >= 0 ? `em média ${m.media} s antes` : `em média ${-m.media} s depois`} da narração (de ${m.min} a ${m.max} s; ${m.antes} de ${m.n} antes).`);
+      if (m) L("Contador × narração", `em ${m.n} ${m.n === 1 ? "lance" : "lances"}, o contador chegou <b>${m.media >= 0 ? `${m.media} s antes` : `${-m.media} s depois`}</b> em média (de ${m.min} a ${m.max} s; ${m.antes} de ${m.n} antes)`);
     }
-    return partes.join(" ");
+    return `<div class="pressao-rodape"><span class="sub">${hora ? `Atualizado às ${hora}` : ""}</span>
+      <button type="button" class="pressao-engr" data-prdev aria-expanded="${!!estado.prDev}">Informações técnicas ${estado.prDev ? "▴" : "▾"}</button></div>
+      ${estado.prDev ? `<dl class="pressao-dev">${linhas.join("")}</dl>` : ""}`;
   }
   function graficoPressao(p, compacto) {
     const pr = p.vv && p.vv.pr;
@@ -568,11 +568,11 @@
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
       <div class="pressao-simb">${simb}</div>
       <p class="pressao-info" aria-live="polite">${infoPressao ? h(infoPressao) : "Toque numa marca para ver o lance."}</p>
-      <p class="sub nota">${notaPressao(p)}</p>
+      ${notaPressao(p)}
     </div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-chave5d]");
+    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-chave5d], [data-prdev]");
     if (!t) return;
     if (t.dataset.chave5d) {
       try {
@@ -589,6 +589,7 @@
       if (t.closest(".painel-vivo-card")) e.stopPropagation();
       return;
     }
+    if (t.hasAttribute("data-prdev")) { estado.prDev = !estado.prDev; aoVivoAtualizado(); return; }
     if (t.hasAttribute("data-prconfig")) estado.prConfig = !estado.prConfig;
     else if (t.dataset.prmodo) estado.prOpc.modo = t.dataset.prmodo;
     else if (t.dataset.propc === "padrao") estado.prOpc = Object.assign({}, OPC_PADRAO);

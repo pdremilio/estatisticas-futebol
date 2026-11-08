@@ -1122,3 +1122,17 @@ table.odds-tabela { margin-top: 14px; }
 .pressao-posse.mini .pp-barra { height: 4px; }
 .pressao-config .pc-chave input { flex: 1 1 220px; min-width: 0; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--linha); background: var(--cartao); color: inherit; font: inherit; font-size: 13px; }
 .pressao-config .pc-chave small { flex-basis: 100%; }
+
+/* ================================================================ rodapé do gráfico + informações técnicas */
+.pressao-rodape { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+.pressao-rodape .pressao-engr { font-size: 12px; }
+.pressao-dev { margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--linha); border-radius: 8px; background: var(--superficie); font-size: 12px;
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0 12px; }
+.pressao-dev .dv-l { display: contents; }
+.pressao-dev dt { color: var(--tinta-2); font-weight: 600; padding: 5px 0; border-top: 1px solid var(--linha); }
+.pressao-dev dd { margin: 0; padding: 5px 0; border-top: 1px solid var(--linha); color: var(--tinta); }
+.pressao-dev .dv-l:first-child dt, .pressao-dev .dv-l:first-child dd { border-top: 0; }
+@media (max-width: 560px) {
+  .pressao-dev { grid-template-columns: 1fr; }
+  .pressao-dev dd { border-top: 0; padding-top: 0; }
+}
