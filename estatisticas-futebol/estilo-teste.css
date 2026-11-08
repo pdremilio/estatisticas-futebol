@@ -824,7 +824,7 @@ table.odds-tabela { margin-top: 14px; }
 .pressao-config p { margin: 0; font-size: 12px; }
 .pressao-config .chip { font-size: 13px; padding: 4px 10px; }
 /* faixas: 24px de marcas em cima (mandante), barras no meio, 24px embaixo (visitante) */
-.pressao-area { position: relative; height: 172px; }
+.pressao-area { position: relative; height: 204px; }
 .pressao-area svg { position: absolute; left: 0; right: 0; top: 26px; bottom: 26px; width: 100%; height: calc(100% - 52px); display: block; overflow: visible; }
 .pressao .p-c { fill: var(--casa); } .pressao .p-f { fill: var(--fora); }
 .pressao .p-atual { fill-opacity: .55; stroke: currentColor; }
@@ -1110,3 +1110,9 @@ table.odds-tabela { margin-top: 14px; }
 .pressao .p-gol.prov { opacity: .28; }
 .radar-lista li.prov { opacity: .7; }
 .radar-lista li.prov .t { font-style: italic; }
+
+/* ================================================================ posse do momento (passes dos últimos 5 min) */
+.pressao-posse { display: grid; grid-template-columns: auto minmax(60px, 1fr) auto; align-items: center; gap: 4px 10px; margin: 8px 0 2px; font-size: 13px; }
+.pressao-posse .pp-barra { height: 6px; border-radius: 3px; background: var(--fora); overflow: hidden; display: block; }
+.pressao-posse .pp-barra i { display: block; height: 100%; background: var(--casa); }
+.pressao-posse small { grid-column: 1 / -1; text-align: center; margin-top: -2px; }

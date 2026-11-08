@@ -314,8 +314,35 @@
     }
     return Object.assign({}, pr, { h, a });
   }
-  function valoresPressao(pr0, modo, atk, prov) {
-    const pr = somarProvisorios(somarAtaques(pr0, atk), prov);
+  // domínio: quem trocou mais passes em cada minuto (365Scores, a cada 6 s) ganha barra pela DIFERENÇA de passes.
+  // É o que mostra o "amasso" mesmo sem chute: 12 passes x 4 no minuto = +1,2 (quase um chute para fora)
+  const PESO_PASSE = 0.15;
+  function somarPasses(pr, pas) {
+    if (!pas) return pr;
+    const h = pr.h.slice(), a = pr.a.slice();
+    pr.slots.forEach((s, i) => {
+      const k = s.per + ":" + s.b + ":" + s.ad, ph = pas.h[k] || 0, pa = pas.a[k] || 0;
+      // (no máximo 2,5 por minuto: se o 365Scores mandar vários minutos de passes de uma vez, não vira um pico falso)
+      if (ph > pa) h[i] = Math.round(((h[i] || 0) + Math.min((ph - pa) * PESO_PASSE, 2.5)) * 10) / 10;
+      else if (pa > ph) a[i] = Math.round(((a[i] || 0) + Math.min((pa - ph) * PESO_PASSE, 2.5)) * 10) / 10;
+    });
+    return Object.assign({}, pr, { h, a });
+  }
+  // "posse do momento": parte dos passes de cada time nos últimos 5 minutos
+  function posseMomento(p) {
+    const pr = p.vv && p.vv.pr, pas = p.vv && p.vv.pas;
+    if (!pr || !pas || pr.fim) return null;
+    const atual = pr.atual == null ? pr.ultimo : pr.atual;
+    let ph = 0, pa = 0;
+    for (let i = Math.max(0, atual - 4); i <= atual; i++) {
+      const s = pr.slots[i]; if (!s) continue;
+      const k = s.per + ":" + s.b + ":" + s.ad; ph += pas.h[k] || 0; pa += pas.a[k] || 0;
+    }
+    if (ph + pa < 10) return null;
+    return Math.round((ph / (ph + pa)) * 100);
+  }
+  function valoresPressao(pr0, modo, atk, prov, pas) {
+    const pr = somarPasses(somarProvisorios(somarAtaques(pr0, atk), prov), pas);
     if (modo !== "tendencia") return { h: pr.h, a: pr.a };
     // tendência: cada minuto carrega um pouco dos anteriores (o lance "esfria" aos poucos)
     const h = [], a = [];
@@ -335,7 +362,7 @@
     if (!pr || pr.fim || pr.intervalo || p.s !== "IN_PLAY") return null;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
     if (atual < 6) return null;
-    const val = valoresPressao(pr, "minuto", p.vv.atk, p.vv.prov);
+    const val = valoresPressao(pr, "minuto", p.vv.atk, p.vv.prov, p.vv.pas);
     const ini = Math.max(0, atual - 7);
     let sh = 0, sa = 0;
     for (let i = ini; i <= atual; i++) { sh += val.h[i] || 0; sa += val.a[i] || 0; }
@@ -389,7 +416,8 @@
     const v = p.vv || {}, partes = [];
     if (horaAtualizacao(p)) partes.push(`Atualizado às ${horaAtualizacao(p)}.`);
     if (v.temAtk && v.atk) partes.push(`Ataques: 365Scores, a cada ~6 s (registrados desde ${horaCurta(v.atk.desde)}, quando o jogo foi aberto).`);
-    else if (v.id365 && v.st === "in") partes.push("Esta liga não tem o contador de ataques do 365Scores: as barras vêm só dos lances.");
+    else if (v.id365 && v.st === "in") partes.push("Esta liga não tem o contador de ataques do 365Scores.");
+    if (v.temPas && v.pas) partes.push("Domínio: o time que trocou mais passes no minuto ganha barra pela diferença (365Scores, a cada ~6 s, desde que o jogo foi aberto).");
     partes.push(v.pbp365
       ? "Chutes, escanteios e gols: narração do 365Scores e da ESPN (consultadas a cada ~10 s)."
       : "Chutes, escanteios e gols: narração da ESPN (consultada a cada ~10 s; chega 1 a 2 minutos depois do lance).");
@@ -410,11 +438,16 @@
     const n = pr.slots.length, L = 6, W = n * L, H = 100, meio = H / 2;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
     const prov = p.vv.prov || [];
-    const val = valoresPressao(pr, opc.modo, p.vv.atk, prov);
+    const val = valoresPressao(pr, opc.modo, p.vv.atk, prov, p.vv.pas);
     const evs = prov.length ? pr.ev.concat(prov) : pr.ev; // narração + provisórias do contador
-    let max = opc.modo === "tendencia" ? 8 : 6;
-    for (let i = 0; i <= atual && i < n; i++) max = Math.max(max, val.h[i] || 0, val.a[i] || 0);
-    const alt = (v) => Math.max((v || 0) / max * (meio - 3), v ? 2 : 0);
+    // escala: o teto é o "minuto forte típico" do jogo (85% das barras ficam abaixo dele), não o maior pico.
+    // Assim um minuto com gol não achata o resto; o que passa do teto encosta no limite
+    const vals = [];
+    for (let i = 0; i <= atual && i < n; i++) { if (val.h[i]) vals.push(val.h[i]); if (val.a[i]) vals.push(val.a[i]); }
+    vals.sort((x, y) => x - y);
+    const p85 = vals.length ? vals[Math.min(vals.length - 1, Math.floor(vals.length * 0.85))] : 0;
+    const max = Math.max(opc.modo === "tendencia" ? 4 : 3, p85 * 1.2);
+    const alt = (v) => Math.max(Math.min((v || 0) / max, 1) * (meio - 3), v ? 2 : 0);
     let barras = "";
     for (let i = 0; i <= atual && i < n; i++) {
       const x = i * L + 0.6, eAgora = i === atual && !pr.fim && !pr.intervalo ? " p-atual" : "";
@@ -479,12 +512,13 @@
       </div>` : "";
     return `<div class="pressao">
       ${blocoAlerta(p)}
-      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${p.vv.temAtk ? "ataques, chutes, escanteios e gols por minuto" : "chutes, escanteios e gols por minuto"}</span>
+      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${[p.vv.temPas && p.vv.pas ? "domínio (passes)" : "", p.vv.temAtk ? "ataques" : "", "chutes, escanteios e gols por minuto"].filter(Boolean).join(", ")}</span>
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Exibir</button></div>
       ${config}
       <div class="pressao-area">${svg}${marcas}</div>
       <div class="pressao-eixo" aria-hidden="true">${eixo}</div>
+      ${(() => { const pm = posseMomento(p); return pm == null ? "" : `<div class="pressao-posse" title="Parte dos passes de cada time nos últimos 5 minutos"><span>${h(nomeTime(p.h))} <b>${pm}%</b></span><span class="pp-barra"><i style="width:${pm}%"></i></span><span><b>${100 - pm}%</b> ${h(nomeTime(p.a))}</span><small class="sub">bola nos últimos 5 min</small></div>`; })()}
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
       <div class="pressao-simb">${simb}</div>
       <p class="pressao-info" aria-live="polite">${infoPressao ? h(infoPressao) : "Toque numa marca para ver o lance."}</p>

@@ -231,7 +231,11 @@
       j = j ? j.displayName : k === "falta" ? (String(c.text || "").match(/^(.+?)\s+\(/) || [])[1] || "" : jogadorDe(c.text);
       const extra = k === "sub" && pl.participants && pl.participants[1] && pl.participants[1].athlete ? "sai " + pl.participants[1].athlete.displayName
         : pl.type.type === "own-goal" ? "contra" : /penalty/.test(pl.type.type) ? "pênalti" : "";
-      brutos.push({ s, l, k, j: j || "", x: extra, min: (c.time && c.time.displayValue) || "", seq: c.sequence });
+      // falta sofrida perto da área (último quarto do campo) pesa o dobro: é bola parada perigosa
+      // (a posição da ESPN vem do ponto de vista de quem cometeu a falta)
+      let w = 0;
+      if (k === "falta") { const fx = Number(pl.fieldPositionX); if (pl.fieldPositionX != null && !isNaN(fx) && 100 - fx >= 75) w = 1; }
+      brutos.push({ s, l, k, w, j: j || "", x: extra, min: (c.time && c.time.displayValue) || "", seq: c.sequence });
     }
     const st = vv.st;
     if (!temLance && st !== "in" && st !== "post") return null;
@@ -251,7 +255,7 @@
     for (const e of brutos) {
       const i = idx[chaveSlot(e.s)];
       if (i == null) continue;
-      if (PESO[e.k]) pr[e.l][i] = Math.round((pr[e.l][i] + PESO[e.k]) * 10) / 10;
+      if (PESO[e.k]) pr[e.l][i] = Math.round((pr[e.l][i] + (e.w || PESO[e.k])) * 10) / 10;
       pr.ultimo = Math.max(pr.ultimo, i);
       if (e.k !== "falta" && e.k !== "imped") pr.ev.push({ i, l: e.l, k: e.k, j: e.j, x: e.x, min: e.min });
     }
@@ -694,9 +698,9 @@
   const EST_365 = { "Gols esperados (xG)": "xg", "Ataque": "atk", "Chances perigosas criadas": "cp", "Posse de Bola": "posse", "Total de chutes": "chutes",
     "Chutes no gol": "alvo", "Escanteios": "esc", "Trave": "trave", "Faltas": "faltas", "Cartões amarelos": "amarelos", "Cartões vermelhos": "vermelhos",
     "Impedimentos": "imped", "Defesas do goleiro": "defesas", "Total de passes": "passes" };
-  function chaveSessao(gid) { return "sb365_" + gid; }
-  function lerSessao(gid) { try { return JSON.parse(sessionStorage.getItem(chaveSessao(gid)) || "null"); } catch (e) { return null; } }
-  function gravarSessao(gid, atk) { try { sessionStorage.setItem(chaveSessao(gid), JSON.stringify(atk)); } catch (e) {} }
+  function chaveSessao(gid, tipo) { return "sb365" + (tipo || "") + "_" + gid; }
+  function lerSessao(gid, tipo) { try { return JSON.parse(sessionStorage.getItem(chaveSessao(gid, tipo)) || "null"); } catch (e) { return null; } }
+  function gravarSessao(gid, obj, tipo) { try { sessionStorage.setItem(chaveSessao(gid, tipo), JSON.stringify(obj)); } catch (e) {} }
   const ultimo365 = new Map();
   async function atualizar365(p, forcar) {
     if (!p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
@@ -719,7 +723,7 @@
       es[k][x.competitorId === idCasa ? 0 : 1] = v;
     }
     const vv = p.vv;
-    const antes = JSON.stringify([vv.es365, vv.atk && vv.atk.ult]);
+    const antes = JSON.stringify([vv.es365, vv.atk && vv.atk.ult, vv.pas && vv.pas.ult]);
     vv.es365 = es;
     vv.id365 = gid;
     vv.temAtk = !!es.atk; // algumas ligas (ex.: Brasileirão) não têm o contador de ataques no 365Scores
@@ -740,8 +744,22 @@
       atk.ult = tot;
       gravarSessao(gid, atk);
     }
+    // passes por minuto (quem está com a bola agora): a diferença entre uma leitura e outra entra no minuto atual
+    const tp = es.passes && es.passes[0] != null && es.passes[1] != null ? [es.passes[0], es.passes[1]] : null;
+    vv.temPas = !!tp;
+    if (tp && s) {
+      const pas = (vv.pas = vv.pas || lerSessao(gid, "p") || { h: {}, a: {}, ult: null });
+      const k = chaveSlot(s);
+      if (pas.ult) {
+        for (const [i, l] of [[0, "h"], [1, "a"]]) {
+          const d = tp[i] - pas.ult[i];
+          if (d > 0 && d < 120) pas[l][k] = (pas[l][k] || 0) + d;
+        }
+      }
+      if (!pas.ult || String(pas.ult) !== String(tp)) { pas.ult = tp; gravarSessao(gid, pas, "p"); }
+    }
     const rapMudou = contarRapidos(p, es, g, s, gid);
-    return rapMudou || antes !== JSON.stringify([vv.es365, vv.atk && vv.atk.ult]);
+    return rapMudou || antes !== JSON.stringify([vv.es365, vv.atk && vv.atk.ult, vv.pas && vv.pas.ult]);
   }
 
   // ---------- lances rápidos: os CONTADORES do 365Scores (chutes, chutes no gol, trave, escanteios, placar)
