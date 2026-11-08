@@ -42,6 +42,8 @@ jobs:
           curl -sfL "${{ steps.pages.outputs.base_url }}/dados.js" -o dados.js || rm -f dados.js
           curl -sfL "${{ steps.pages.outputs.base_url }}/dados5.js" -o dados5.js || rm -f dados5.js
           curl -sfL "${{ steps.pages.outputs.base_url }}/cache5.json" -o cache5.json || rm -f cache5.json
+          curl -sfL "${{ steps.pages.outputs.base_url }}/cache5d.json" -o cache5d.json || rm -f cache5d.json
+          curl -sfL "${{ steps.pages.outputs.base_url }}/extra5d.js" -o extra5d.js || rm -f extra5d.js
 
       - name: Atualizar dados
         env:
@@ -56,13 +58,22 @@ jobs:
         timeout-minutes: 15
         run: python3 atualizar_b5.py
 
+      # Números extras de pré-jogo (ataques, ataques perigosos, 1º tempo) pela 5DollarFootballAPI.
+      # A chave fica no segredo FIVE_DOLLAR_KEY; sem ela, o passo não faz nada. Se falhar, o site segue normal.
+      - name: Números extras (5DollarFootballAPI)
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          FIVE_DOLLAR_KEY: ${{ secrets.FIVE_DOLLAR_KEY }}
+        run: python3 atualizar_5d.py
+
       - name: Montar a pasta do site
         run: |
           mkdir -p _site
           cp index.html estilo.css app.js motor.js dados-demo.js config.js contas.js aovivo.js _site/
           if [ -f dados.js ]; then cp dados.js _site/; fi
           if [ -f agenda.json ]; then cp agenda.json _site/; fi
-          for f in teste.html app-teste.js aovivo-teste.js estilo-teste.css motor-teste.js dados5.js cache5.json; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
+          for f in teste.html app-teste.js aovivo-teste.js estilo-teste.css motor-teste.js dados5.js cache5.json extra5d.js cache5d.json; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
 
       - name: Enviar o site
         uses: actions/upload-pages-artifact@v3
