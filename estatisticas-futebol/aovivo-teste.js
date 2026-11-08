@@ -758,7 +758,9 @@
       }
       if (!pas.ult || String(pas.ult) !== String(tp)) { pas.ult = tp; gravarSessao(gid, pas, "p"); }
     }
-    const rapMudou = contarRapidos(p, es, g, s, gid);
+    const num = (x) => (x == null || x === "" || isNaN(Number(x)) || Number(x) < 0 ? null : Number(x));
+    const gh = num((g.homeCompetitor || {}).score), ga = num((g.awayCompetitor || {}).score);
+    const rapMudou = contarFonte(p, "365", { gol: gh != null && ga != null ? [gh, ga] : null, alvo: es.alvo, chutes: es.chutes, trave: es.trave, esc: es.esc }, s);
     return rapMudou || antes !== JSON.stringify([vv.es365, vv.atk && vv.atk.ult, vv.pas && vv.pas.ult]);
   }
 
@@ -770,30 +772,35 @@
   const combina = (kp, kn) => kp === kn || (kp === "fora" && kn === "bloq") || (COMPAT_CHUTE[kp] && COMPAT_CHUTE[kn]);
   const minutoDe = (sl) => (sl ? { per: sl.per, m: sl.b + sl.ad } : null);
   const perto = (a, b) => a && b && Math.abs(a.m - b.m) <= 3 && (a.per === b.per || Math.abs(a.m - b.m) <= 1);
-  function lerRap(gid) { try { return JSON.parse(sessionStorage.getItem("sb365r_" + gid) || "null"); } catch (e) { return null; } }
-  function gravarRap(gid, rap) { try { sessionStorage.setItem("sb365r_" + gid, JSON.stringify(rap)); } catch (e) {} }
+  function lerRap(ch) { try { return JSON.parse(sessionStorage.getItem("sbrap_" + ch) || "null"); } catch (e) { return null; } }
+  function gravarRap(ch, rap) { try { sessionStorage.setItem("sbrap_" + ch, JSON.stringify(rap)); } catch (e) {} }
   function registrarMedida(rap, k, seg) {
     rap.med.push({ k, seg: Math.round(seg) });
     if (rap.med.length > 80) rap.med.shift();
   }
-  function contarRapidos(p, es, g, sl, gid) {
-    const vv = p.vv;
-    const rap = (vv.rap = vv.rap || lerRap(gid) || { ult: null, pend: [], med: [], vistos: {}, semPar: [], ok: false, id: 0, ini: Date.now() });
-    const num = (x) => (x == null || x === "" || isNaN(Number(x)) || Number(x) < 0 ? null : Number(x));
-    const gh = num((g.homeCompetitor || {}).score), ga = num((g.awayCompetitor || {}).score);
-    const cur = { gol: gh != null && ga != null ? [gh, ga] : null, alvo: es.alvo, chutes: es.chutes, trave: es.trave, esc: es.esc };
-    if (!rap.ult) { rap.ult = cur; conferirRapidos(p); gravarRap(gid, rap); return false; } // 1ª leitura: só marca o ponto de partida
+  // contadores de uma FONTE (365Scores ou 5DollarFootballAPI): quando sobem, viram lance provisório.
+  // cur = { gol: placar, alvo: chutes no gol, chutes: total de chutes OU fora: chutes para fora, trave, esc }
+  // Se as duas fontes registram o mesmo lance, ele vale uma vez só, e o site anota qual chegou primeiro.
+  const NOME_FONTE = { "365": "365Scores", "5d": "5Dollar" };
+  function contarFonte(p, fonte, cur, sl) {
+    const vv = p.vv, ch = chaveJogo(p);
+    const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
+    if (!rap.ult || Array.isArray(rap.ult) || rap.ult.gol !== undefined) rap.ult = {}; // formato antigo
+    rap.corrida = rap.corrida || [];
+    const ult = rap.ult[fonte];
+    if (!ult) { rap.ult[fonte] = cur; conferirRapidos(p); gravarRap(ch, rap); return false; } // 1ª leitura: só o ponto de partida
     const agora = Date.now(), mm = minutoDe(sl);
     rap.semPar = rap.semPar.filter((x) => agora - x.t < 5 * 60e3);
     let mudou = false;
+    const nova = (l, k) => rap.pend.push({ id: ++rap.id, l, k, per: mm.per, m: mm.m, r: sl.ad ? sl.b + "+" + sl.ad : String(sl.b), t: agora, src: { [fonte]: agora } });
     [["h", 0], ["a", 1]].forEach(([l, i]) => {
-      const d = (k) => (cur[k] && rap.ult[k] && cur[k][i] != null && rap.ult[k][i] != null ? cur[k][i] - rap.ult[k][i] : 0);
-      const dg = d("gol"), da = d("alvo"), dc = d("chutes"), dt = d("trave"), de = d("esc");
-      if ([dg, da, dc, dt, de].some((x) => Math.abs(x) > 6)) return; // salto estranho (troca de jogo, correção grande): só reposiciona
-      // contador voltou (correção): tira a provisória mais nova daquele tipo
+      const d = (k) => (cur[k] && ult[k] && cur[k][i] != null && ult[k][i] != null ? cur[k][i] - ult[k][i] : 0);
+      const dg = d("gol"), da = d("alvo"), dc = d("chutes"), df = d("fora"), dt = d("trave"), de = d("esc");
+      if ([dg, da, dc, df, dt, de].some((x) => Math.abs(x) > 6)) return; // salto estranho (troca de jogo, correção grande)
+      // contador voltou (correção): tira a provisória mais nova daquele tipo que só esta fonte tinha
       for (const [dx, ks] of [[dg, ["gol"]], [da, ["alvo"]], [dt, ["trave"]], [de, ["esc"]]]) {
         for (let n = dx; n < 0; n++) {
-          const j = rap.pend.map((x) => x.l === l && ks.includes(x.k)).lastIndexOf(true);
+          const j = rap.pend.map((x) => x.l === l && ks.includes(x.k) && x.src && x.src[fonte] && Object.keys(x.src).length === 1).lastIndexOf(true);
           if (j >= 0) { rap.pend.splice(j, 1); mudou = true; }
         }
       }
@@ -803,28 +810,38 @@
       for (let n = 0; n < g0; n++) novos.push("gol");
       for (let n = 0; n < Math.max(a0 - g0, 0); n++) novos.push("alvo");
       for (let n = 0; n < t0; n++) novos.push("trave");
-      for (let n = 0; n < Math.max(dc - Math.max(a0, g0) - t0, 0); n++) novos.push("fora"); // chute para fora ou bloqueado
+      const nFora = cur.fora ? Math.max(df, 0) : Math.max(dc - Math.max(a0, g0) - t0, 0);
+      for (let n = 0; n < nFora; n++) novos.push("fora"); // chute para fora ou bloqueado
       for (let n = 0; n < Math.max(de, 0); n++) novos.push("esc");
       const golsNarr = vv.pr ? vv.pr.ev.filter((e) => e.l === l && e.k === "gol").length : 0;
       for (const k of novos) {
-        // gol: o placar manda. Se a narração já tem todos os gols do placar, não precisa de marca
-        if (k === "gol") {
-          if (golsNarr >= cur.gol[i]) continue;
-          rap.pend.push({ id: ++rap.id, l, k, per: mm.per, m: mm.m, r: sl.ad ? sl.b + "+" + sl.ad : String(sl.b), t: agora });
-          mudou = true;
-          continue;
+        // a outra fonte já registrou esse lance? então é o mesmo: só anota quem chegou primeiro
+        const outra = rap.pend.find((x) => x.l === l && (k === "gol" ? x.k === "gol" : combina(x.k, k)) && x.src && !x.src[fonte] && agora - x.t < 4 * 60e3);
+        if (outra) {
+          outra.src[fonte] = agora;
+          const prim = Object.keys(outra.src).sort((a, b) => outra.src[a] - outra.src[b])[0];
+          rap.corrida.push({ prim, seg: Math.round((agora - outra.t) / 1000) });
+          if (rap.corrida.length > 60) rap.corrida.shift();
+          mudou = true; continue;
         }
+        // gol: o placar manda. Se a narração já tem todos os gols do placar, não precisa de marca
+        if (k === "gol") { if (golsNarr < cur.gol[i]) { nova(l, k); mudou = true; } continue; }
         // a narração chegou ANTES do contador? então não cria marca: só anota a medida (negativa)
         const j = rap.semPar.findIndex((x) => x.l === l && combina(k, x.k) && perto(x, mm));
-        if (j >= 0) { registrarMedida(rap, k, -(agora - rap.semPar[j].t) / 1000); rap.semPar.splice(j, 1); mudou = true; continue; }
-        rap.pend.push({ id: ++rap.id, l, k, per: mm.per, m: mm.m, r: sl.ad ? sl.b + "+" + sl.ad : String(sl.b), t: agora });
-        mudou = true;
+        if (j >= 0) {
+          const sp = rap.semPar[j];
+          if (sp.jm) { rap.corrida.push({ prim: sp.prim, seg: Math.round((agora - sp.t0) / 1000) }); if (rap.corrida.length > 60) rap.corrida.shift(); }
+          else registrarMedida(rap, k, -(agora - sp.t) / 1000);
+          rap.semPar.splice(j, 1); mudou = true; continue;
+        }
+        nova(l, k); mudou = true;
       }
     });
-    for (const k in cur) if (cur[k]) rap.ult[k] = cur[k];
+    rap.ult[fonte] = Object.assign({}, ult);
+    for (const k in cur) if (cur[k]) rap.ult[fonte][k] = cur[k];
     if (rap.pend.length > 40) rap.pend.splice(0, rap.pend.length - 40);
     if (mudou) conferirRapidos(p);
-    gravarRap(gid, rap);
+    gravarRap(ch, rap);
     return mudou;
   }
   // confere a narração: cada lance novo (chute, escanteio, gol) "baixa" a provisória correspondente
@@ -846,7 +863,14 @@
           // procura a provisória mais antiga do mesmo time e tipo (ou outro chute) perto desse minuto
           let j = rap.pend.findIndex((x) => x.l === e.l && x.k === e.k && perto(x, me));
           if (j < 0) j = rap.pend.findIndex((x) => x.l === e.l && combina(x.k, e.k) && perto(x, me));
-          if (j >= 0) { registrarMedida(rap, rap.pend[j].k, (agora - rap.pend[j].t) / 1000); rap.pend.splice(j, 1); }
+          if (j >= 0) {
+            const x = rap.pend[j];
+            registrarMedida(rap, x.k, (agora - x.t) / 1000);
+            rap.pend.splice(j, 1);
+            // a outra fonte ainda não contou esse lance: deixa avisado para ela não criar uma marca repetida
+            const prim = x.src ? Object.keys(x.src)[0] : null;
+            for (const f of Object.keys(rap.ult || {})) if (x.src && !x.src[f]) rap.semPar.push({ l: e.l, k: x.k, per: me.per, m: me.m, t: agora, jm: true, prim, t0: x.t });
+          }
           // lance sem provisória: guarda por 5 min (o contador pode subir depois). Nos primeiros 30 s depois de
           // abrir o jogo a narração ainda está "chegando de uma vez": esses só são contados
           else if (e.k !== "gol" && agora - (rap.ini || 0) > 30000) rap.semPar.push({ l: e.l, k: e.k, per: me.per, m: me.m, t: agora });
@@ -864,6 +888,8 @@
       return { i, l: x.l, k: x.k, j: "", x: "", min: x.r + "'", prov: true, t: x.t };
     }) : null;
     // medidor: quanto o contador chegou antes da narração (positivo = contador primeiro)
+    const cor = rap.corrida || [];
+    vv.corrida = cor.length ? { n: cor.length, d5: cor.filter((x) => x.prim === "5d").length, media: Math.round(cor.reduce((a, x) => a + x.seg, 0) / cor.length) } : null;
     const seg = rap.med.map((x) => x.seg);
     vv.medRap = seg.length ? { n: seg.length, media: Math.round(seg.reduce((a, b) => a + b, 0) / seg.length), min: Math.min(...seg), max: Math.max(...seg),
       antes: seg.filter((x) => x > 0).length } : null;
@@ -956,9 +982,15 @@
     const vv = p.vv;
     const id = await idDo5d(p);
     if (!id) { const antes = vv.d5 && vv.d5.semJogo; vv.d5 = vv.d5 && vv.d5.id ? vv.d5 : { semJogo: true }; return !antes; }
-    const r = await buscar5d(`fixtures/${id}/statistics`);
-    const st = r && r.data && r.data.statistics;
-    if (!st) return false;
+    // um pedido só: placar, escanteios, cartões e estatísticas do jogo
+    const r = await buscar5d(`fixtures/${id}?include=stats`);
+    const fx = r && r.data, st = fx && (fx.statistics || fx.stats);
+    if (!fx) return false;
+    const sl0 = slotDe(vv.clk, vv.per);
+    const par0 = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
+    let mudouC = false;
+    if (sl0) mudouC = contarFonte(p, "5d", { gol: par0(fx.goals), alvo: st && par0(st.shots_on_target), fora: st && par0(st.shots_off_target), esc: par0(fx.corners) }, sl0);
+    if (!st) return mudouC;
     const par = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
     const cur = { at: par(st.attacks), da: par(st.dangerous_attacks) };
     const d5 = (vv.d5 = vv.d5 && vv.d5.id === id ? vv.d5 : lerSessao(id, "d5") || { id, at: { h: {}, a: {} }, da: { h: {}, a: {} }, ult: null, desde: new Date().toISOString() });
@@ -977,7 +1009,7 @@
     d5.ult = { at: cur.at || (d5.ult && d5.ult.at), da: cur.da || (d5.ult && d5.ult.da) };
     d5.em = Date.now();
     gravarSessao(id, d5, "d5");
-    return mudou || !vv.d5Ok ? ((vv.d5Ok = true), true) : false;
+    return mudou || mudouC || !vv.d5Ok ? ((vv.d5Ok = true), true) : false;
   }
 
   let timer365 = null;

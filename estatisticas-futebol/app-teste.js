@@ -452,7 +452,9 @@
       ? "Chutes, escanteios e gols: narração do 365Scores e da ESPN (consultadas a cada ~10 s)."
       : "Chutes, escanteios e gols: narração da ESPN (consultada a cada ~10 s; chega 1 a 2 minutos depois do lance).");
     if (v.rap) {
-      partes.push("Marcas claras: o contador do 365Scores já registrou o lance e a narração ainda não chegou.");
+      partes.push(`Marcas claras: o contador (${temChave5d() ? "365Scores ou 5Dollar" : "365Scores"}) já registrou o lance e a narração ainda não chegou.`);
+      const c = v.corrida;
+      if (c) partes.push(`Corrida dos contadores: o 5Dollar chegou primeiro em ${c.d5} de ${c.n} ${c.n === 1 ? "lance" : "lances"} e o 365Scores em ${c.n - c.d5} (diferença média de ${c.media} s).`);
       const m = v.medRap;
       if (m) partes.push(`Medidor: em ${m.n} ${m.n === 1 ? "lance" : "lances"}, o contador chegou ${m.media >= 0 ? `em média ${m.media} s antes` : `em média ${-m.media} s depois`} da narração (de ${m.min} a ${m.max} s; ${m.antes} de ${m.n} antes).`);
     }
@@ -1609,6 +1611,27 @@
       </tbody></table><p class="sub nota">xG: gols esperados pela qualidade das chances. Temporada inteira na competição, sem separar casa e fora.</p>`;
   }
 
+  // ataques e ataques perigosos na temporada (5DollarFootballAPI, montado pelo robô do GitHub em extra5d.js)
+  function blocoAtaques5d(code, p) {
+    const X = window.EXTRA5D, comp = X && X.comps && X.comps[code];
+    if (!comp) return "";
+    const C = X.campos, ix = (k) => C.indexOf(k);
+    // mandante: jogos em casa; visitante: jogos fora (se tiver menos de 3, usa todos)
+    const parte = (tid, lado) => { const t = comp[tid] || comp[String(tid)]; if (!t) return null; const v = t[lado][0] >= 3 ? t[lado] : t.g; return v[0] ? v : null; };
+    const a = parte(p.h, "c"), b = parte(p.a, "f");
+    if (!a && !b) return "";
+    const med = (v, k, dec) => (v && v[ix(k)] ? fNum(v[ix(k)] / v[0], dec == null ? 1 : dec) : "–");
+    const linha = (rot, k, dec) => `<tr><td class="n"></td><td class="p">${med(a, k, dec)}</td><td class="rot">${rot}</td><td class="p">${med(b, k, dec)}</td><td class="n"></td></tr>`;
+    const pos = (v) => (v && v[ix("pos")] ? Math.round(v[ix("pos")] / v[0]) + "%" : "–");
+    return `<table class="stats-central xg-tab"><tbody><tr class="secao"><td colspan="5">Ataques na temporada (por jogo)</td></tr>
+      ${linha("Ataques perigosos feitos", "da")}${linha("Ataques perigosos sofridos", "dac")}
+      ${linha("Ataques feitos", "at", 0)}${linha("Ataques sofridos", "atc", 0)}
+      ${linha("Ataques perigosos no 1º tempo", "da1")}${linha("Sofridos no 1º tempo", "da1c")}
+      ${linha("Chutes no gol", "ch")}${linha("Chutes para fora", "cf")}
+      <tr><td class="n"></td><td class="p">${pos(a)}</td><td class="rot">Posse média</td><td class="p">${pos(b)}</td><td class="n"></td></tr>
+      </tbody></table><p class="sub nota">Fonte: 5DollarFootballAPI. ${h(nomeTime(p.h))} nos jogos em casa (${a ? a[0] : 0}) e ${h(nomeTime(p.a))} nos jogos fora (${b ? b[0] : 0}).</p>`;
+  }
+
   function htmlJogo(code, p) {
     const comp = DADOS.competicoes[code];
     const fim = encerrada(p), vivo = aoVivo(p), temTimes = p.h && p.a;
@@ -1682,7 +1705,7 @@
               <button type="button" data-recorte="total" aria-pressed="${lado}">Total</button></div></div>
           <div class="centro-nomes"><span class="c">${h(nomeTime(p.h))}</span><span class="f">${h(nomeTime(p.a))}</span></div>
           ${semDetalhe ? `<div class="vazio vazio-curto">Ainda sem ${aba === "extras" ? "estatísticas" : "detalhe dos gols"} destes jogos. ${B5 ? "Elas vão sendo baixadas aos poucos nas atualizações." : "Disponível com a fonte principal de dados."}</div>` : tabelaCentral(tempo ? "tempo" : aba, bH, bA)}
-          ${aba === "extras" ? blocoXg(code, p) : ""}
+          ${aba === "extras" ? blocoXg(code, p) + blocoAtaques5d(code, p) : ""}
           ${botoesTempo}
           <p class="sub nota">${aba === "gtipos" ? "Porcentagem sobre os gols com a narração do lance; um gol pode ter mais de um tipo (ex.: de cabeça após escanteio). " : aba === "periodos" ? "Porcentagem sobre os gols de cada time; acréscimos contam no fim de cada tempo. " : ""}${tempo ? `Cada jogo conta só pelo placar do ${tempo}º tempo. ` : ""}${fim ? "Números de antes desta partida. " : ""}${estado.ultimos ? "Considerando os últimos 5 jogos" : "Considerando todos os jogos"} ${lado ? "no total" : "do mandante em casa e do visitante fora"}.</p>
         </div>
