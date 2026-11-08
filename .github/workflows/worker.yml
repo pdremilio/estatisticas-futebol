@@ -1,0 +1,32 @@
+name: Publicar o servidor do ao vivo (Cloudflare)
+
+# Publica a pasta worker/ na Cloudflare. Precisa dos segredos do repositório:
+#   CLOUDFLARE_API_TOKEN  (token com o modelo "Edit Cloudflare Workers")
+#   CLOUDFLARE_ACCOUNT_ID (Account ID da Cloudflare)
+#   FIVE_DOLLAR_KEY       (chave da 5DollarFootballAPI; vai para o cofre do Worker)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - ".github/workflows/worker.yml"
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Pegar os arquivos
+        uses: actions/checkout@v4
+
+      - name: Publicar na Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          secrets: |
+            FIVE_DOLLAR_KEY
+        env:
+          FIVE_DOLLAR_KEY: ${{ secrets.FIVE_DOLLAR_KEY }}
