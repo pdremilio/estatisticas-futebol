@@ -377,6 +377,8 @@
   }
 
   const temChave5d = () => { try { return !!localStorage.getItem("sb_5d_chave"); } catch (e) { return false; } };
+  const servidor5d = () => !!(window.AoVivo && AoVivo.servidor5d);
+  const fonte5d = () => servidor5d() || temChave5d();
   // ---------- alerta de pressão: quem está dominando os últimos minutos (lances da ESPN + ataques do 365Scores)
   // nível 1 "pressão forte": ≥ 68% da pressão das últimas 8 barras; nível 2 "gol pode sair": ≥ 75% e
   // pelo menos 3 lances perigosos (chute no gol, trave ou escanteio) nesse período.
@@ -443,14 +445,14 @@
     L("Lances", v.pbp365 ? "narração do 365Scores + ESPN, consultadas a cada ~10 s" : "narração da ESPN, consultada a cada ~10 s (chega 1 a 2 min depois do lance)");
     L("Ataques (365Scores)", v.temAtk && v.atk ? `sim, a cada ~6 s (desde ${horaCurta(v.atk.desde)})` : v.id365 && v.st === "in" ? "esta liga não tem o contador" : "—");
     L("Domínio de passes", v.temPas && v.pas ? "sim: quem trocou mais passes no minuto ganha barra pela diferença (a cada ~6 s)" : "—");
-    if (temChave5d()) {
+    if (fonte5d()) {
       const st = (window.AoVivo && AoVivo.d5Status) || {}, d = v.d5;
       const estado5 = st.msg && st.msg !== "ok" ? h(st.msg) : d && d.semJogo ? "este jogo não está na lista ao vivo deles" : !d ? "conectando…" : "ok, lido a cada ~8 s" + (d.desde ? ` (desde ${horaCurta(d.desde)})` : "");
-      L("5DollarFootballAPI", estado5);
+      L("5DollarFootballAPI", estado5 + (servidor5d() ? " · pelo servidor do ScanBall (todos os jogos, para todos)" : " · pela sua chave (só o jogo aberto)"));
       if (d && d.ult && d.ult.da) L("Ataques perigosos", `${d.ult.da[0]} × ${d.ult.da[1]}${d.ult.at ? ` · ataques ${d.ult.at[0]} × ${d.ult.at[1]}` : ""} · último novo ${d.mudDa ? `há ${Math.round((Date.now() - d.mudDa) / 1000)} s` : "ainda não"}`);
     }
     if (v.rap) {
-      L("Marcas claras", `o contador (${temChave5d() ? "365Scores ou 5Dollar" : "365Scores"}) já registrou o lance e a narração ainda não chegou`);
+      L("Marcas claras", `o contador (${fonte5d() ? "365Scores ou 5Dollar" : "365Scores"}) já registrou o lance e a narração ainda não chegou`);
       const c = v.corrida;
       if (c) L("Corrida dos contadores", `5Dollar primeiro em <b>${c.d5} de ${c.n}</b> · 365Scores em ${c.n - c.d5} · diferença média de ${c.media} s`);
       const m = v.medRap;
@@ -550,7 +552,7 @@
           <button type="button" class="chip" data-prmodo="tendencia" aria-pressed="${opc.modo === "tendencia"}">Tendência</button>
           <button type="button" class="chip" data-propc="saldo" aria-pressed="${!!opc.saldo}">Só o saldo</button>
           <button type="button" class="chip" data-propc="padrao">Restaurar padrão</button></div>
-        <div class="pc-linha pc-chave"><span class="sub">5Dollar</span>${temChave5d()
+        <div class="pc-linha pc-chave"><span class="sub">5Dollar</span>${servidor5d() ? `<span class="sub">ligado para todos pelo servidor do ScanBall ✓</span>` : temChave5d()
           ? `<span class="sub">chave salva neste navegador ✓</span><button type="button" class="chip" data-chave5d="remover">Remover chave</button>`
           : `<input id="chave5d" type="password" autocomplete="off" placeholder="cole a chave da 5DollarFootballAPI" aria-label="Chave da 5DollarFootballAPI"><button type="button" class="chip" data-chave5d="salvar">Salvar</button><small class="sub">A chave fica só neste navegador; nunca vai para o site nem para o GitHub.</small>`}</div>
         <div class="pc-linha"><span class="sub">Alerta</span><button type="button" class="chip" data-propc="som" aria-pressed="${!!opc.som}">🔔 Som quando um time pressionar forte</button></div>

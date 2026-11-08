@@ -931,6 +931,25 @@
   // por conta -> estatísticas a cada ~8 s (7,5/min) + lista de jogos ao vivo a cada 2 min para achar o jogo.
   const D5 = "https://api.5dollarfootballapi.com/v1/";
   const chave5d = () => { try { return localStorage.getItem("sb_5d_chave") || ""; } catch (e) { return ""; } };
+  // servidor do ScanBall na Cloudflare (config.js -> aoVivo5d): busca TODOS os jogos ao vivo de uma vez para
+  // todos os visitantes, com a chave escondida. Com ele ligado, a chave pessoal não é usada.
+  const WORKER5D = String(((window.SB_CONFIG || {}).aoVivo5d) || "").replace(/\/+$/, "");
+  const fonte5d = () => !!WORKER5D || !!chave5d();
+  let lista5W = null, lista5WEm = 0, lista5WBusca = null;
+  async function listaDoWorker() {
+    if (lista5W && Date.now() - lista5WEm < 7000) return lista5W;
+    if (!lista5WBusca) lista5WBusca = (async () => {
+      try {
+        const r = await fetch(WORKER5D + "/ao-vivo", { cache: "no-store" });
+        const j = r.ok ? await r.json() : null;
+        if (j && j.ok) { lista5W = j.jogos || []; lista5WEm = Date.now(); d5Status.msg = "ok"; d5Status.em = Date.now(); d5Status.servidor = true; }
+        else d5Status.msg = "servidor do ao vivo: " + ((j && j.erro) || "erro " + r.status);
+      } catch (e) { d5Status.msg = "não consegui falar com o servidor do ao vivo"; }
+      lista5WBusca = null;
+      return lista5W;
+    })();
+    return lista5WBusca;
+  }
   const d5Status = { msg: "", em: 0 };
   let d5Lista = null, d5ListaEm = 0, d5Pausa = 0;
   const d5Par = new Map(), d5Ult = new Map();
@@ -954,7 +973,8 @@
   async function idDo5d(p) {
     const ch = chaveJogo(p);
     if (d5Par.get(ch)) return d5Par.get(ch);
-    if (!d5Lista || Date.now() - d5ListaEm > 120000) {
+    if (WORKER5D) { d5Lista = await listaDoWorker(); if (!d5Lista) return 0; }
+    else if (!d5Lista || Date.now() - d5ListaEm > 120000) {
       d5ListaEm = Date.now();
       const r = await buscar5d("fixtures?status=live&per_page=500");
       if (!r) return 0;
@@ -975,16 +995,18 @@
     return melhor;
   }
   async function atualizar5d(p) {
-    if (!chave5d() || !p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
+    if (!fonte5d() || !p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
     const ch = chaveJogo(p);
-    if (Date.now() - (d5Ult.get(ch) || 0) < 7500) return false;
+    if (Date.now() - (d5Ult.get(ch) || 0) < (WORKER5D ? 5000 : 7500)) return false;
     d5Ult.set(ch, Date.now());
     const vv = p.vv;
     const id = await idDo5d(p);
     if (!id) { const antes = vv.d5 && vv.d5.semJogo; vv.d5 = vv.d5 && vv.d5.id ? vv.d5 : { semJogo: true }; return !antes; }
     // um pedido só: placar, escanteios, cartões e estatísticas do jogo
-    const r = await buscar5d(`fixtures/${id}?include=stats`);
-    const fx = r && r.data, st = fx && (fx.statistics || fx.stats);
+    let fx;
+    if (WORKER5D) { const lista = await listaDoWorker(); fx = (lista || []).find((x) => x.id === id) || null; if (!fx) d5Par.delete(ch); }
+    else { const r = await buscar5d(`fixtures/${id}?include=stats`); fx = r && r.data; }
+    const st = fx && (fx.statistics || fx.stats);
     if (!fx) return false;
     const sl0 = slotDe(vv.clk, vv.per);
     const par0 = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
@@ -1032,7 +1054,7 @@
     }
     const res = await Promise.all(lista.map((p) => atualizarDetalhe(p, forcar && !ultimoDetalhe.has(p.vv.espn.code + ":" + p.vv.espn.id))));
     // painel: ataques do 365Scores de todos os jogos rolando (no ritmo do painel, a cada 20 s)
-    const r365 = await Promise.all(lista.filter((p) => p.vv.st === "in").map((p) => Promise.all([atualizar365(p, true).catch(() => false), atualizarPbp(p, true).catch(() => false)]).then((x) => x.some(Boolean))));
+    const r365 = await Promise.all(lista.filter((p) => p.vv.st === "in").map((p) => Promise.all([atualizar365(p, true).catch(() => false), atualizarPbp(p, true).catch(() => false), WORKER5D ? atualizar5d(p).catch(() => false) : false]).then((x) => x.some(Boolean))));
     return res.some(Boolean) || r365.some(Boolean);
   }
 
@@ -1139,7 +1161,7 @@
   }
 
   window.AoVivo = {
-    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status,
+    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status, servidor5d: !!WORKER5D,
     _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); },
   };
 })();
