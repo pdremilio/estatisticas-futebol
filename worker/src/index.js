@@ -51,7 +51,10 @@ function enxugar(fx) {
 
 export class AoVivo {
   constructor(state, env) {
+    this.state = state;
     this.env = env;
+    this.hist = new Map();   // id -> minuto a minuto do jogo (também salvo no armazenamento do servidor)
+    this.ht = new Set();     // jogos que já passaram do intervalo
     this.txt = null;       // última resposta pronta (JSON em texto)
     this.em = 0;           // quando foi buscada
     this.pausa = 0;        // 5Dollar pediu para esperar (limite)
@@ -60,7 +63,9 @@ export class AoVivo {
     this.erro = "";
   }
 
-  async fetch() {
+  async fetch(req) {
+    const url = new URL(typeof req === "string" ? req : (req && req.url) || "https://interno/ao-vivo");
+    if (url.pathname === "/historico") return this.historico(url);
     const agora = Date.now();
     if (agora - this.em > this.intervalo && agora >= this.pausa && !this.buscando) {
       this.buscando = this.buscar().catch((e) => { this.erro = String(e && e.message || e); }).finally(() => { this.buscando = null; });
@@ -101,6 +106,45 @@ export class AoVivo {
     this.em = Date.now();
     this.erro = "";
     this.txt = JSON.stringify({ ok: 1, em: new Date(this.em).toISOString(), intervalo: this.intervalo, eventos: !this.semEventos, n: jogos.length, jogos });
+    await this.registrar(jogos).catch(() => {});
+  }
+
+  // guarda uma "foto" por minuto (ataques e ataques perigosos acumulados) de cada jogo ao vivo, para o site
+  // desenhar o gráfico completo dos jogos passados. Grava só quando o minuto muda (1 gravação/min por jogo).
+  async registrar(jogos) {
+    for (const j of jogos) {
+      const st = j.statistics || {}, at = st.attacks, da = st.dangerous_attacks;
+      if (!at && !da) continue;
+      const cod = String(j.status_code || "").toLowerCase();
+      if (/half|ht|break/.test(cod)) { this.ht.add(j.id); continue; }
+      const m = parseInt(cod, 10);
+      if (!(m >= 1 && m <= 130)) continue;
+      const per = m > 45 || this.ht.has(j.id) ? 2 : 1;
+      if (per === 2) this.ht.add(j.id);
+      let h = this.hist.get(j.id);
+      if (!h) {
+        h = (await this.state.storage.get("j:" + j.id)) || { id: j.id, h: j.teams.home.name, a: j.teams.away.name, ko: j.kickoff_utc, m: {} };
+        this.hist.set(j.id, h);
+        const dia = "d:" + String(j.kickoff_utc || new Date().toISOString()).slice(0, 10);
+        const ind = (await this.state.storage.get(dia)) || [];
+        if (!ind.some((x) => x.id === j.id)) { ind.push({ id: j.id, h: h.h, a: h.a, ko: h.ko }); await this.state.storage.put(dia, ind); }
+      }
+      const chave = per + ":" + m, novo = !h.m[chave];
+      h.m[chave] = { at: at ? [at.home, at.away] : null, da: da ? [da.home, da.away] : null };
+      if (novo) await this.state.storage.put("j:" + j.id, h);
+    }
+    if (this.hist.size > 300) this.hist.clear();
+  }
+
+  async historico(url) {
+    const json = (o) => new Response(JSON.stringify(o), { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+    const dia = url.searchParams.get("dia"), id = url.searchParams.get("id");
+    if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) return json({ ok: 1, jogos: (await this.state.storage.get("d:" + dia)) || [] });
+    if (id && /^\d+$/.test(id)) {
+      const h = this.hist.get(Number(id)) || (await this.state.storage.get("j:" + id));
+      return json(h ? Object.assign({ ok: 1 }, h) : { ok: 0 });
+    }
+    return json({ ok: 0, erro: "use ?dia=AAAA-MM-DD ou ?id=N" });
   }
 }
 
@@ -109,9 +153,9 @@ export default {
     const h = cors(req);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
     const url = new URL(req.url);
-    if (url.pathname === "/ao-vivo") {
+    if (url.pathname === "/ao-vivo" || url.pathname === "/historico") {
       const obj = env.AOVIVO.get(env.AOVIVO.idFromName("unico"));
-      const r = await obj.fetch("https://interno/ao-vivo");
+      const r = await obj.fetch("https://interno" + url.pathname + url.search);
       return new Response(r.body, { status: r.status, headers: { ...Object.fromEntries(r.headers), ...h } });
     }
     return new Response("ScanBall · servidor do ao vivo. Use /ao-vivo.", { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", ...h } });
