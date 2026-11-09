@@ -70,6 +70,7 @@ PARALELO = 6
 PASTA = os.path.dirname(os.path.abspath(__file__))
 ARQ_SAIDA = os.path.join(PASTA, "dados5.js")
 ARQ_CACHE = os.path.join(PASTA, "cache5.json")
+ARQ_TIT = os.path.join(PASTA, "titulares5.json")   # titulares das últimas 5 partidas de cada time (aba Escalações)
 ARQ_FD = os.path.join(PASTA, "dados.js")   # dados da football-data (só para reaproveitar as odds)
 
 try:
@@ -406,7 +407,16 @@ def resumir_detalhe(r, p):
         elif tp == "penalty---scored" and "p" not in fl:
             fl = "p" + fl
         gl.append([base, lt, fl, tp == "own-goal"])
-    return es, gl
+    # titulares de cada lado (para "titular nas últimas 5" na aba Escalações)
+    tit = {}
+    for ro in r.get("rosters") or []:
+        lt = "h" if ro.get("homeAway") == "home" else "a" if ro.get("homeAway") == "away" else lado.get(str((ro.get("team") or {}).get("id")))
+        if not lt:
+            continue
+        tit[lt] = [[str((x.get("athlete") or {}).get("id")), (x.get("athlete") or {}).get("displayName") or "",
+                    (x.get("position") or {}).get("abbreviation") or ""]
+                   for x in ro.get("roster") or [] if x.get("starter") and (x.get("athlete") or {}).get("id")]
+    return es, gl, tit
 
 
 def aplicar_detalhe(p, det):
@@ -425,11 +435,30 @@ def aplicar_detalhe(p, det):
         p["gl"] = conferido
 
 
+def ultimos_jogos(todas, n=5):
+    """time -> os n últimos jogos encerrados dele (mais recente primeiro)."""
+    por_time = {}
+    for code, lg, p in sorted(todas, key=lambda x: x[2]["d"], reverse=True):
+        if p["s"] != "FINISHED":
+            continue
+        for tid in (str(p["h"]), str(p["a"])):
+            lista = por_time.setdefault(tid, [])
+            if len(lista) < n:
+                lista.append((code, lg, p))
+    return por_time
+
+
 def baixar_detalhes(todas, cache, agora):
-    """Busca o detalhe dos jogos encerrados que ainda não estão no cache (os mais recentes primeiro)."""
+    """Busca o detalhe dos jogos encerrados que ainda não estão no cache (os mais recentes primeiro) e, depois,
+    rebaixa os 5 últimos jogos de cada time que estão no cache sem os titulares (guardados a partir da beta 6)."""
     faltam = [(code, lg, p) for code, lg, p in todas
               if p["s"] == "FINISHED" and p["i"] not in cache and iso_para_dt(p["d"]) < agora - timedelta(hours=2)]
     faltam.sort(key=lambda x: x[2]["d"], reverse=True)
+    vistos = {p["i"] for _, _, p in faltam}
+    for jogos in ultimos_jogos(todas).values():
+        for code, lg, p in jogos:
+            if p["i"] in cache and "tit" not in cache[p["i"]] and p["i"] not in vistos:
+                faltam.append((code, lg, p)); vistos.add(p["i"])
     faltam = faltam[:MAX_SUMARIOS]
     if not faltam:
         return 0
@@ -440,10 +469,10 @@ def baixar_detalhes(todas, cache, agora):
         if not r:
             return p["i"], None
         try:
-            es, gl = resumir_detalhe(r, p)
+            es, gl, tit = resumir_detalhe(r, p)
         except Exception:
             return p["i"], None
-        return p["i"], {"es": es, "gl": [g[:3] + [bool(g[3])] for g in gl]}
+        return p["i"], {"es": es, "gl": [g[:3] + [bool(g[3])] for g in gl], "tit": tit}
 
     ok = 0
     with ThreadPoolExecutor(PARALELO) as ex:
@@ -643,6 +672,28 @@ def ler_js(caminho):
         return None
 
 
+def gravar_titulares(todas, cache, agora):
+    """titulares5.json: para cada time, os 5 últimos jogos e, de cada jogador, em quais deles começou jogando
+    ("10110" = titular no 1º, 3º e 4º jogo, do mais recente para o mais antigo). O site só baixa ao abrir Escalações."""
+    saida = {}
+    for tid, jogos in ultimos_jogos(todas).items():
+        com = [(c, lg, p) for c, lg, p in jogos if (cache.get(p["i"]) or {}).get("tit")]
+        if not com:
+            continue
+        jog = {}
+        lista_j = []
+        for k, (c, lg, p) in enumerate(com):
+            lado = "h" if str(p["h"]) == tid else "a"
+            lista_j.append([p["d"][:10], str(p["a"] if lado == "h" else p["h"]), lado])
+            for aid, nome, pos in cache[p["i"]]["tit"].get(lado) or []:
+                x = jog.setdefault(aid, [nome, pos, ["0"] * len(com)])
+                x[2][k] = "1"
+        saida[tid] = {"j": lista_j, "p": {aid: [n, pos, "".join(m)] for aid, (n, pos, m) in jog.items()}}
+    with open(ARQ_TIT, "w", encoding="utf-8") as f:
+        json.dump({"gerado_em": iso_curto(agora), "times": saida}, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"Titulares das últimas 5: {len(saida)} times ({os.path.getsize(ARQ_TIT) / 1024:.0f} KB, baixado só na aba Escalações)")
+
+
 def ler_cache():
     try:
         with open(ARQ_CACHE, encoding="utf-8") as f:
@@ -711,6 +762,7 @@ def main():
         else:
             comp.pop("incompleto", None)
     odds_da_reserva(competicoes, times)
+    gravar_titulares(todas, cache, agora)
 
     # forma recente vem do placar da ESPN (não precisa ir para o site)
     for t in times.values():

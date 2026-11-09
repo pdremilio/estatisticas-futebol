@@ -94,7 +94,10 @@
 
   // troca o conteúdo de um bloco mexendo só no que mudou (em vez de apagar e recriar tudo):
   // é bem mais leve no celular e não perde rolagem, foco, seleção nem o "passar o mouse"
-  const compativel = (v, n) => v.nodeType === n.nodeType && v.nodeName === n.nodeName && (v.nodeType !== 1 || v.id === n.id);
+  // dois nós "são o mesmo bloco" se têm o mesmo tipo, o mesmo id e a mesma 1ª classe (cabeçalho com cabeçalho,
+  // gráfico com gráfico): assim, quando um bloco entra ou sai (um aviso, por exemplo), os outros não são remontados
+  const classe1 = (el) => (el.classList && el.classList[0]) || "";
+  const compativel = (v, n) => v.nodeType === n.nodeType && v.nodeName === n.nodeName && (v.nodeType !== 1 || (v.id === n.id && classe1(v) === classe1(n)));
   function sincronizarNo(v, n, prof) {
     if (!compativel(v, n)) { v.replaceWith(n); return; }
     if (n.nodeType === 3 || n.nodeType === 8) { if (v.data !== n.data) v.data = n.data; return; }
@@ -269,7 +272,25 @@
   const EST_VIVO = [["posse", "Posse de bola", "%"], ["xg", "Gols esperados (xG)"], ["da", "Ataques perigosos"], ["atk", "Ataques"], ["cp", "Chances perigosas"], ["chutes", "Finalizações"], ["alvo", "No alvo"], ["fora5", "Para fora"], ["trave", "Na trave"],
     ["esc", "Escanteios"], ["faltas", "Faltas"], ["amarelos", "Cartões amarelos"], ["vermelhos", "Cartões vermelhos"], ["imped", "Impedimentos"],
     ["defesas", "Defesas do goleiro"], ["passes", "Passes"]];
-  const temAoVivo = (p) => !!(p.vv && p.vv.espn);
+  const temAoVivo = (p) => !!(p.vv && p.vv.espn && !p.vv.soEsc);
+  // jogo da ESPN (escalações em qualquer jogo) e jogo encerrado há até 3 dias (aba "Ao vivo" com o que aconteceu)
+  const lgEspn = (code) => (DADOS.competicoes[code] || {}).espn || "";
+  const podeEscalacoes = (code, p) => !!(lgEspn(code) && p.h && p.a && p.i && !p.semEspn);
+  const encerradoRecente = (code, p) => encerrada(p) && podeEscalacoes(code, p) && Date.now() - new Date(p.d).getTime() < 3 * 86400e3;
+  const pedidosEsc = new Set(), pedidosFim = new Set();
+  function garantirEscalacoes(code, p) {
+    const k = code + ":" + p.i;
+    if (pedidosEsc.has(k) || !window.AoVivo || !window.AoVivo.carregarEscalacoes) return;
+    if (p.vv && p.vv.elenco && p.vv.tit5) return;
+    pedidosEsc.add(k);
+    window.AoVivo.carregarEscalacoes(code, p).catch(() => {}).finally(() => setTimeout(() => pedidosEsc.delete(k), 60000));
+  }
+  function garantirEncerrado(code, p) {
+    const k = code + ":" + p.i;
+    if (pedidosFim.has(k) || !window.AoVivo || !window.AoVivo.carregarEncerrado) return;
+    pedidosFim.add(k);
+    window.AoVivo.carregarEncerrado(code, p).then((ok) => { if (!ok) setTimeout(() => pedidosFim.delete(k), 60000); }).catch(() => pedidosFim.delete(k));
+  }
   // aviso quando a ESPN não responde há alguns ciclos (o placar volta a ser o da football-data)
   const avisoFonte = () => (window.AoVivo && window.AoVivo.indisponivel && window.AoVivo.indisponivel()
     ? `<div class="aviso-fonte" role="status"><b>Dados ao vivo temporariamente indisponíveis.</b> A ESPN não está respondendo; tentando de novo a cada 20 s. Enquanto isso, o placar vem da football-data, que atrasa alguns minutos.</div>` : "");
@@ -592,7 +613,7 @@
     const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${faixa}
           <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/>${linhas}${barras}</svg>`;
     if (compacto) {
-      return `${blocoAlerta(p, true)}<div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}</div>${blocoPressao5(p, true)}</div>`;
+      return `<div class="pressao-avisos">${blocoAlerta(p, true)}</div><div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}</div>${blocoPressao5(p, true)}</div>`;
     }
     const simb = TIPOS_MARCA.filter(([k]) => opc[k] && k !== "esc").map(([k]) => {
       const ex = k === "cartao" ? '<i class="mk-ex mk-amarelo"></i><i class="mk-ex mk-vermelho"></i>' : `<i class="mk-ex mk-${k}">${iconeMarca(k)}</i>`;
@@ -612,7 +633,7 @@
         <p class="sub">"Só o minuto": cada barra mostra só o que aconteceu naquele minuto. "Tendência": cada barra carrega um pouco dos minutos anteriores. "Só o saldo": em cada minuto aparece só o time que dominou (barra = a diferença entre os dois); minuto equilibrado vira um tracinho cinza.</p>
       </div>` : "";
     return `<div class="pressao">
-      ${blocoAlerta(p)}${avisoReserva(p)}
+      <div class="pressao-avisos">${blocoAlerta(p)}${avisoReserva(p)}</div>
       <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${subPressao(p)}</span>
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Exibir</button></div>
@@ -723,29 +744,47 @@
     ["jg", "J", "Jogos na temporada"], ["min", "Min", "Minutos jogados na temporada"], ["g", "G", "Gols"], ["a", "A", "Assistências"],
     ["cg", "CG", "Chutes no gol"], ["cart", "Cart.", "Cartões amarelos / vermelhos"],
   ];
-  const ORD_ESC = [["pos", "Posição"], ["jg", "Jogos"], ["min", "Minutos"], ["g", "Gols"], ["a", "Assistências"], ["cg", "Chutes no gol"], ["cart", "Cartões"]];
+  const ORD_ESC = [["pos", "Posição"], ["jg", "Jogos"], ["min", "Minutos"], ["t5", "Titular nas últ. 5"], ["g", "Gols"], ["a", "Assistências"], ["cg", "Chutes no gol"], ["cart", "Cartões"]];
+  // titular nas últimas 5 partidas (arquivo do robô, baixado só ao abrir a aba): "10110" -> 3
+  const tit5De = (p, l, j) => { const t = p.vv && p.vv.tit5 && p.vv.tit5[l]; const x = t && j.id && t.p[String(j.id)]; return t ? (x ? x[2].split("").filter((c) => c === "1").length : 0) : null; };
+  const nJogos5 = (p, l) => { const t = p.vv && p.vv.tit5 && p.vv.tit5[l]; return t ? t.j.length : 0; };
+  // provável titular: o goleiro com mais minutos + os 10 jogadores de linha com mais minutos (enquanto os minutos
+  // carregam, vale o número de jogos)
+  function provaveisTitulares(p, l) {
+    const e = p.vv && p.vv.elenco && p.vv.elenco[l];
+    if (!e) return new Set();
+    const peso = (s) => (s.min != null ? s.min : (s.jg || 0) * 60);
+    const lista = Object.entries(e.jog).filter(([, s]) => s.jg > 0 || s.min > 0).sort((a, b) => peso(b[1]) - peso(a[1]) || b[1].jg - a[1].jg);
+    const gol = lista.find(([, s]) => PROF(s.pos) === 0);
+    const linha = lista.filter(([, s]) => PROF(s.pos) !== 0).slice(0, 10);
+    return new Set([...(gol ? [gol[0]] : []), ...linha.map(([id]) => id)]);
+  }
   estado.escOrd = ler("esc_ord", "pos");
-  const valorEsc = (s, k) => (!s ? -1 : k === "cart" ? s.am * 1 + s.vm * 3 : k === "min" ? (s.min == null ? -1 : s.min) : s[k] || 0);
+  const valorEsc = (s, k, t5) => (k === "t5" ? (t5 == null ? -1 : t5) : !s ? -1 : k === "cart" ? s.am * 1 + s.vm * 3 : k === "min" ? (s.min == null ? -1 : s.min) : s[k] || 0);
   const fMin = (m) => (m == null ? "…" : m >= 1000 ? Math.floor(m / 1000) + "." + String(m % 1000).padStart(3, "0") : String(m));
   function tabelaJogadores(p, l, tid) {
     const e = p.vv.esc && p.vv.esc[l];
     const ele = p.vv.elenco && p.vv.elenco[l];
     const top = destaquesElenco(p, l);
     const ord = estado.escOrd;
+    const n5 = nJogos5(p, l), prov = e ? null : provaveisTitulares(p, l);
+    const cols = n5 ? [...COLS_ESC.slice(0, 2), ["t5", "Tit.", `Titular nas últimas ${n5} partidas`], ...COLS_ESC.slice(2)] : COLS_ESC;
     const linha = (j, cls) => {
       const s = temporadaDe(p, l, j);
+      const t5 = tit5De(p, l, j);
       const noJogo = `${"⚽".repeat(j.g || 0)}${j.a ? `<span class="esc-a" title="Assistências neste jogo">A${j.a > 1 ? j.a : ""}</span>` : ""}${j.am ? '<i class="ic amarelo" title="Cartão amarelo"></i>' : ""}${j.vm ? '<i class="ic vermelho" title="Cartão vermelho"></i>' : ""}${j.ent ? '<span class="esc-ent" title="Entrou">▲</span>' : ""}${j.sai ? '<span class="esc-sai" title="Saiu">▼</span>' : ""}`;
       const marca = (top.art === String(j.id) ? ' <span class="selo-art" title="Artilheiro do time na temporada">artilheiro</span>' : "") + (top.gar === String(j.id) ? ' <span class="selo-gar" title="Líder de assistências do time na temporada">garçom</span>' : "");
       const res = ord !== "pos" && e && !j.tit ? ' <span class="esc-res" title="Começou no banco">reserva</span>' : "";
+      const pv = prov && ord !== "pos" && prov.has(String(j.id)) ? ' <span class="esc-prov" title="Provável titular: entre os que mais jogaram (minutos) na temporada">provável</span>' : "";
       const cel = (k) => {
-        const v = !s ? "–" : k === "cart" ? (s.am + s.vm ? `${s.am}/${s.vm}` : "0") : k === "min" ? fMin(s.min) : s[k];
-        return `<td class="${k === ord ? "ord" : ""}">${v}</td>`;
+        const v = k === "t5" ? (t5 == null ? "–" : `${t5}/${n5}`) : !s ? "–" : k === "cart" ? (s.am + s.vm ? `${s.am}/${s.vm}` : "0") : k === "min" ? fMin(s.min) : s[k];
+        return `<td class="c-${k}${k === ord ? " ord" : ""}${k === "t5" && t5 === n5 && n5 ? " t5-cheio" : ""}">${v}</td>`;
       };
-      return `<tr class="${cls}"><td>${h(j.num)}</td><td class="esq">${h(j.n)}${marca}${res}<span class="esc-ic">${noJogo}</span></td><td class="esc-pos">${h(j.pos === "SUB" ? "" : j.pos)}</td>${COLS_ESC.map(([k]) => cel(k)).join("")}</tr>`;
+      return `<tr class="${cls}"><td>${h(j.num)}</td><td class="esq">${h(j.n)}${marca}${res}${pv}<span class="esc-ic">${noJogo}</span></td><td class="esc-pos">${h(j.pos === "SUB" ? "" : j.pos)}</td>${cols.map(([k]) => cel(k)).join("")}</tr>`;
     };
-    const cabT = (rot) => `<thead><tr><th>#</th><th class="esq">${rot}</th><th></th>${COLS_ESC.map(([k, r, t]) =>
-      `<th><button type="button" class="esc-ord" data-escord="${k}" aria-pressed="${ord === k}" title="${t}: ordenar">${r}${ord === k ? "▾" : ""}</button></th>`).join("")}</tr></thead>`;
-    const porValor = (lista) => lista.slice().sort((x, y) => valorEsc(temporadaDe(p, l, y), ord) - valorEsc(temporadaDe(p, l, x), ord) || PROF(x.pos) - PROF(y.pos));
+    const cabT = (rot) => `<thead><tr><th>#</th><th class="esq">${rot}</th><th></th>${cols.map(([k, r, t]) =>
+      `<th class="c-${k}"><button type="button" class="esc-ord" data-escord="${k}" aria-pressed="${ord === k}" title="${t}: ordenar">${r}${ord === k ? "▾" : ""}</button></th>`).join("")}</tr></thead>`;
+    const porValor = (lista) => lista.slice().sort((x, y) => valorEsc(temporadaDe(p, l, y), ord, tit5De(p, l, y)) - valorEsc(temporadaDe(p, l, x), ord, tit5De(p, l, x)) || PROF(x.pos) - PROF(y.pos));
     let corpo;
     if (e) {
       if (ord === "pos") {
@@ -758,11 +797,15 @@
       }
     } else if (ele && Object.keys(ele.jog).length) {
       // escalação ainda não saiu: mostra os destaques do elenco (ou o elenco inteiro ordenado pela coluna escolhida)
-      let lista = Object.entries(ele.jog).map(([id, s]) => ({ id, n: s.n, num: s.num, pos: s.pos, g: 0, a: 0 }));
-      lista = ord === "pos"
-        ? lista.sort((a, b) => { const sa = ele.jog[a.id], sb = ele.jog[b.id]; return sb.g + sb.a * 0.6 - (sa.g + sa.a * 0.6) || sb.jg - sa.jg; })
-        : porValor(lista);
-      corpo = `<table class="dados esc-tab">${cabT("Destaques do elenco")}<tbody>${lista.slice(0, 10).map((j) => linha(j, "")).join("")}</tbody></table>`;
+      // escalação ainda não saiu: prováveis titulares (1 goleiro + 10 de linha com mais minutos) e o resto do elenco
+      const lista = Object.entries(ele.jog).map(([id, s]) => ({ id, n: s.n, num: s.num, pos: s.pos, g: 0, a: 0 }));
+      if (ord === "pos") {
+        const peso = (j) => { const s = ele.jog[j.id]; return s.min != null ? s.min : (s.jg || 0) * 60; };
+        const tit = lista.filter((j) => prov.has(String(j.id))).sort((a, b) => PROF(a.pos) - PROF(b.pos) || peso(b) - peso(a));
+        const resto = lista.filter((j) => !prov.has(String(j.id))).sort((a, b) => peso(b) - peso(a) || ele.jog[b.id].jg - ele.jog[a.id].jg);
+        corpo = `${tit.length ? `<table class="dados esc-tab">${cabT("Prováveis titulares")}<tbody>${tit.map((j) => linha(j, "")).join("")}</tbody></table>` : ""}
+          ${resto.length ? `<table class="dados esc-tab">${cabT("Resto do elenco")}<tbody>${resto.map((j) => linha(j, ele.jog[j.id].jg ? "" : "apagado")).join("")}</tbody></table>` : ""}`;
+      } else corpo = `<table class="dados esc-tab">${cabT("Elenco")}<tbody>${porValor(lista).map((j) => linha(j, ele.jog[j.id].jg ? "" : "apagado")).join("")}</tbody></table>`;
     } else corpo = `<p class="sub">Sem escalação.</p>`;
     return `<div class="esc-lado"><div class="esc-cab ${l === "h" ? "c" : "f"}">${escudo(tid)}<b>${h(nomeTime(tid))}</b><span class="sub">${h((e && e.form) || "")}</span></div>${corpo}</div>`;
   }
@@ -781,12 +824,13 @@
     const temporada = ele && (ele.h || ele.a) && (ele.h || ele.a).temporada;
     if (!e || (!e.h && !e.a)) {
       const temElenco = ele && ((ele.h && Object.keys(ele.h.jog).length) || (ele.a && Object.keys(ele.a.jog).length));
-      return `<div class="painel-corpo">${avisoFonte()}<div class="vazio vazio-curto"><strong>Escalações ainda não divulgadas</strong>Elas costumam sair cerca de 1 hora antes do jogo.${temElenco ? " Enquanto isso, veja os destaques de cada elenco." : ""}</div>
-        ${temElenco ? `${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div><p class="sub nota">Temporada: ${h(temporada || "")}. Fonte: ESPN.</p>` : ""}</div>`;
+      const t5 = p.vv && p.vv.tit5 && (p.vv.tit5.h || p.vv.tit5.a);
+      return `<div class="painel-corpo">${avisoFonte()}<div class="vazio vazio-curto"><strong>Escalações ainda não divulgadas</strong>Elas costumam sair cerca de 1 hora antes do jogo.${temElenco ? " Enquanto isso, veja os prováveis titulares e o elenco de cada time." : " Carregando os elencos…"}</div>
+        ${temElenco ? `${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div><p class="sub nota"><b>Prováveis titulares</b>: o goleiro e os 10 jogadores de linha com mais minutos na temporada (${h(temporada || "")}) — é uma estimativa, não a escalação oficial.${t5 ? " <b>Tit.</b>: em quantas das últimas partidas do time o jogador começou jogando." : ""} J, Min, G, A, CG e Cart.: números na temporada. Fonte: ESPN.</p>` : ""}</div>`;
     }
     return `<div class="painel-corpo">${avisoFonte()}${campinho(p, e)}
       ${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div>
-      <p class="sub nota">J, Min, G, A, CG e Cart.: números na temporada${temporada ? " (" + h(temporada) + ")" : ""}${ele ? "" : " (carregando…)"}. Ícones ao lado do nome: o que fez neste jogo (⚽ gol · A assistência · ▲ entrou · ▼ saiu). Fonte: ESPN.</p></div>`;
+      <p class="sub nota">J, Min, G, A, CG e Cart.: números na temporada${temporada ? " (" + h(temporada) + ")" : ""}${ele ? "" : " (carregando…)"}.${p.vv.tit5 && (p.vv.tit5.h || p.vv.tit5.a) ? " Tit.: em quantas das últimas partidas do time o jogador começou jogando." : ""} Ícones ao lado do nome: o que fez neste jogo (⚽ gol · A assistência · ▲ entrou · ▼ saiu). Fonte: ESPN.</p></div>`;
   }
   // ---------- radar: minicampo com onde foi o último lance + faixa dos últimos lances (narração da ESPN)
   const vistoRadar = {}; // jogo -> maior lance já mostrado (pisca só o que chegou agora)
@@ -1843,7 +1887,8 @@
     const incompleto = avisoIncompleto(code);
     const semPar = p.semEspn && !temAoVivo(p) ? `<div class="aviso-fonte">Este jogo não foi encontrado na ESPN, então ele fica sem placar ao vivo, lances e escalações. O placar vem da football-data, que atrasa alguns minutos.</div>` : "";
 
-    const listaAbas = temAoVivo(p) ? [...ABAS_JOGO, ["escalacoes", "Escalações"], ["aovivo", vivo ? '<span class="vivo-min">Ao vivo</span>' : "Ao vivo"]] : ABAS_JOGO;
+    const comVivo = temAoVivo(p) || encerradoRecente(code, p), comEsc = temAoVivo(p) || podeEscalacoes(code, p);
+    const listaAbas = [...ABAS_JOGO, ...(comEsc ? [["escalacoes", "Escalações"]] : []), ...(comVivo ? [["aovivo", vivo ? '<span class="vivo-min">Ao vivo</span>' : "Ao vivo"]] : [])];
     const chaveJogo = code + ":" + p.i;
     if (estado.abaDoJogo !== chaveJogo) { estado.abaDoJogo = chaveJogo; estado.abaManual = false; }
     let aba = listaAbas.some((a) => a[0] === estado.abaJogo) ? estado.abaJogo : "inteiro";
@@ -1886,9 +1931,12 @@
         ${lateral(p.a, ja, ladoA, "f")}
       </div>`;
     } else if (aba === "aovivo") {
-      conteudo = abaAoVivo(p, code);
+      if (!temAoVivo(p) || !(p.vv.pr || p.vv.lances)) { if (encerradoRecente(code, p)) garantirEncerrado(code, p); }
+      conteudo = !temAoVivo(p) && encerradoRecente(code, p)
+        ? `<div class="painel-corpo"><p class="sub pv-carregando">Carregando o que aconteceu no jogo…</p></div>` : abaAoVivo(p, code);
     } else if (aba === "escalacoes") {
-      conteudo = abaEscalacoes(p);
+      garantirEscalacoes(code, p);
+      conteudo = p.vv ? abaEscalacoes(p) : `<div class="painel-corpo"><p class="sub pv-carregando">Carregando escalações e elencos…</p></div>`;
     } else if (aba === "proj") {
       conteudo = abaProjecoes(code, p, pj);
     } else if (aba === "tabela") {

@@ -144,6 +144,7 @@
     if (!p._orig) p._orig = { s: p.s, fh: p.fh, fa: p.fa, hh: p.hh, ha: p.ha };
     const vv = (p.vv = p.vv || {});
     vv.espn = { lg: lgDe(code), id: ev.id, code };
+    vv.soEsc = false;
     vv.tid = { h: casa.team && casa.team.id, a: fora.team && fora.team.id };
     vv.st = tp.state;
     vv.clk = st.displayClock || ""; vv.per = st.period || 0;
@@ -795,7 +796,14 @@
     if (!rap.ult || Array.isArray(rap.ult) || rap.ult.gol !== undefined) rap.ult = {}; // formato antigo
     rap.corrida = rap.corrida || [];
     const ult = rap.ult[fonte];
-    if (!ult || soBase) { rap.ult[fonte] = Object.assign({}, ult || {}, cur); if (!ult) conferirRapidos(p); gravarRap(ch, rap); return false; } // 1ª leitura (ou fonte de reserva parada): só o ponto de partida
+    if (!ult || soBase) {
+      rap.ult[fonte] = Object.assign({}, ult || {}, cur);
+      // a partir deste minuto os lances da 5Dollar são contados aqui; os de antes vêm do histórico do servidor
+      if (!ult && fonte === "5d" && sl && !rap.base5d) rap.base5d = minutoDe(sl);
+      if (!ult) conferirRapidos(p);
+      gravarRap(ch, rap);
+      return false;
+    } // 1ª leitura (ou fonte de reserva parada): só o ponto de partida
     const agora = Date.now(), mm = minutoDe(sl);
     rap.semPar = rap.semPar.filter((x) => agora - x.t < 5 * 60e3);
     let mudou = false;
@@ -807,7 +815,7 @@
       // contador voltou (correção): tira a provisória mais nova daquele tipo que só esta fonte tinha
       for (const [dx, ks] of [[dg, ["gol"]], [da, ["alvo"]], [dt, ["trave"]], [de, ["esc"]], [dam, ["amarelo"]], [dvm, ["vermelho"]]]) {
         for (let n = dx; n < 0; n++) {
-          const j = rap.pend.map((x) => x.l === l && ks.includes(x.k) && x.src && x.src[fonte] && Object.keys(x.src).length === 1).lastIndexOf(true);
+          const j = rap.pend.map((x) => !x.hist && x.l === l && ks.includes(x.k) && x.src && x.src[fonte] && Object.keys(x.src).length === 1).lastIndexOf(true);
           if (j >= 0) { rap.pend.splice(j, 1); mudou = true; }
         }
       }
@@ -825,7 +833,7 @@
       const golsNarr = vv.pr ? vv.pr.ev.filter((e) => e.l === l && e.k === "gol").length : 0;
       for (const k of novos) {
         // a outra fonte já registrou esse lance? então é o mesmo: só anota quem chegou primeiro
-        const outra = rap.pend.find((x) => x.l === l && (k === "gol" ? x.k === "gol" : combina(x.k, k)) && x.src && !x.src[fonte] && agora - x.t < 4 * 60e3);
+        const outra = rap.pend.find((x) => !x.hist && x.l === l && (k === "gol" ? x.k === "gol" : combina(x.k, k)) && x.src && !x.src[fonte] && agora - x.t < 4 * 60e3);
         if (outra) {
           outra.src[fonte] = agora;
           const prim = Object.keys(outra.src).sort((a, b) => outra.src[a] - outra.src[b])[0];
@@ -848,7 +856,10 @@
     });
     rap.ult[fonte] = Object.assign({}, ult);
     for (const k in cur) if (cur[k]) rap.ult[fonte][k] = cur[k];
-    if (rap.pend.length > 40) rap.pend.splice(0, rap.pend.length - 40);
+    // guarda só as 40 provisórias mais novas (os lances refeitos do histórico do servidor não contam no limite)
+    for (let sobra = rap.pend.filter((x) => !x.hist).length - 40, j = 0; sobra > 0 && j < rap.pend.length; ) {
+      if (!rap.pend[j].hist) { rap.pend.splice(j, 1); sobra--; } else j++;
+    }
     if (mudou) conferirRapidos(p);
     gravarRap(ch, rap);
     return mudou;
@@ -874,8 +885,9 @@
           if (j < 0) j = rap.pend.findIndex((x) => x.l === e.l && combina(x.k, e.k) && perto(x, me));
           if (j >= 0) {
             const x = rap.pend[j];
-            registrarMedida(rap, x.k, (agora - x.t) / 1000);
+            if (!x.hist) registrarMedida(rap, x.k, (agora - x.t) / 1000);
             rap.pend.splice(j, 1);
+            if (x.hist) continue;
             // a outra fonte ainda não contou esse lance: deixa avisado para ela não criar uma marca repetida
             const prim = x.src ? Object.keys(x.src)[0] : null;
             for (const f of Object.keys(rap.ult || {})) if (x.src && !x.src[f]) rap.semPar.push({ l: e.l, k: x.k, per: me.per, m: me.m, t: agora, jm: true, prim, t0: x.t });
@@ -1000,7 +1012,7 @@
   const RESERVA_MS = 120000;
   function modoDe(p) {
     const vv = p && p.vv;
-    if (vv && vv.passado) return vv.d5 ? "5d" : "365";
+    if (vv && (vv.passado || vv.st === "post")) return vv.d5 && vv.d5.at ? "5d" : "365";
     if (!vv || !fonte5d()) return "365";
     const d = vv.d5, agora = Date.now();
     if (d && d.em && agora - d.em < RESERVA_MS) return "5d";
@@ -1131,32 +1143,13 @@
     if (passados.has(k)) return passados.get(k);
     const pp = { i: p.i, d: p.d, h: p.h, a: p.a, fh: p.fh, fa: p.fa, hh: p.hh, ha: p.ha, s: "FINISHED",
       vv: { espn: { code: code + "-passado", id: String(p.i), lg }, st: "post", passado: true } };
-    const [r, hist] = await Promise.all([lg ? buscarJSON(`${BASE}${lg}/summary?event=${p.i}`) : null, historico5d(p).catch(() => null)]);
+    const [r, hist] = await Promise.all([lg ? buscarJSON(`${BASE}${lg}/summary?event=${p.i}`) : null, historicoBruto(p).catch(() => null)]);
     if (r) lerDetalhe(r, pp);
-    if (hist) pp.vv.d5 = hist;
+    if (hist) aplicarHistorico(pp, hist);
     pp.vv.st = "post";
     pp.ok = !!(r || hist);
     if (pp.ok) passados.set(k, pp);
     return pp;
-  }
-  // minuto a minuto guardado pelo servidor: transforma as "fotos" acumuladas em ataques por minuto do gráfico
-  async function historico5d(p) {
-    if (!WORKER5D) return null;
-    const dia = new Date(p.d).toISOString().slice(0, 10);
-    const ind = await buscarJSON(`${WORKER5D}/historico?dia=${dia}`);
-    if (!ind || !Array.isArray(ind.jogos) || !ind.jogos.length) return null;
-    const T = dados.times || {}, nome = (id) => [(T[id] || {}).n, (T[id] || {}).c, (T[id] || {}).t].join(" ");
-    const th = tokens(nome(p.h)), ta = tokens(nome(p.a));
-    let melhor = null, nota = 0;
-    for (const g of ind.jogos) {
-      const sh = parecido(th, tokens(g.h)), sa = parecido(ta, tokens(g.a));
-      if (sh && sa && sh + sa > nota) { melhor = g; nota = sh + sa; }
-    }
-    if (!melhor) return null;
-    const j = await buscarJSON(`${WORKER5D}/historico?id=${melhor.id}`);
-    if (!j || !j.m) return null;
-    const m = fotosParaMinutos(j.m);
-    return { id: melhor.id, at: m.at, da: m.da, ult: m.ult, passado: true };
   }
   // "fotos" acumuladas por minuto (servidor) -> ataques e ataques perigosos de cada minuto do gráfico
   function fotosParaMinutos(mapa) {
@@ -1182,7 +1175,17 @@
     if (!WORKER5D || !d5 || !d5.id || Date.now() - (histUlt.get(d5.id) || 0) < 60000) return false;
     histUlt.set(d5.id, Date.now());
     const j = await buscarJSON(`${WORKER5D}/historico?id=${d5.id}`);
-    if (!j || !j.m) return false;
+    return aplicarHistorico(p, j);
+  }
+  // histórico do servidor (fotos por minuto) num jogo: ataques/ataques perigosos dos minutos que este navegador não
+  // viu e, uma vez por jogo, os lances do contador (gols, chutes, escanteios, cartões) desses minutos — sem repetir
+  // o que a narração já tem
+  function aplicarHistorico(p, j) {
+    const vv = p && p.vv;
+    if (!vv || !j || !j.m) return false;
+    const d5 = (vv.d5 = vv.d5 && vv.d5.id ? vv.d5 : Object.assign(vv.d5 || {}, { id: j.id, at: { h: {}, a: {} }, da: { h: {}, a: {} }, ult: null, desde: j.ko }));
+    if (!d5.id) d5.id = j.id;
+    d5.at = d5.at || { h: {}, a: {} }; d5.da = d5.da || { h: {}, a: {} };
     const m = fotosParaMinutos(j.m);
     let mudou = false;
     for (const q of ["at", "da"]) for (const l of ["h", "a"]) for (const k in m[q][l]) {
@@ -1190,7 +1193,116 @@
       if (temLocal) continue;
       if (d5[q][l][k] !== m[q][l][k]) { d5[q][l][k] = m[q][l][k]; (d5.hist = d5.hist || {})[k] = 1; mudou = true; }
     }
+    if (!d5.ult && m.ult) d5.ult = { at: m.ult.at, da: m.ult.da };
+    if (!vv.histLances && vv.pr) { vv.histLances = true; if (lancesDoHistorico(p, j.m)) mudou = true; }
     return mudou;
+  }
+  function lancesDoHistorico(p, mapa) {
+    const vv = p.vv, pr = vv.pr, ch = chaveJogo(p);
+    const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
+    const base = rap.base5d;
+    // lances da narração que já existem (cada um "cobre" um lance do contador perto dele)
+    const narr = pr.ev.filter((e) => CONTAVEIS[e.k]).map((e) => ({ e, me: minutoDe(pr.slots[e.i]), usado: false }));
+    const fotos = Object.entries(mapa).map(([k, v]) => { const [per, m] = k.split(":").map(Number); return { per, m, v }; }).sort((a, b) => a.per - b.per || a.m - b.m);
+    let ant = null, criou = false;
+    for (const f of fotos) {
+      const depoisDaBase = base && (f.per > base.per || (f.per === base.per && f.m >= base.m));
+      if (ant && !depoisDaBase) {
+        for (const [l, i] of [["h", 0], ["a", 1]]) {
+          const d = (k) => (f.v[k] && ant[k] ? Math.max(0, f.v[k][i] - ant[k][i]) : 0);
+          const dg = d("g"), novos = [];
+          for (let n = 0; n < dg; n++) novos.push("gol");
+          for (let n = 0; n < Math.max(0, d("ch") - dg); n++) novos.push("alvo");
+          for (let n = 0; n < d("cf"); n++) novos.push("fora");
+          for (let n = 0; n < d("esc"); n++) novos.push("esc");
+          for (let n = 0; n < d("am"); n++) novos.push("amarelo");
+          for (let n = 0; n < d("vm"); n++) novos.push("vermelho");
+          if (novos.length > 8) continue; // salto estranho no histórico
+          const mm = { per: f.per, m: f.m };
+          for (const k of novos) {
+            const x = narr.find((y) => !y.usado && y.e.l === l && (k === "gol" ? y.e.k === "gol" : combina(k, y.e.k)) && perto(y.me, mm));
+            if (x) { x.usado = true; continue; }
+            const r = f.per === 1 && f.m > 45 ? "45+" + (f.m - 45) : f.per === 2 && f.m > 90 ? "90+" + (f.m - 90) : String(f.m);
+            rap.pend.push({ id: ++rap.id, l, k, per: f.per, m: f.m, r, t: (f.per * 200 + f.m) * 1000, src: { "5d": 1 }, hist: true });
+            criou = true;
+          }
+        }
+      }
+      ant = f.v;
+    }
+    if (criou) { conferirRapidos(p); gravarRap(ch, rap); }
+    return criou;
+  }
+  // histórico bruto de um jogo pelo dia e pelos nomes dos times (jogos que não estão mais na lista ao vivo)
+  async function historicoBruto(p) {
+    if (!WORKER5D) return null;
+    const dia = new Date(p.d).toISOString().slice(0, 10);
+    const ind = await buscarJSON(`${WORKER5D}/historico?dia=${dia}`);
+    if (!ind || !Array.isArray(ind.jogos) || !ind.jogos.length) return null;
+    const T = dados.times || {}, nome = (id) => [(T[id] || {}).n, (T[id] || {}).c, (T[id] || {}).t].join(" ");
+    const th = tokens(nome(p.h)), ta = tokens(nome(p.a));
+    let melhor = null, nota = 0;
+    for (const g of ind.jogos) {
+      const sh = parecido(th, tokens(g.h)), sa = parecido(ta, tokens(g.a));
+      if (sh && sa && sh + sa > nota) { melhor = g; nota = sh + sa; }
+    }
+    if (!melhor) return null;
+    const j = await buscarJSON(`${WORKER5D}/historico?id=${melhor.id}`);
+    return j && j.m ? j : null;
+  }
+  // painel "Ao vivo": o minuto a minuto de todos os jogos rolando num pedido só (1 vez por minuto)
+  let vivosHistEm = 0;
+  async function historicoDosVivos() {
+    if (!WORKER5D || !painelAberto() || Date.now() - vivosHistEm < 60000) return false;
+    vivosHistEm = Date.now();
+    const j = await buscarJSON(`${WORKER5D}/historico?vivos=1`);
+    if (!j || !Array.isArray(j.jogos)) return false;
+    const porId = new Map(j.jogos.map((x) => [x.id, x]));
+    let mudou = false;
+    for (const p of jogosRolando()) {
+      const id = d5Par.get(chaveJogo(p));
+      if (id && porId.has(id) && aplicarHistorico(p, porId.get(id))) mudou = true;
+    }
+    return mudou;
+  }
+  // jogo encerrado (até 3 dias): monta a aba "Ao vivo" na hora em que alguém abre — narração da ESPN + histórico
+  const encerrados = new Map();
+  function carregarEncerrado(code, p) {
+    const k = code + ":" + p.i;
+    if (encerrados.has(k)) return encerrados.get(k);
+    const comp = dados.competicoes[code] || {}, lg = comp.espn || ESPN[code];
+    const prom = (async () => {
+      if (!lg) return false;
+      const r = await buscarJSON(`${BASE}${lg}/summary?event=${p.i}`);
+      if (!r) { encerrados.delete(k); return false; }
+      p.vv = p.vv || { espn: { code, id: String(p.i), lg }, st: "post", tid: { h: String(p.h), a: String(p.a) } };
+      p.vv.soEsc = false;
+      lerDetalhe(r, p);
+      p.vv.st = "post";
+      const j = await historicoBruto(p).catch(() => null);
+      if (j) aplicarHistorico(p, j);
+      redesenhar();
+      return true;
+    })();
+    encerrados.set(k, prom);
+    return prom;
+  }
+  // aba Escalações em qualquer jogo: elenco da temporada (ESPN) + titulares das últimas 5 (robô do site)
+  let titulares = null;
+  function carregarTitulares() {
+    if (!titulares) titulares = fetch("titulares5.json?v=" + Math.floor(Date.now() / 600000), { cache: "default" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    return titulares;
+  }
+  async function carregarEscalacoes(code, p) {
+    const comp = dados.competicoes[code] || {}, lg = comp.espn || ESPN[code];
+    if (!lg) return false;
+    if (!p.vv) p.vv = { espn: { code, id: String(p.i), lg }, st: p.s === "FINISHED" ? "post" : "pre", tid: { h: String(p.h), a: String(p.a) }, soEsc: true };
+    if (!p.vv.tid) p.vv.tid = { h: String(p.h), a: String(p.a) };
+    const [t] = await Promise.all([carregarTitulares(), atualizarElencos(p).catch(() => false)]);
+    if (t && t.times) p.vv.tit5 = { h: t.times[String(p.h)] || null, a: t.times[String(p.a)] || null };
+    redesenhar();
+    atualizarMinutos(p).catch(() => {});
+    return true;
   }
 
   let timer365 = null;
@@ -1200,7 +1312,7 @@
     if (document.hidden) return seguir();
     const p = jogoAberto();
     // com o servidor do ScanBall, a 5Dollar atualiza o placar de TODOS os jogos rolando (uma lista só, sem custo a mais)
-    const outros = WORKER5D ? jogosRolando().filter((x) => x !== p).map((x) => atualizar5d(x).catch(() => false)) : [];
+    const outros = WORKER5D ? jogosRolando().filter((x) => x !== p).map((x) => atualizar5d(x).catch(() => false)).concat([historicoDosVivos().catch(() => false)]) : [];
     const doAberto = p && p.vv.st === "in"
       ? [atualizarDetalhe(p, false).catch(() => false), atualizar365(p, false).catch(() => false), atualizarPbp(p, false).catch(() => false), atualizar5d(p).catch(() => false)]
       : [];
@@ -1330,7 +1442,7 @@
   }
 
   window.AoVivo = {
-    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status, servidor5d: !!WORKER5D, modoDe, graficoPassado,
+    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status, servidor5d: !!WORKER5D, modoDe, graficoPassado, carregarEncerrado, carregarEscalacoes,
     _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); },
   };
 })();

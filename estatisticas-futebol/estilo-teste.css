@@ -949,7 +949,7 @@ table.odds-tabela { margin-top: 14px; }
   .esc-grade { grid-template-columns: 1fr; } .pressao-area { height: 156px; } .pressao-leg small { display: none; }
   .pressao-cab { flex-wrap: nowrap; } .pressao-cab > .sub { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .cj { width: 58px; } .cj-nome { max-width: 58px; font-size: 10.5px; }
-  .esc-tab th:nth-child(8), .esc-tab td:nth-child(8) { display: none; } .esc-tab td, .esc-tab th { padding: 5px 3px; }
+  .esc-tab .c-cg { display: none; } .esc-tab th.esq { white-space: normal; } .esc-tab td, .esc-tab th { padding: 5px 3px; }
   .selo-art, .selo-gar { font-size: 9.5px; padding: 1px 4px; }
   .pressao-eixo { font-size: 9.5px; }
 }
@@ -1157,3 +1157,9 @@ table.odds-tabela { margin-top: 14px; }
 .mg-msg { text-align: center; padding: 18px 0; }
 body.modal-aberto { overflow: hidden; }
 @media (max-width: 560px) { .modal-graf { padding: 8px; } .mg-caixa { padding: 12px 10px 10px; } .mg-cab h2 { font-size: 15px; } }
+
+/* espaço fixo dos avisos do gráfico (vazio quando não tem aviso) */
+.pressao-avisos:empty { display: none; }
+/* escalações antes do jogo: provável titular e titular nas últimas 5 */
+.esc-prov { font-size: 10.5px; color: var(--tinta-2); border: 1px dashed var(--linha); border-radius: 999px; padding: 0 5px; margin-left: 4px; white-space: nowrap; }
+.esc-tab td.t5-cheio { font-weight: 700; }
