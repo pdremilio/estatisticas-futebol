@@ -97,7 +97,7 @@
     if (n.nodeType === 3 || n.nodeType === 8) { if (v.data !== n.data) v.data = n.data; return; }
     if (n.nodeType !== 1) { v.replaceWith(n); return; }
     if (v.isEqualNode(n)) return;
-    if (!prof || /^(INPUT|SELECT|TEXTAREA|OPTION|svg)$/i.test(n.nodeName)) { v.replaceWith(n); return; }
+    if (!prof || /^(INPUT|SELECT|TEXTAREA|OPTION)$/i.test(n.nodeName)) { v.replaceWith(n); return; }
     for (const a of [...v.attributes]) if (!n.hasAttribute(a.name)) v.removeAttribute(a.name);
     for (const a of n.attributes) if (v.getAttribute(a.name) !== a.value) v.setAttribute(a.name, a.value);
     sincronizarFilhos(v, [...n.childNodes], prof - 1);
@@ -263,7 +263,7 @@
   const ROT_STATUS = (p) => (aoVivo(p) ? (p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : `<span class="vivo">${STATUS[p.s]}</span>`) : STATUS[p.s] || p.s);
 
   // ---------- ao vivo: estatísticas, lances, pressão e escalações (dados da ESPN, ver aovivo.js)
-  const EST_VIVO = [["posse", "Posse de bola", "%"], ["xg", "Gols esperados (xG)"], ["atk", "Ataques"], ["cp", "Chances perigosas"], ["chutes", "Finalizações"], ["alvo", "No alvo"], ["trave", "Na trave"],
+  const EST_VIVO = [["posse", "Posse de bola", "%"], ["xg", "Gols esperados (xG)"], ["da", "Ataques perigosos"], ["atk", "Ataques"], ["cp", "Chances perigosas"], ["chutes", "Finalizações"], ["alvo", "No alvo"], ["fora5", "Para fora"], ["trave", "Na trave"],
     ["esc", "Escanteios"], ["faltas", "Faltas"], ["amarelos", "Cartões amarelos"], ["vermelhos", "Cartões vermelhos"], ["imped", "Impedimentos"],
     ["defesas", "Defesas do goleiro"], ["passes", "Passes"]];
   const temAoVivo = (p) => !!(p.vv && p.vv.espn);
@@ -363,14 +363,21 @@
     });
     return Object.assign({}, pr, { h, a });
   }
-  function valoresPressao(pr0, modo, atk, prov, pas, vv) {
-    const pr = somarD5(somarPasses(somarProvisorios(somarAtaques(pr0, atk), prov), pas), vv && vv.d5, vv && vv.temAtk);
+  // quem alimenta as barras: com a 5Dollar em dia, ataques perigosos/ataques dela; na reserva (365Scores),
+  // os ataques e o domínio de passes do 365Scores
+  const fonteDe = (vv) => (vv && window.AoVivo && AoVivo.modoDe ? AoVivo.modoDe({ vv }) : "365");
+  function valoresPressao(pr0, modo, atk, prov, pas, vv, vivo) {
+    const reserva = fonteDe(vv) === "365";
+    const pr = somarD5(somarPasses(somarProvisorios(somarAtaques(pr0, reserva ? atk : null), prov), reserva ? pas : null), reserva ? null : vv && vv.d5, false);
     if (modo !== "tendencia") return { h: pr.h, a: pr.a };
-    // tendência: cada minuto carrega um pouco dos anteriores (o lance "esfria" aos poucos)
+    // tendência: cada minuto carrega um pouco dos anteriores (o lance "esfria" aos poucos).
+    // vivo = { i, e }: no minuto atual, o que veio de antes esfria segundo a segundo (e = fração do minuto já jogada);
+    // no fim do minuto a barra chega exatamente ao valor do minuto fechado
     const h = [], a = [];
     let sh = 0, sa = 0;
     for (let i = 0; i < pr.slots.length; i++) {
-      sh = 0.55 * sh + (pr.h[i] || 0); sa = 0.55 * sa + (pr.a[i] || 0);
+      const f = vivo && i === vivo.i ? Math.pow(0.55, vivo.e) : 0.55;
+      sh = f * sh + (pr.h[i] || 0); sa = f * sa + (pr.a[i] || 0);
       h[i] = Math.round(sh * 10) / 10; a[i] = Math.round(sa * 10) / 10;
     }
     return { h, a };
@@ -442,9 +449,16 @@
     const v = p.vv || {}, hora = horaAtualizacao(p);
     const linhas = [];
     const L = (rot, txt) => linhas.push(`<div class="dv-l"><dt>${rot}</dt><dd>${txt}</dd></div>`);
-    L("Lances", v.pbp365 ? "narração do 365Scores + ESPN, consultadas a cada ~10 s" : "narração da ESPN, consultada a cada ~10 s (chega 1 a 2 min depois do lance)");
-    L("Ataques (365Scores)", v.temAtk && v.atk ? `sim, a cada ~6 s (desde ${horaCurta(v.atk.desde)})` : v.id365 && v.st === "in" ? "esta liga não tem o contador" : "—");
-    L("Domínio de passes", v.temPas && v.pas ? "sim: quem trocou mais passes no minuto ganha barra pela diferença (a cada ~6 s)" : "—");
+    const fonte = fonteDe(v);
+    L("Fonte principal", fonte === "5d" ? "5DollarFootballAPI (placar, lances, ataques e ataques perigosos)" : fonte === "espera" ? "esperando a 1ª resposta da 5DollarFootballAPI" : fonte5d() ? "365Scores (reserva: a 5Dollar está sem dados deste jogo)" : "365Scores");
+    L("Lances", fonte === "365"
+      ? (v.pbp365 ? "contadores e narração do 365Scores + narração da ESPN" : "contadores do 365Scores + narração da ESPN") + " (a cada ~6–10 s)"
+      : "contadores e eventos da 5Dollar (a cada ~8 s); a narração da ESPN (a cada ~10 s) completa com os nomes");
+    L("xG", v.es365 && v.es365.xg ? `365Scores (a cada ${fonte === "365" ? "~6" : "~30"} s)` : "—");
+    if (fonte === "365") {
+      L("Ataques (365Scores)", v.temAtk && v.atk ? `sim, a cada ~6 s (desde ${horaCurta(v.atk.desde)})` : v.id365 && v.st === "in" ? "esta liga não tem o contador" : "—");
+      L("Domínio de passes", v.temPas && v.pas ? "sim: quem trocou mais passes no minuto ganha barra pela diferença (a cada ~6 s)" : "—");
+    }
     if (fonte5d()) {
       const st = (window.AoVivo && AoVivo.d5Status) || {}, d = v.d5;
       const estado5 = st.msg && st.msg !== "ok" ? h(st.msg) : d && d.semJogo ? "este jogo não está na lista ao vivo deles" : !d ? "conectando…" : "ok, lido a cada ~8 s" + (d.desde ? ` (desde ${horaCurta(d.desde)})` : "");
@@ -452,7 +466,6 @@
       if (d && d.ult && d.ult.da) L("Ataques perigosos", `${d.ult.da[0]} × ${d.ult.da[1]}${d.ult.at ? ` · ataques ${d.ult.at[0]} × ${d.ult.at[1]}` : ""} · último novo ${d.mudDa ? `há ${Math.round((Date.now() - d.mudDa) / 1000)} s` : "ainda não"}`);
     }
     if (v.rap) {
-      L("Marcas claras", `o contador (${fonte5d() ? "365Scores ou 5Dollar" : "365Scores"}) já registrou o lance e a narração ainda não chegou`);
       const c = v.corrida;
       if (c) L("Corrida dos contadores", `5Dollar primeiro em <b>${c.d5} de ${c.n}</b> · 365Scores em ${c.n - c.d5} · diferença média de ${c.media} s`);
       const m = v.medRap;
@@ -461,6 +474,17 @@
     return `<div class="pressao-rodape"><span class="sub">${hora ? `Atualizado às ${hora}` : ""}</span>
       <button type="button" class="pressao-engr" data-prdev aria-expanded="${!!estado.prDev}">Informações técnicas ${estado.prDev ? "▴" : "▾"}</button></div>
       ${estado.prDev ? `<dl class="pressao-dev">${linhas.join("")}</dl>` : ""}`;
+  }
+  // o que entra nas barras, conforme a fonte do momento
+  function subPressao(p) {
+    const v = p.vv || {}, reserva = fonteDe(v) === "365";
+    return [reserva && v.temPas && v.pas ? "domínio (passes)" : "", !reserva && v.d5 && v.d5.da ? "ataques perigosos" : "", reserva && v.temAtk ? "ataques" : "",
+      "chutes, escanteios e gols por minuto"].filter(Boolean).join(", ");
+  }
+  // 5Dollar ligada mas sem dados deste jogo há 2 min: avisa que o 365Scores assumiu
+  function avisoReserva(p) {
+    if (!fonte5d() || fonteDe(p.vv) !== "365" || !p.vv || p.vv.st !== "in") return "";
+    return `<div class="aviso-5d" role="status">5Dollar sem dados deste jogo há mais de 2 min: o 365Scores assumiu o gráfico e as estatísticas.</div>`;
   }
   function graficoPressao(p, compacto) {
     const pr = p.vv && p.vv.pr;
@@ -472,7 +496,15 @@
     const n = pr.slots.length, L = 6, W = n * L, H = 100, meio = H / 2;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
     const prov = p.vv.prov || [];
-    const val0 = valoresPressao(pr, opc.modo, p.vv.atk, prov, p.vv.pas, p.vv);
+    // barra viva: guarda quando o minuto atual começou (para o "esfriar" segundo a segundo)
+    const vivoAgora = !pr.fim && !pr.intervalo && atual >= 0 && p.s === "IN_PLAY";
+    let vivo = null;
+    if (vivoAgora) {
+      const ini = p.vv._iniMin;
+      if (!ini || ini.i !== atual) p.vv._iniMin = { i: atual, t: ini && ini.i === atual - 1 ? Date.now() : Date.now() - 30000 };
+      vivo = { i: atual, e: Math.min(1, Math.max(0, (Date.now() - p.vv._iniMin.t) / 60000)) };
+    }
+    const val0 = valoresPressao(pr, opc.modo, p.vv.atk, prov, p.vv.pas, p.vv, vivo);
     // saldo: em cada minuto só aparece quem dominou, com a barra = a diferença entre os dois times;
     // minuto equilibrado (os dois atacando parecido) vira um tracinho cinza no meio
     const empate = [];
@@ -493,10 +525,19 @@
     const alt = (v) => Math.max(Math.min((v || 0) / max, 1) * (meio - 3), v ? 2 : 0);
     let barras = "";
     for (let i = 0; i <= atual && i < n; i++) {
-      const x = i * L + 0.6, eAgora = i === atual && !pr.fim && !pr.intervalo ? " p-atual" : "";
-      if (val.h[i]) barras += `<rect class="p-c${eAgora}" x="${x}" y="${(meio - alt(val.h[i])).toFixed(1)}" width="${L - 1.2}" height="${alt(val.h[i]).toFixed(1)}"/>`;
-      if (val.a[i]) barras += `<rect class="p-f${eAgora}" x="${x}" y="${meio}" width="${L - 1.2}" height="${alt(val.a[i]).toFixed(1)}"/>`;
-      if (empate[i]) barras += `<rect class="p-empate${eAgora}" x="${x}" y="${meio - 3}" width="${L - 1.2}" height="6"/>`;
+      const x = i * L + 0.6;
+      if (i === atual && vivoAgora) continue; // a barra viva vem depois, sempre com as duas metades (para animar)
+      if (val.h[i]) barras += `<rect class="p-c" x="${x}" y="${(meio - alt(val.h[i])).toFixed(1)}" width="${L - 1.2}" height="${alt(val.h[i]).toFixed(1)}"/>`;
+      if (val.a[i]) barras += `<rect class="p-f" x="${x}" y="${meio}" width="${L - 1.2}" height="${alt(val.a[i]).toFixed(1)}"/>`;
+      if (empate[i]) barras += `<rect class="p-empate" x="${x}" y="${meio - 3}" width="${L - 1.2}" height="6"/>`;
+    }
+    // minuto atual: as metades de cima e de baixo existem sempre (altura 0 quando não tem nada), assim a barra
+    // desliza suave quando sobe, esfria ou troca de lado
+    if (vivoAgora && atual < n) {
+      const x = atual * L + 0.6, ah = empate[atual] ? 3 : alt(val.h[atual]), aa = empate[atual] ? 3 : alt(val.a[atual]);
+      const cls = empate[atual] ? "p-empate" : "";
+      barras += `<rect id="pv-c" class="p-c p-atual ${cls}" x="${x}" width="${L - 1.2}" y="${(meio - ah).toFixed(1)}" height="${ah.toFixed(1)}" style="y:${(meio - ah).toFixed(1)}px;height:${ah.toFixed(1)}px"/>`;
+      barras += `<rect id="pv-f" class="p-f p-atual ${cls}" x="${x}" width="${L - 1.2}" y="${meio}" height="${aa.toFixed(1)}" style="height:${aa.toFixed(1)}px"/>`;
     }
     // faixa do minuto atual (mostra onde a barra está "crescendo")
     const faixa = !pr.fim && !pr.intervalo && atual >= 0 ? `<rect class="p-faixa" x="${atual * L}" y="0" width="${L}" height="${H}"/>` : "";
@@ -505,7 +546,7 @@
     let linhas = iniSeg > 0 ? `<line x1="${iniSeg * L}" x2="${iniSeg * L}" y1="0" y2="${H}" class="p-tempo"/>` : "";
     const iniProrr = pr.slots.findIndex((s) => s.per === 3);
     if (iniProrr > 0) linhas += `<line x1="${iniProrr * L}" x2="${iniProrr * L}" y1="0" y2="${H}" class="p-tempo"/>`;
-    if (opc.gol) for (const e of evs) if (e.k === "gol") linhas += `<line x1="${e.i * L + L / 2}" x2="${e.i * L + L / 2}" y1="0" y2="${H}" class="p-gol ${e.l === "h" ? "c" : "f"}${e.prov ? " prov" : ""}"/>`;
+    if (opc.gol) for (const e of evs) if (e.k === "gol") linhas += `<line x1="${e.i * L + L / 2}" x2="${e.i * L + L / 2}" y1="0" y2="${H}" class="p-gol ${e.l === "h" ? "c" : "f"}"/>`;
 
     // marcas: tamanho fixo em pixels, empilhadas (até 2 por minuto e lado); toque mostra todas
     const bloco = compacto ? (window.innerWidth < 560 ? 4 : 3) : window.innerWidth < 560 ? 3 : window.innerWidth < 900 ? 2 : 1;
@@ -516,12 +557,12 @@
       (grupos[chave] = grupos[chave] || []).push(e);
     }
     const nomeLado = (l) => nomeTime(l === "h" ? p.h : p.a);
-    const descr = (x) => `${x.min || pr.slots[x.i].r + "'"} ${x.j ? x.j + " · " : ""}${x.prov && x.k === "fora" ? "chute para fora ou bloqueado" : NOME_MARCA[x.k]}${x.x ? " (" + x.x + ")" : ""}${x.prov ? " (pelo contador, esperando a narração)" : ""}`;
+    const descr = (x) => `${x.min || pr.slots[x.i].r + "'"} ${x.j ? x.j + " · " : ""}${NOME_MARCA[x.k]}${x.x ? " (" + x.x + ")" : ""}`;
     const marcas = Object.values(grupos).map((g) => {
       const ord = g.slice().sort((a, b) => PRIOR[b.k] - PRIOR[a.k]);
       const info = g.slice().sort((a, b) => a.i - b.i).map(descr).join(" | ") + ` — ${nomeLado(g[0].l)}`;
       const left = (((ord[0].i + 0.5) / n) * 100).toFixed(2);
-      return ord.slice(0, 2).map((e, j) => `<button type="button" class="mk mk-${e.k} ${e.l === "h" ? "mk-c" : "mk-f"}${e.prov ? " mk-prov" : ""} mk-n${j}${j === 1 && g.length > 2 ? " mk-mais" : ""}" style="left:${left}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${iconeMarca(e.k)}</button>`).join("");
+      return ord.slice(0, 2).map((e, j) => `<button type="button" class="mk mk-${e.k} ${e.l === "h" ? "mk-c" : "mk-f"} mk-n${j}${j === 1 && g.length > 2 ? " mk-mais" : ""}" style="left:${left}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${iconeMarca(e.k)}</button>`).join("");
     }).join("");
 
     // eixo de 5 em 5 minutos
@@ -559,8 +600,8 @@
         <p class="sub">"Só o minuto": cada barra mostra só o que aconteceu naquele minuto. "Tendência": cada barra carrega um pouco dos minutos anteriores. "Só o saldo": em cada minuto aparece só o time que dominou (barra = a diferença entre os dois); minuto equilibrado vira um tracinho cinza.</p>
       </div>` : "";
     return `<div class="pressao">
-      ${blocoAlerta(p)}
-      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${[p.vv.temPas && p.vv.pas ? "domínio (passes)" : "", p.vv.d5 && p.vv.d5.da ? "ataques perigosos" : "", p.vv.temAtk ? "ataques" : "", "chutes, escanteios e gols por minuto"].filter(Boolean).join(", ")}</span>
+      ${blocoAlerta(p)}${avisoReserva(p)}
+      <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${subPressao(p)}</span>
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Exibir</button></div>
       ${config}
@@ -574,8 +615,9 @@
     </div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-chave5d], [data-prdev]");
+    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-chave5d], [data-prdev], [data-estper]");
     if (!t) return;
+    if (t.dataset.estper) { estado.estPer = t.dataset.estper; aoVivoAtualizado(); return; }
     if (t.dataset.chave5d) {
       try {
         if (t.dataset.chave5d === "salvar") { const v = ((document.getElementById("chave5d") || {}).value || "").trim(); if (v) localStorage.setItem("sb_5d_chave", v); }
@@ -890,11 +932,50 @@
       <p class="sub nota">Placar e minuto: ESPN (a cada 20 s). Gráfico e lances: ataques e narração do 365Scores (quando a liga tem) junto com a narração da ESPN. Toque num jogo para ver tudo.</p>
     </section>`);
   }
+  // estatísticas do painel ao vivo por período (Jogo todo / 1º tempo / 2º tempo). Os períodos usam os números
+  // da 5Dollar: 1º tempo vem pronto; 2º tempo = jogo todo − 1º tempo
+  function estatPeriodo(v) {
+    const fonte = fonteDe(v), d = v.d5 && v.d5.fx, st = d && d.st;
+    const par = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
+    const do5 = (s, gols, esc) => {
+      const o = {};
+      if (s) { o.da = par(s.dangerous_attacks); o.atk = par(s.attacks); o.alvo = par(s.shots_on_target); o.fora5 = par(s.shots_off_target); o.posse = par(s.possession); }
+      if (esc) o.esc = esc;
+      for (const k in o) if (!o[k]) delete o[k];
+      return o;
+    };
+    const com5 = fonte !== "365" && st;
+    const cartoes = d && d.cards && d.cards.home && d.cards.away ? { amarelos: [Number(d.cards.home.yellow) || 0, Number(d.cards.away.yellow) || 0], vermelhos: [Number(d.cards.home.red) || 0, Number(d.cards.away.red) || 0] } : {};
+    const todo = Object.assign({}, v.es || {}, fonte === "365" ? v.es365 || {} : {}, com5 ? Object.assign(do5(st, null, par(d.corners)), cartoes) : {});
+    if (v.es365 && v.es365.xg) todo.xg = v.es365.xg;
+    const temTempos = com5 && st.first_half;
+    const escolha = temTempos ? estado.estPer || "todo" : "todo";
+    const chips = temTempos ? `<div class="est-per" role="group" aria-label="Período">${[["todo", "Jogo todo"], ["1", "1º tempo"], ["2", "2º tempo"]].map(([k, rot]) => `<button type="button" class="chip" data-estper="${k}" aria-pressed="${escolha === k}">${rot}</button>`).join("")}</div>` : "";
+    if (escolha === "todo") return { es: Object.keys(todo).length ? todo : null, chips, nota: "" };
+    const c = d.corners || {}, esc1 = c.half_home != null && c.half_away != null ? [Number(c.half_home) || 0, Number(c.half_away) || 0] : null;
+    const um = do5(st.first_half, null, esc1);
+    if (escolha === "1") return { es: Object.keys(um).length ? um : null, chips, nota: '<p class="sub nota">1º tempo: números da 5DollarFootballAPI.</p>', vazio: "Sem números do 1º tempo ainda." };
+    // 2º tempo: jogo todo menos o 1º tempo (só depois do intervalo)
+    if (!(v.per >= 2)) return { es: null, chips, nota: "", vazio: "O 2º tempo ainda não começou." };
+    const tudo = do5(st, null, par(d.corners)), dois = {};
+    for (const k in tudo) {
+      if (k === "posse") continue;
+      if (um[k]) dois[k] = [Math.max(0, tudo[k][0] - um[k][0]), Math.max(0, tudo[k][1] - um[k][1])];
+    }
+    // posse do 2º tempo: aproximada pela posse do jogo todo e a do 1º tempo
+    const mins = Math.max(46, parseInt(String(v.clk || v.min || "").replace(/\D.*$/, ""), 10) || 46);
+    if (tudo.posse && um.posse) {
+      const h2 = (tudo.posse[0] * mins - um.posse[0] * 45) / (mins - 45);
+      if (isFinite(h2)) { const x = Math.max(0, Math.min(100, Math.round(h2))); dois.posse = [x, 100 - x]; }
+    }
+    return { es: Object.keys(dois).length ? dois : null, chips, nota: '<p class="sub nota">2º tempo: jogo todo menos o 1º tempo (5DollarFootballAPI); posse aproximada.</p>', vazio: "Sem números do 2º tempo ainda." };
+  }
   function blocoAoVivo(p) {
     const v = p.vv;
-    if (!v || (!(v.ev && v.ev.length) && !v.es && !v.es365 && !(v.lances && v.lances.length))) return "";
-    // estatísticas: as do 365Scores (mais rápidas e com ataques/xG) por cima das da ESPN
-    const esTodas = v.es || v.es365 ? Object.assign({}, v.es || {}, v.es365 || {}) : null;
+    if (!v || (!(v.ev && v.ev.length) && !v.es && !v.es365 && !(v.d5 && v.d5.fx) && !(v.lances && v.lances.length) && !(v.prov && v.prov.length))) return "";
+    // estatísticas: ESPN, por cima o 365Scores (xG; e tudo na reserva) e, com a 5Dollar em dia, os números dela
+    const per = estatPeriodo(v);
+    const esTodas = per.es;
     const icone = (t) => (t === "gol" ? "⚽" : t === "amarelo" ? '<i class="ic amarelo"></i>' : t === "vermelho" ? '<i class="ic vermelho"></i>' : t === "sub" ? "⇄" : t === "var" ? "VAR" : "");
     const txt = (e) => `<span class="${e.t === "gol" ? "gol" : ""}">${e.l === "h" ? "" : icone(e.t) + " "}${h(e.j || "")}${e.x ? ` <small>${h(e.x)}</small>` : ""}${e.l === "h" ? " " + icone(e.t) : ""}</span>`;
     const minNum = (m) => { const [a, b] = String(m).split("+"); return Number(a) + (Number(b) || 0) / 100; };
@@ -902,24 +983,27 @@
     const num = (x) => (x == null ? null : Number(String(x).replace("%", "")));
     const est = esTodas ? EST_VIVO.filter(([k]) => esTodas[k] && (num(esTodas[k][0]) != null || num(esTodas[k][1]) != null)).map(([k, rot, suf = ""]) => {
       const a = num(esTodas[k][0]) || 0, b = num(esTodas[k][1]) || 0, t = a + b || 1;
-      const f = (x) => (k === "xg" ? fNum(x, 2) : x) + suf;
+      const f = (x) => (k === "xg" ? fNum(x, 2) : Math.round(x)) + suf;
       return `<div class="est-linha"><span class="v">${f(a)}</span><span class="rot">${rot}</span><span class="v">${f(b)}</span>
         <span class="est-trilho"><span style="width:${(a / t) * 100}%"></span><span style="width:${(b / t) * 100}%"></span></span></div>`;
     }).join("") : "";
     const em = v.emDet || v.em ? new Date(v.emDet || v.em) : null;
     const atual = em ? `<span class="atual">· atualizado ${pad(em.getHours())}:${pad(em.getMinutes())}:${pad(em.getSeconds())}</span>` : "";
     // lance a lance (narração da ESPN) ao lado das estatísticas; sem narração, ficam os lances principais
-    const prov = (v.prov || []).slice().sort((a, b) => b.t - a.t);
-    const NOME_PROV = { gol: "<b>GOL!</b>", alvo: "Chute no gol", trave: "<b>Na trave!</b>", fora: "Chute para fora ou bloqueado", esc: "Escanteio" };
-    const linhasProv = prov.map((e) => `<li class="prov ${e.l === "a" ? "f" : "c"}"><span class="m">${h(e.min)}</span><span class="ic-l">${ICONE_LANCE[e.k] || ""}</span><span class="t">${NOME_PROV[e.k] || ""} · ${h(nomeTime(e.l === "h" ? p.h : p.a))} <span class="sub">(pelo contador; detalhes chegando)</span></span></li>`).join("");
-    const narr = (v.lances && v.lances.length) || prov.length ? (() => {
+    // lances que o contador/eventos já registraram e a narração ainda não trouxe: entram iguais aos outros
+    // (a narração da ESPN, quando chega, completa com o nome do jogador)
+    const minVal = (m) => { const x = String(m || "").match(/(\d+)'?\s*(?:\+\s*(\d+))?/); return x ? Number(x[1]) + (Number(x[2]) || 0) / 100 : 0; };
+    const doContador = (v.prov || []).map((e) => ({ k: e.k, l: e.l, j: e.j || "", j2: e.x ? e.x.replace(/^sai /, "") : "", min: e.min, t: e.t, cont: true }));
+    const todos = (v.lances || []).map((e, i) => ({ e, ord: minVal(e.min), seq: i + 1 })).concat(doContador.map((e) => ({ e, ord: minVal(e.min), seq: 1e9 + (e.t || 0) / 1e4 })));
+    todos.sort((a, b) => b.ord - a.ord || b.seq - a.seq);
+    const narr = todos.length ? (() => {
       const visto = novosDoRadar(p);
-      return `<ul class="radar-lista narracao" aria-live="polite">${linhasProv}${(v.lances || []).slice().reverse().map((e, i) => `<li class="${e.seq > visto ? "novo" : ""} ${e.k === "marco" ? "marco" : e.l === "a" ? "f" : "c"}${i === 0 && !prov.length ? " atual" : ""}">
+      return `<ul class="radar-lista narracao" aria-live="polite">${todos.map(({ e }, i) => `<li class="${!e.cont && e.seq > visto ? "novo" : ""} ${e.k === "marco" ? "marco" : e.l === "a" ? "f" : "c"}${i === 0 ? " atual" : ""}">
         <span class="m">${h(e.min)}</span><span class="ic-l">${ICONE_LANCE[e.k] || ""}</span><span class="t">${textoLance(p, e)}</span></li>`).join("")}</ul>`;
     })() : "";
     return `<div class="vivo-painel">
       <div><h3>${narr ? "Lance a lance" : "Lances"} ${atual}</h3>${narr || (evs ? `<ul class="ev-lista">${evs}</ul>` : '<p class="sub">Nenhum lance registrado ainda.</p>')}</div>
-      <div><h3>Estatísticas</h3>${est ? `<div class="est-lista">${est}</div>` : '<p class="sub">Estatísticas ainda não disponíveis.</p>'}</div>
+      <div><h3>Estatísticas</h3>${per.chips}${est ? `<div class="est-lista">${est}</div>${per.nota}` : `<p class="sub">${per.vazio || "Estatísticas ainda não disponíveis."}</p>`}</div>
     </div>`;
   }
   const DIA_CURTO = (iso) => { const d = new Date(iso); return SEMANA[d.getDay()] + " " + pad(d.getDate()) + "/" + pad(d.getMonth() + 1); };
@@ -2459,6 +2543,12 @@
     const m = location.hash.match(/^#jogo\/([^/]+)\/([^/]+)/);
     return m ? { code: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) } : null;
   }
+  // barra viva: com um jogo rolando na tela, redesenha a cada 2 s para a barra do minuto atual "esfriar" suave
+  setInterval(() => {
+    if (document.hidden || !document.querySelector(".pressao #pv-c")) return;
+    aoVivoAtualizado();
+  }, 2000);
+
   // atualização ao vivo (placar a cada 20 s, lances e estatísticas a cada poucos segundos)
   const ROLAVEIS = "#lista-jogos-corpo, .detalhe-lado, .radar-lista, .ev-lista, .tabela-rolagem, .esc-lado, .abas-jogo, .chips";
   function aoVivoAtualizado() {

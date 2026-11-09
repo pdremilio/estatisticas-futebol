@@ -153,6 +153,9 @@
     if (tp.state === "in") {
       p.s = /HALFTIME/.test(tp.name || "") ? "PAUSED" : "IN_PLAY";
       p.fh = Number(casa.score); p.fa = Number(fora.score);
+      // a 5Dollar atualiza o placar a cada 8 s (a ESPN, a cada 20 s): enquanto ela estiver em dia, o placar é o dela
+      const d5p = vv.d5Placar;
+      if (d5p && Date.now() - d5p.em < 45000) { p.fh = d5p.h; p.fa = d5p.a; }
       vv.min = p.s === "PAUSED" ? "Intervalo" : st.displayClock || tp.shortDetail || "";
     } else if (tp.state === "post" && tp.completed && !/POSTPONED|CANCEL|ABANDON/.test(tp.name || "")) {
       p.s = "FINISHED"; p.fh = Number(casa.score); p.fa = Number(fora.score); vv.min = "";
@@ -428,7 +431,7 @@
     return novos;
   }
   function montarMisturado(p) {
-    const ch = chaveJogo(p), res = resumos.get(ch), pb = pbp365.get(ch);
+    const ch = chaveJogo(p), res = resumos.get(ch), pb = modoDe(p) === "365" ? pbp365.get(ch) : null;
     const extra = pb ? soNo365(p, pb.msgs, res) : [];
     const r = { commentary: ((res && res.com) || []).concat(extra) };
     const ladoDe = res ? res.ladoDe : (t) => (t && t.lado) || null;
@@ -705,7 +708,9 @@
   async function atualizar365(p, forcar) {
     if (!p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
     const ch = p.vv.espn.code + ":" + p.vv.espn.id;
-    if (!forcar && Date.now() - (ultimo365.get(ch) || 0) < CICLO_365 - 500) return false;
+    const modo = modoDe(p), reserva = modo === "365";
+    // com a 5Dollar como principal, o 365Scores só entra com o xG: a cada 30 s basta
+    if (!forcar && Date.now() - (ultimo365.get(ch) || 0) < (reserva ? CICLO_365 : 30000) - 500) return false;
     ultimo365.set(ch, Date.now());
     const gid = await idDo365(p);
     if (!gid) return false;
@@ -735,7 +740,7 @@
     const s = slotDe(g.gameTimeDisplay || vv.clk, vv.per);
     if (tot && s) {
       const k = chaveSlot(s);
-      if (atk.ult) {
+      if (atk.ult && reserva) {
         for (const [i, l] of [[0, "h"], [1, "a"]]) {
           const d = tot[i] - atk.ult[i];
           if (d > 0 && d < 20) atk[l][k] = (atk[l][k] || 0) + d;
@@ -750,7 +755,7 @@
     if (tp && s) {
       const pas = (vv.pas = vv.pas || lerSessao(gid, "p") || { h: {}, a: {}, ult: null });
       const k = chaveSlot(s);
-      if (pas.ult) {
+      if (pas.ult && reserva) {
         for (const [i, l] of [[0, "h"], [1, "a"]]) {
           const d = tp[i] - pas.ult[i];
           if (d > 0 && d < 120) pas[l][k] = (pas[l][k] || 0) + d;
@@ -760,7 +765,7 @@
     }
     const num = (x) => (x == null || x === "" || isNaN(Number(x)) || Number(x) < 0 ? null : Number(x));
     const gh = num((g.homeCompetitor || {}).score), ga = num((g.awayCompetitor || {}).score);
-    const rapMudou = contarFonte(p, "365", { gol: gh != null && ga != null ? [gh, ga] : null, alvo: es.alvo, chutes: es.chutes, trave: es.trave, esc: es.esc }, s);
+    const rapMudou = contarFonte(p, "365", { gol: gh != null && ga != null ? [gh, ga] : null, alvo: es.alvo, chutes: es.chutes, trave: es.trave, esc: es.esc }, s, !reserva);
     return rapMudou || antes !== JSON.stringify([vv.es365, vv.atk && vv.atk.ult, vv.pas && vv.pas.ult]);
   }
 
@@ -769,7 +774,9 @@
   // atual do gráfico; quando a narração (ESPN ou 365Scores) traz o mesmo lance, a provisória sai e fica o lance
   // de verdade (com jogador e minuto exato). O site também mede quantos segundos o contador chegou antes.
   const COMPAT_CHUTE = { alvo: 1, trave: 1, fora: 1, bloq: 1 };
-  const combina = (kp, kn) => kp === kn || (kp === "fora" && kn === "bloq") || (COMPAT_CHUTE[kp] && COMPAT_CHUTE[kn]);
+  const combina = (kp, kn) => kp === kn || (kp === "fora" && kn === "bloq") || (COMPAT_CHUTE[kp] && COMPAT_CHUTE[kn]) || (kp === "vermelho" && kn === "2amarelo");
+  // lances da narração que "baixam" um lance do contador (chutes, escanteios, gols, cartões, substituições)
+  const CONTAVEIS = { gol: 1, alvo: 1, trave: 1, fora: 1, bloq: 1, esc: 1, amarelo: 1, vermelho: 1, "2amarelo": 1, sub: 1 };
   const minutoDe = (sl) => (sl ? { per: sl.per, m: sl.b + sl.ad } : null);
   const perto = (a, b) => a && b && Math.abs(a.m - b.m) <= 3 && (a.per === b.per || Math.abs(a.m - b.m) <= 1);
   function lerRap(ch) { try { return JSON.parse(sessionStorage.getItem("sbrap_" + ch) || "null"); } catch (e) { return null; } }
@@ -782,23 +789,23 @@
   // cur = { gol: placar, alvo: chutes no gol, chutes: total de chutes OU fora: chutes para fora, trave, esc }
   // Se as duas fontes registram o mesmo lance, ele vale uma vez só, e o site anota qual chegou primeiro.
   const NOME_FONTE = { "365": "365Scores", "5d": "5Dollar" };
-  function contarFonte(p, fonte, cur, sl) {
+  function contarFonte(p, fonte, cur, sl, soBase) {
     const vv = p.vv, ch = chaveJogo(p);
     const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
     if (!rap.ult || Array.isArray(rap.ult) || rap.ult.gol !== undefined) rap.ult = {}; // formato antigo
     rap.corrida = rap.corrida || [];
     const ult = rap.ult[fonte];
-    if (!ult) { rap.ult[fonte] = cur; conferirRapidos(p); gravarRap(ch, rap); return false; } // 1ª leitura: só o ponto de partida
+    if (!ult || soBase) { rap.ult[fonte] = Object.assign({}, ult || {}, cur); if (!ult) conferirRapidos(p); gravarRap(ch, rap); return false; } // 1ª leitura (ou fonte de reserva parada): só o ponto de partida
     const agora = Date.now(), mm = minutoDe(sl);
     rap.semPar = rap.semPar.filter((x) => agora - x.t < 5 * 60e3);
     let mudou = false;
     const nova = (l, k) => rap.pend.push({ id: ++rap.id, l, k, per: mm.per, m: mm.m, r: sl.ad ? sl.b + "+" + sl.ad : String(sl.b), t: agora, src: { [fonte]: agora } });
     [["h", 0], ["a", 1]].forEach(([l, i]) => {
       const d = (k) => (cur[k] && ult[k] && cur[k][i] != null && ult[k][i] != null ? cur[k][i] - ult[k][i] : 0);
-      const dg = d("gol"), da = d("alvo"), dc = d("chutes"), df = d("fora"), dt = d("trave"), de = d("esc");
-      if ([dg, da, dc, df, dt, de].some((x) => Math.abs(x) > 6)) return; // salto estranho (troca de jogo, correção grande)
+      const dg = d("gol"), da = d("alvo"), dc = d("chutes"), df = d("fora"), dt = d("trave"), de = d("esc"), dam = d("amarelo"), dvm = d("vermelho");
+      if ([dg, da, dc, df, dt, de, dam, dvm].some((x) => Math.abs(x) > 6)) return; // salto estranho (troca de jogo, correção grande)
       // contador voltou (correção): tira a provisória mais nova daquele tipo que só esta fonte tinha
-      for (const [dx, ks] of [[dg, ["gol"]], [da, ["alvo"]], [dt, ["trave"]], [de, ["esc"]]]) {
+      for (const [dx, ks] of [[dg, ["gol"]], [da, ["alvo"]], [dt, ["trave"]], [de, ["esc"]], [dam, ["amarelo"]], [dvm, ["vermelho"]]]) {
         for (let n = dx; n < 0; n++) {
           const j = rap.pend.map((x) => x.l === l && ks.includes(x.k) && x.src && x.src[fonte] && Object.keys(x.src).length === 1).lastIndexOf(true);
           if (j >= 0) { rap.pend.splice(j, 1); mudou = true; }
@@ -813,6 +820,8 @@
       const nFora = cur.fora ? Math.max(df, 0) : Math.max(dc - Math.max(a0, g0) - t0, 0);
       for (let n = 0; n < nFora; n++) novos.push("fora"); // chute para fora ou bloqueado
       for (let n = 0; n < Math.max(de, 0); n++) novos.push("esc");
+      for (let n = 0; n < Math.max(dam, 0); n++) novos.push("amarelo");
+      for (let n = 0; n < Math.max(dvm, 0); n++) novos.push("vermelho");
       const golsNarr = vv.pr ? vv.pr.ev.filter((e) => e.l === l && e.k === "gol").length : 0;
       for (const k of novos) {
         // a outra fonte já registrou esse lance? então é o mesmo: só anota quem chegou primeiro
@@ -852,7 +861,7 @@
       // conta os lances da narração por time e tipo: quando a conta sobe, chegou lance novo (os mais recentes)
       // (contar em vez de comparar nome/minuto evita "lance novo" falso quando a ESPN substitui a versão do 365Scores)
       const agora = Date.now(), grupos = {};
-      for (const e of pr.ev) if (PESO[e.k] && e.k !== "falta" && e.k !== "imped") (grupos[e.l + e.k] = grupos[e.l + e.k] || []).push(e);
+      for (const e of pr.ev) if (CONTAVEIS[e.k]) (grupos[e.l + e.k] = grupos[e.l + e.k] || []).push(e);
       const vistos = rap.vistos && !Array.isArray(rap.vistos) ? rap.vistos : {};
       for (const g in grupos) {
         const lista = grupos[g].slice().sort((a, b) => a.i - b.i), antes = vistos[g] || 0;
@@ -885,7 +894,7 @@
     vv.prov = pr ? rap.pend.map((x) => {
       let i = pr.idx[x.per + ":" + (x.m > LIM[x.per] ? LIM[x.per] : x.m) + ":" + (x.m > LIM[x.per] ? x.m - LIM[x.per] : 0)];
       if (i == null) i = Math.max(atual, 0);
-      return { i, l: x.l, k: x.k, j: "", x: "", min: x.r + "'", prov: true, t: x.t };
+      return { i, l: x.l, k: x.k, j: x.j || "", x: x.x || "", min: x.r + "'", prov: true, t: x.t };
     }) : null;
     // medidor: quanto o contador chegou antes da narração (positivo = contador primeiro)
     const cor = rap.corrida || [];
@@ -900,6 +909,7 @@
   const ultimoPbp = new Map();
   async function atualizarPbp(p, forcar) {
     if (!p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
+    if (modoDe(p) !== "365") return false; // com a 5Dollar em dia, os nomes vêm da ESPN
     const ch = chaveJogo(p);
     if (!forcar && Date.now() - (ultimoPbp.get(ch) || 0) < CICLO_PBP - 1500) return false;
     ultimoPbp.set(ch, Date.now());
@@ -970,6 +980,19 @@
       return null;
     }
   }
+  // quem manda no ao vivo deste jogo: "5d" (5Dollar em dia), "365" (reserva: 5Dollar sem dados há 2 min,
+  // ou sem 5Dollar ligada) ou "espera" (acabou de abrir, esperando a 1ª resposta da 5Dollar)
+  const RESERVA_MS = 120000;
+  function modoDe(p) {
+    const vv = p && p.vv;
+    if (!vv || !fonte5d()) return "365";
+    const d = vv.d5, agora = Date.now();
+    if (d && d.em && agora - d.em < RESERVA_MS) return "5d";
+    // servidor/API com erro e nenhum dado deste jogo: não adianta esperar, o 365Scores entra já
+    if (!(d && d.em) && d5Status.msg && d5Status.msg !== "ok") return "365";
+    if (vv.d5Tentou && agora - vv.d5Tentou > RESERVA_MS) return "365";
+    return d && d.em ? "365" : "espera";
+  }
   async function idDo5d(p) {
     const ch = chaveJogo(p);
     if (d5Par.get(ch)) return d5Par.get(ch);
@@ -996,43 +1019,87 @@
   }
   async function atualizar5d(p) {
     if (!fonte5d() || !p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
-    const ch = chaveJogo(p);
+    const ch = chaveJogo(p), vv = p.vv;
+    if (!vv.d5Tentou) vv.d5Tentou = Date.now();
     if (Date.now() - (d5Ult.get(ch) || 0) < (WORKER5D ? 5000 : 7500)) return false;
     d5Ult.set(ch, Date.now());
-    const vv = p.vv;
     const id = await idDo5d(p);
     if (!id) { const antes = vv.d5 && vv.d5.semJogo; vv.d5 = vv.d5 && vv.d5.id ? vv.d5 : { semJogo: true }; return !antes; }
-    // um pedido só: placar, escanteios, cartões e estatísticas do jogo
     let fx;
     if (WORKER5D) { const lista = await listaDoWorker(); fx = (lista || []).find((x) => x.id === id) || null; if (!fx) d5Par.delete(ch); }
-    else { const r = await buscar5d(`fixtures/${id}?include=stats`); fx = r && r.data; }
-    const st = fx && (fx.statistics || fx.stats);
+    else { const r = await buscar5d(`fixtures/${id}?include=events,stats`); fx = r && r.data; }
     if (!fx) return false;
-    const sl0 = slotDe(vv.clk, vv.per);
-    const par0 = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
-    let mudouC = false;
-    if (sl0) mudouC = contarFonte(p, "5d", { gol: par0(fx.goals), alvo: st && par0(st.shots_on_target), fora: st && par0(st.shots_off_target), esc: par0(fx.corners) }, sl0);
-    if (!st) return mudouC;
-    const par = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
-    const cur = { at: par(st.attacks), da: par(st.dangerous_attacks) };
+    return lerFx5d(p, id, fx);
+  }
+  const par5 = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
+  // lê um jogo da 5Dollar: placar, lances (contadores + eventos), ataques por minuto e números do painel
+  function lerFx5d(p, id, fx) {
+    const vv = p.vv, st = fx.statistics || fx.stats || null, agora = Date.now();
     const d5 = (vv.d5 = vv.d5 && vv.d5.id === id ? vv.d5 : lerSessao(id, "d5") || { id, at: { h: {}, a: {} }, da: { h: {}, a: {} }, ult: null, desde: new Date().toISOString() });
-    const sl = slotDe(vv.clk, vv.per);
+    d5.log = d5.log || []; d5.subs = d5.subs || [];
     let mudou = false;
-    if (d5.ult && sl) {
-      const k = chaveSlot(sl);
-      for (const q of ["at", "da"]) {
-        if (!cur[q] || !d5.ult[q]) continue;
-        for (const [i, l] of [[0, "h"], [1, "a"]]) {
-          const d = cur[q][i] - d5.ult[q][i];
-          if (d > 0 && d < 40) { d5[q][l][k] = (d5[q][l][k] || 0) + d; mudou = true; if (q === "da") d5.mudDa = Date.now(); }
+    // placar: a 5Dollar é a principal (a ESPN não sobrescreve enquanto ela estiver em dia)
+    const g = par5(fx.goals);
+    if (g) {
+      vv.d5Placar = { h: g[0], a: g[1], em: agora };
+      if ((p.s === "IN_PLAY" || p.s === "PAUSED") && (p.fh !== g[0] || p.fa !== g[1])) { p.fh = g[0]; p.fa = g[1]; mudou = true; }
+    }
+    // números completos para o painel de estatísticas (jogo todo / 1º tempo / 2º tempo)
+    const fxSig = JSON.stringify([fx.goals, fx.corners, fx.cards, st]);
+    if (fxSig !== d5.fxSig) { d5.fxSig = fxSig; d5.fx = { goals: fx.goals, corners: fx.corners, cards: fx.cards, st }; mudou = true; }
+    // lances pelos contadores: gol, chute no gol, chute para fora, escanteio, cartões
+    const sl = slotDe(vv.clk, vv.per);
+    const ca = fx.cards || {}, cartao = (k) => (ca.home && ca.away ? [Number(ca.home[k]) || 0, Number(ca.away[k]) || 0] : null);
+    if (sl) mudou = contarFonte(p, "5d", { gol: g, alvo: st && par5(st.shots_on_target), fora: st && par5(st.shots_off_target), esc: par5(fx.corners),
+      amarelo: cartao("yellow"), vermelho: cartao("red") }, sl) || mudou;
+    // substituições (com quem entra e quem sai), pelos eventos
+    mudou = subs5d(p, d5, fx.events) || mudou;
+    // ataques e ataques perigosos por minuto (+ registro com a hora, para a barra "viva" do minuto atual)
+    if (st) {
+      const cur = { at: par5(st.attacks), da: par5(st.dangerous_attacks) };
+      if (d5.ult && sl) {
+        const k = chaveSlot(sl);
+        for (const q of ["at", "da"]) {
+          if (!cur[q] || !d5.ult[q]) continue;
+          for (const [i, l] of [[0, "h"], [1, "a"]]) {
+            const d = cur[q][i] - d5.ult[q][i];
+            if (d > 0 && d < 40) { d5[q][l][k] = (d5[q][l][k] || 0) + d; d5.log.push({ t: agora, l, q, n: d, k }); mudou = true; if (q === "da") d5.mudDa = agora; }
+          }
         }
       }
+      d5.ult = { at: cur.at || (d5.ult && d5.ult.at), da: cur.da || (d5.ult && d5.ult.da) };
     }
-    d5.ult = { at: cur.at || (d5.ult && d5.ult.at), da: cur.da || (d5.ult && d5.ult.da) };
-    d5.em = Date.now();
+    d5.log = d5.log.filter((x) => agora - x.t < 180000);
+    d5.em = agora;
     gravarSessao(id, d5, "d5");
-    return mudou || mudouC || !vv.d5Ok ? ((vv.d5Ok = true), true) : false;
+    return mudou || !vv.d5Ok ? ((vv.d5Ok = true), true) : false;
   }
+  // substituição da 5Dollar: entra na lista na hora, já com os nomes (a narração da ESPN só confirma)
+  function subs5d(p, d5, eventos) {
+    if (!Array.isArray(eventos)) return false;
+    const vv = p.vv, ch = chaveJogo(p);
+    const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
+    const primeira = !d5.subsOk, atual = minutoDe(slotDe(vv.clk, vv.per));
+    let mudou = false;
+    for (const e of eventos) {
+      if (e.type !== "substitution" || (e.team !== "home" && e.team !== "away")) continue;
+      const chave = [e.minute, e.team, e.player_in, e.player_out].join("|");
+      if (d5.subs.includes(chave)) continue;
+      d5.subs.push(chave);
+      const m = Number(e.minute) || 0, sl = slotDe(m + "'", m > 45 ? (m > 90 ? 3 : 2) : 1);
+      // na 1ª leitura, as trocas antigas a narração já tem: só entram as dos últimos 3 minutos
+      if (!sl || (primeira && atual && atual.m - m > 3)) continue;
+      const l = e.team === "home" ? "h" : "a", mm = minutoDe(sl);
+      const ja = (vv.pr ? vv.pr.ev : []).some((x) => x.k === "sub" && x.l === l && x.j && e.player_in && semAcento(x.j) === semAcento(e.player_in));
+      if (ja) continue;
+      rap.pend.push({ id: ++rap.id, l, k: "sub", j: e.player_in || "", x: e.player_out ? "sai " + e.player_out : "", per: mm.per, m: mm.m, r: sl.ad ? sl.b + "+" + sl.ad : String(sl.b), t: Date.now(), src: { "5d": Date.now() } });
+      mudou = true;
+    }
+    d5.subsOk = true;
+    if (mudou) { conferirRapidos(p); gravarRap(ch, rap); }
+    return mudou;
+  }
+  const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
 
   let timer365 = null;
   function ciclo365() {
@@ -1040,9 +1107,19 @@
     const seguir = () => { timer365 = setTimeout(ciclo365, 3000); }; // cada busca respeita o próprio intervalo
     if (document.hidden) return seguir();
     const p = jogoAberto();
-    if (!p || p.vv.st !== "in") return seguir();
-    Promise.all([atualizarDetalhe(p, false).catch(() => false), atualizar365(p, false).catch(() => false), atualizarPbp(p, false).catch(() => false), atualizar5d(p).catch(() => false)])
-      .then((m) => { if (m.some(Boolean)) redesenhar(); }).catch(() => {}).finally(seguir);
+    // com o servidor do ScanBall, a 5Dollar atualiza o placar de TODOS os jogos rolando (uma lista só, sem custo a mais)
+    const outros = WORKER5D ? jogosRolando().filter((x) => x !== p).map((x) => atualizar5d(x).catch(() => false)) : [];
+    const doAberto = p && p.vv.st === "in"
+      ? [atualizarDetalhe(p, false).catch(() => false), atualizar365(p, false).catch(() => false), atualizarPbp(p, false).catch(() => false), atualizar5d(p).catch(() => false)]
+      : [];
+    if (!outros.length && !doAberto.length) return seguir();
+    Promise.all(doAberto.concat(outros)).then((m) => { if (m.some(Boolean)) redesenhar(); }).catch(() => {}).finally(seguir);
+  }
+
+  function jogosRolando() {
+    const lista = [];
+    for (const code of codigos()) for (const p of ((dados.competicoes[code] || {}).partidas || [])) if (p.vv && p.vv.espn && p.vv.st === "in") lista.push(p);
+    return lista;
   }
 
   async function atualizarPainel(forcar) {
@@ -1161,7 +1238,7 @@
   }
 
   window.AoVivo = {
-    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status, servidor5d: !!WORKER5D,
+    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status, servidor5d: !!WORKER5D, modoDe,
     _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); },
   };
 })();

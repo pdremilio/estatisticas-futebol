@@ -820,7 +820,8 @@ table.odds-tabela { margin-top: 14px; }
 .pressao-engr[aria-expanded="true"] { color: var(--tinta); border-color: var(--tinta-3); }
 .pressao-config { border: 1px solid var(--linha); background: var(--superficie); border-radius: var(--raio-p); padding: 8px 10px; margin-bottom: 8px; display: grid; gap: 6px; }
 .pressao-config .pc-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.pressao-config .pc-linha > .sub { width: 58px; font-size: 12px; }
+.pressao-config .pc-linha > .sub:first-child { width: 58px; font-size: 12px; }
+.pressao-config .pc-linha > .sub:not(:first-child) { font-size: 12px; }
 .pressao-config p { margin: 0; font-size: 12px; }
 .pressao-config .chip { font-size: 13px; padding: 4px 10px; }
 /* faixas: 24px de marcas em cima (mandante), barras no meio, 24px embaixo (visitante) */
@@ -1136,3 +1137,9 @@ table.odds-tabela { margin-top: 14px; }
   .pressao-dev { grid-template-columns: 1fr; }
   .pressao-dev dd { border-top: 0; padding-top: 0; }
 }
+
+/* ================================================================ beta 6: barra viva, aviso de reserva, período das estatísticas */
+@media (prefers-reduced-motion: no-preference) { .pressao rect.p-atual { transition: y .9s ease, height .9s ease, fill .4s; } }
+.aviso-5d { margin: 4px 0 8px; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; background: var(--superficie-2); border: 1px solid var(--linha); color: var(--tinta-2); }
+.est-per { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.est-per .chip { font-size: 12px; }
