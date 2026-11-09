@@ -71,7 +71,7 @@ export class AoVivo {
       this.buscando = this.buscar().catch((e) => { this.erro = String(e && e.message || e); }).finally(() => { this.buscando = null; });
     }
     // primeira vez (ou resposta muito velha): espera a busca terminar; senão devolve a última na hora
-    if (this.buscando && (!this.txt || agora - this.em > this.intervalo * 4)) await this.buscando;
+    if (this.buscando && (!this.txt || agora - this.em > this.intervalo * 4 || url.searchParams.has("despertador"))) await this.buscando;
     const corpo = this.txt || JSON.stringify({ ok: 0, erro: this.erro || "sem dados ainda" });
     return new Response(corpo, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
   }
@@ -159,5 +159,11 @@ export default {
       return new Response(r.body, { status: r.status, headers: { ...Object.fromEntries(r.headers), ...h } });
     }
     return new Response("ScanBall · servidor do ao vivo. Use /ao-vivo.", { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", ...h } });
+  },
+  // despertador (a cada minuto, mesmo sem ninguém no site): mantém o minuto a minuto de todos os jogos salvo
+  // do começo ao fim. Com visitantes, a busca de 8 em 8 s já está em dia e o despertador não gasta nada a mais.
+  async scheduled(evento, env, ctx) {
+    const obj = env.AOVIVO.get(env.AOVIVO.idFromName("unico"));
+    ctx.waitUntil(obj.fetch("https://interno/ao-vivo?despertador=1").then((r) => r.text()).catch(() => {}));
   },
 };
