@@ -112,9 +112,11 @@ export class AoVivo {
   // guarda uma "foto" por minuto (ataques e ataques perigosos acumulados) de cada jogo ao vivo, para o site
   // desenhar o gráfico completo dos jogos passados. Grava só quando o minuto muda (1 gravação/min por jogo).
   async registrar(jogos) {
+    this.vivos = jogos.map((j) => j.id);
+    const parH = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
     for (const j of jogos) {
       const st = j.statistics || {}, at = st.attacks, da = st.dangerous_attacks;
-      if (!at && !da) continue;
+      if (!at && !da && !j.goals) continue;
       const cod = String(j.status_code || "").toLowerCase();
       if (/half|ht|break/.test(cod)) { this.ht.add(j.id); continue; }
       const m = parseInt(cod, 10);
@@ -130,7 +132,12 @@ export class AoVivo {
         if (!ind.some((x) => x.id === j.id)) { ind.push({ id: j.id, h: h.h, a: h.a, ko: h.ko }); await this.state.storage.put(dia, ind); }
       }
       const chave = per + ":" + m, novo = !h.m[chave];
-      h.m[chave] = { at: at ? [at.home, at.away] : null, da: da ? [da.home, da.away] : null };
+      // foto acumulada do minuto: ataques, ataques perigosos e os contadores (gols, chutes no gol e para fora,
+      // escanteios, cartões) — com ela o site refaz o gráfico e os lances em qualquer computador
+      const c = j.cards || {}, cart = (k) => (c.home && c.away ? [Number(c.home[k]) || 0, Number(c.away[k]) || 0] : null);
+      const foto = { at: parH(at), da: parH(da), g: parH(j.goals), ch: parH(st.shots_on_target), cf: parH(st.shots_off_target), esc: parH(j.corners), am: cart("yellow"), vm: cart("red") };
+      for (const k in foto) if (!foto[k]) delete foto[k]; // sem o número: nem guarda (economiza espaço)
+      h.m[chave] = foto;
       if (novo) await this.state.storage.put("j:" + j.id, h);
     }
     if (this.hist.size > 300) this.hist.clear();
@@ -139,6 +146,15 @@ export class AoVivo {
   async historico(url) {
     const json = (o) => new Response(JSON.stringify(o), { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=60" } });
     const dia = url.searchParams.get("dia"), id = url.searchParams.get("id");
+    // todos os jogos rolando num pacote só (o painel "Ao vivo" usa); montado no máximo 1 vez por minuto
+    if (url.searchParams.has("vivos")) {
+      if (!this.vivosTxt || Date.now() - this.vivosEm > 60000) {
+        const jogos = (this.vivos || []).map((i) => this.hist.get(i)).filter(Boolean);
+        this.vivosTxt = JSON.stringify({ ok: 1, em: new Date().toISOString(), jogos });
+        this.vivosEm = Date.now();
+      }
+      return new Response(this.vivosTxt, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=60" } });
+    }
     if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) return json({ ok: 1, jogos: (await this.state.storage.get("d:" + dia)) || [] });
     if (id && /^\d+$/.test(id)) {
       const h = this.hist.get(Number(id)) || (await this.state.storage.get("j:" + id));
