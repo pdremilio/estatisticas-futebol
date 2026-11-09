@@ -73,7 +73,7 @@ jobs:
           cp index.html estilo.css app.js motor.js dados-demo.js config.js contas.js aovivo.js _site/
           if [ -f dados.js ]; then cp dados.js _site/; fi
           if [ -f agenda.json ]; then cp agenda.json _site/; fi
-          for f in teste.html app-teste.js aovivo-teste.js estilo-teste.css motor-teste.js dados5.js cache5.json extra5d.js cache5d.json; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
+          for f in teste.html app-teste.js aovivo-teste.js estilo-teste.css motor-teste.js dados5.js cache5.json extra5d.js cache5d.json titulares5.json; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
 
       - name: Enviar o site
         uses: actions/upload-pages-artifact@v3
