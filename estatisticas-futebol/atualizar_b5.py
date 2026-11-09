@@ -47,8 +47,18 @@ COMPETICOES = [
     ("UECL", "uefa.europa.conf", "Conference League", "Europa", 10216, "INT"),
     ("LIB", "conmebol.libertadores", "Libertadores", "América do Sul", 45, "INT"),
     ("SUL", "conmebol.sudamericana", "Sul-Americana", "América do Sul", 299, "INT"),
+    # beta 6: competições novas (ao vivo pela 5DollarFootballAPI; pré-jogo pela ESPN + FotMob, com o que tiver)
+    ("UNL", "uefa.nations", "Nations League", "Europa", 9806, "INT"),
+    ("SPL", "ksa.1", "Saudi Pro League", "Arábia Saudita", 536, "KSA"),
+    ("BEL", "bel.1", "Pro League", "Bélgica", 40, "BEL"),
+    ("SPR", "sco.1", "Premiership", "Escócia", 64, "SCO"),
+    ("J1", "jpn.1", "J1 League", "Japão", 223, "JPN"),
+    ("NOR", "nor.1", "Eliteserien", "Noruega", 59, "NOR"),
+    ("SWE", "swe.1", "Allsvenskan", "Suécia", 67, "SWE"),
+    ("DEN", "den.1", "Superliga", "Dinamarca", 46, "DEN"),
+    ("ECU", "ecu.1", "LigaPro", "Equador", 246, "ECU"),
 ]
-COPAS = {"CL", "UEL", "UECL", "LIB", "SUL"}
+COPAS = {"CL", "UEL", "UECL", "LIB", "SUL", "UNL"}
 
 ESPN = os.environ.get("ESPN_BASE", "https://site.api.espn.com/apis/site/v2/sports/soccer/")
 ESPN_V2 = os.environ.get("ESPN_V2_BASE", "https://site.api.espn.com/apis/v2/sports/soccer/")
@@ -685,6 +695,21 @@ def main():
             aplicar_detalhe(p, cache[p["i"]])
             com_det += 1 if p.get("es") else 0
     print(f"\nDetalhe dos jogos: {novos} baixados agora · {com_det} jogos com estatísticas")
+    # competição com pré-jogo incompleto (a ESPN não traz tudo): o site mostra um aviso nela
+    for code in {c for c, _, _ in todas}:
+        comp = competicoes[code]
+        fin = [p for p in comp["partidas"] if p["s"] == "FINISHED"]
+        baixados = [p for p in fin if p["i"] in cache]
+        falta = []
+        if len(baixados) >= 10 and sum(1 for p in baixados if p.get("es")) / len(baixados) < 0.6:
+            falta.append("estatísticas dos jogos")
+        if not comp.get("artilharia") and code not in COPAS:
+            falta.append("artilharia")
+        if falta:
+            comp["incompleto"] = falta
+            print(f"   [{code}] pré-jogo incompleto: falta {', '.join(falta)}")
+        else:
+            comp.pop("incompleto", None)
     odds_da_reserva(competicoes, times)
 
     # forma recente vem do placar da ESPN (não precisa ir para o site)

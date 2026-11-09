@@ -55,6 +55,15 @@ LIGAS = {
     "UECL": ([], ["conference league"], []),
     "LIB": ([], ["libertadores"], []),
     "SUL": ([], ["sudamericana", "sul-americana"], []),
+    "UNL": ([], ["nations league"], ["concacaf", "women"]),
+    "SPL": (["saudi"], ["pro league", "professional league", "premier league"], []),
+    "BEL": (["belgium"], ["pro league", "first division a", "jupiler", "first division"], ["challenger", "division b"]),
+    "SPR": (["scotland"], ["premiership"], []),
+    "J1": (["japan"], ["j1", "j. league", "j-league", "j league"], ["j2", "j3"]),
+    "NOR": (["norway"], ["eliteserien"], []),
+    "SWE": (["sweden"], ["allsvenskan"], []),
+    "DEN": (["denmark"], ["superliga", "superligaen"], []),
+    "ECU": (["ecuador"], ["ligapro", "liga pro", "serie a"], ["serie b"]),
 }
 PROIBIDAS = ["women", "woman", "femin", "u17", "u18", "u19", "u20", "u21", "u23", "youth", "reserve", "amateur", "cup", "copa", "qualif", "play-off", "playoff"]
 
@@ -302,6 +311,12 @@ def main():
         print(f"{vivos} jogo(s) ao vivo agora: não busco nada (o limite fica para o ao vivo do site). Só remonto o arquivo.")
     else:
         todas = baixar_ligas(cache)
+        # para decidir as próximas competições: estas existem na 5Dollar?
+        for rot, chaves in (("Amistosos de seleção", ["friendl"]), ("Copa Africana", ["africa cup", "nations cup", "afcon"]),
+                            ("Bundesliga 2", ["2. bundesliga", "2 bundesliga", "bundesliga 2"]), ("La Liga 2", ["laliga2", "la liga 2", "segunda", "laliga hypermotion"]),
+                            ("Irlanda", ["ireland"])):
+            achou = [f"{l['nome']} ({l['pais']}, id {l['id']})" for l in todas or [] if any(c in sem_acento(l["nome"] + " " + l["pais"]) for c in chaves)]
+            print(f"   5Dollar tem {rot}? {'sim: ' + '; '.join(achou[:4]) if achou else 'não achei'}")
         for code in LIGAS:
             if code not in comps_site or _pedidos[0] >= MAX_PEDIDOS:
                 continue

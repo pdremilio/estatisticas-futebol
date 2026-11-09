@@ -24,6 +24,9 @@
     ARG: { nome: "Liga Profesional", pais: "Argentina" }, CHI: { nome: "Primera División", pais: "Chile" }, COL: { nome: "Primera A", pais: "Colômbia" },
     UEL: { nome: "Europa League", pais: "Europa" }, UECL: { nome: "Conference League", pais: "Europa" },
     LIB: { nome: "Libertadores", pais: "América do Sul" }, SUL: { nome: "Sul-Americana", pais: "América do Sul" },
+    UNL: { nome: "Nations League", pais: "Europa" }, SPL: { nome: "Saudi Pro League", pais: "Arábia Saudita" }, BEL: { nome: "Pro League", pais: "Bélgica" },
+    SPR: { nome: "Premiership", pais: "Escócia" }, J1: { nome: "J1 League", pais: "Japão" }, NOR: { nome: "Eliteserien", pais: "Noruega" },
+    SWE: { nome: "Allsvenskan", pais: "Suécia" }, DEN: { nome: "Superliga", pais: "Dinamarca" }, ECU: { nome: "LigaPro", pais: "Equador" },
     WC: { nome: "Copa do Mundo", pais: "Mundo" },
     EC: { nome: "Eurocopa", pais: "Europa" },
   };
@@ -1719,6 +1722,12 @@
       </tbody></table><p class="sub nota">Fonte: 5DollarFootballAPI. ${h(nomeTime(p.h))} nos jogos em casa (${a ? a[0] : 0}) e ${h(nomeTime(p.a))} nos jogos fora (${b ? b[0] : 0}).</p>`;
   }
 
+  // competição em que a ESPN não traz o pré-jogo completo: avisa (o ao vivo continua completo pela 5DollarFootballAPI)
+  function avisoIncompleto(code) {
+    const c = DADOS.competicoes[code], f = c && c.incompleto;
+    if (!f || !f.length) return "";
+    return `<div class="aviso-fonte">Esta competição não tem todas as estatísticas no pré-jogo (falta: ${h(f.join(", "))}), mas tem o ao vivo completo.</div>`;
+  }
   function htmlJogo(code, p) {
     const comp = DADOS.competicoes[code];
     const fim = encerrada(p), vivo = aoVivo(p), temTimes = p.h && p.a;
@@ -1754,6 +1763,7 @@
         </div>
       </div>`;
     if (!temTimes) return cab;
+    const incompleto = avisoIncompleto(code);
     const semPar = p.semEspn && !temAoVivo(p) ? `<div class="aviso-fonte">Este jogo não foi encontrado na ESPN, então ele fica sem placar ao vivo, lances e escalações. O placar vem da football-data, que atrasa alguns minutos.</div>` : "";
 
     const listaAbas = temAoVivo(p) ? [...ABAS_JOGO, ["escalacoes", "Escalações"], ["aovivo", vivo ? '<span class="vivo-min">Ao vivo</span>' : "Ao vivo"]] : ABAS_JOGO;
@@ -1809,7 +1819,7 @@
     } else {
       conteudo = abaRanking(code, p);
     }
-    return `${cab}${semPar}${abas}<div class="aba-conteudo">${conteudo}</div>`;
+    return `${cab}${semPar}${incompleto}${abas}<div class="aba-conteudo">${conteudo}</div>`;
   }
 
   function abaRanking(code, p) {
@@ -2001,7 +2011,7 @@
           <td class="ocultar-celular">${l.gp}</td><td class="ocultar-celular">${l.gc}</td><td>${l.sg > 0 ? "+" : ""}${l.sg}</td>
           <td class="esq ocultar-celular">${forma(formaDe(l.t))}</td></tr>`).join("")}</tbody></table></div>`).join("");
 
-    app.innerHTML = `${chipsComp("classificacao", code)}
+    app.innerHTML = `${chipsComp("classificacao", code)}${avisoIncompleto(code)}
       <section class="painel" style="margin-top:12px">
         <div class="painel-cab"><h2>Classificação · ${h(nomeComp(code))}</h2>
           <div class="alternar" role="group" aria-label="Recorte da tabela">
