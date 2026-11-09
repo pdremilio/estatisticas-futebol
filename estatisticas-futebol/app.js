@@ -449,7 +449,9 @@
   // de onde vêm os dados do gráfico (aparece embaixo dele)
   // rodapé do gráfico: só a hora; o resto (fontes, medidor, corrida) fica em "Informações técnicas"
   function notaPressao(p) {
-    const v = p.vv || {}, hora = horaAtualizacao(p);
+    const v = p.vv || {};
+    if (v.passado) return `<p class="sub nota">Jogo encerrado · lances da narração da ESPN${v.d5 ? " + ataques e ataques perigosos registrados pelo servidor do ScanBall durante o jogo" : ""}.</p>`;
+    const hora = horaAtualizacao(p);
     const linhas = [];
     const L = (rot, txt) => linhas.push(`<div class="dv-l"><dt>${rot}</dt><dd>${txt}</dd></div>`);
     const fonte = fonteDe(v);
@@ -1469,6 +1471,73 @@
     return estado.ultimos ? l.slice(-estado.ultimos) : l;
   }
 
+  // ---------- gráfico de pressão de um jogo que já acabou (abre numa janelinha por cima do site)
+  const ICONE_GRAF = `<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M3.5 16V10M7.8 16V5.5M12.2 16V8.5M16.5 16V3.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+  function botaoGraficoPassado(code, p) {
+    const c = DADOS.competicoes[code];
+    if (!encerrada(p) || !c || !(c.espn || B5) || !window.AoVivo || !AoVivo.graficoPassado) return `<span class="graf-pass-vazio"></span>`;
+    return `<button type="button" class="graf-pass" data-grafpass="${h(code)}|${h(String(p.i))}" title="Ver o gráfico de pressão deste jogo" aria-label="Gráfico de pressão de ${h(nomeTime(p.h))} ${p.fh} x ${p.fa} ${h(nomeTime(p.a))}">${ICONE_GRAF}</button>`;
+  }
+  let modalGraf = null; // { code, id, pp, carregando, erro }
+  function desenharModalGraf() {
+    const m = document.getElementById("modal-graf");
+    if (!m || !modalGraf) return;
+    const { code, id, pp, carregando } = modalGraf;
+    const p = acharPartida(code, id);
+    if (!p) return fecharModalGraf();
+    const cab = `<div class="mg-cab"><span class="sub">${h((DADOS.competicoes[code] || {}).nome || nomeComp(code))} · ${h(dataLonga(p.d))}</span>
+      <h2>${h(nomeTime(p.h))} <b>${p.fh} x ${p.fa}</b> ${h(nomeTime(p.a))}</h2>${p.hh != null ? `<span class="sub">(${p.hh}x${p.ha}) no 1º tempo</span>` : ""}</div>`;
+    let corpo;
+    if (carregando) corpo = `<p class="sub mg-msg">Carregando o gráfico…</p>`;
+    else if (!pp || !pp.ok) corpo = `<p class="sub mg-msg">Não consegui buscar os lances deste jogo agora. Tente de novo daqui a pouco.</p>`;
+    else {
+      const g = graficoPressao(pp, false);
+      const semLances = !(pp.vv.pr && pp.vv.pr.ev && pp.vv.pr.ev.some((e) => e.k !== "gol" && e.k !== "amarelo" && e.k !== "vermelho" && e.k !== "sub"));
+      corpo = g ? g + (semLances && !pp.vv.d5 ? `<p class="sub mg-msg">A ESPN não tem a narração deste jogo: o gráfico mostra só gols e cartões.</p>` : "")
+        : `<p class="sub mg-msg">A ESPN não tem os lances deste jogo, então não dá para montar o gráfico.</p>`;
+    }
+    morfar(m.querySelector(".mg-corpo"), cab + corpo);
+  }
+  async function abrirModalGraf(code, id) {
+    const p = acharPartida(code, id);
+    if (!p) return;
+    let m = document.getElementById("modal-graf");
+    if (!m) {
+      m = document.createElement("div");
+      m.id = "modal-graf"; m.className = "modal-graf";
+      m.innerHTML = `<div class="mg-caixa" role="dialog" aria-modal="true" aria-label="Gráfico de pressão do jogo"><button type="button" class="mg-fechar" data-mgfechar aria-label="Fechar">✕</button><div class="mg-corpo"></div></div>`;
+      document.body.appendChild(m);
+    }
+    m.hidden = false;
+    document.body.classList.add("modal-aberto");
+    modalGraf = { code, id, pp: null, carregando: true, volta: document.activeElement };
+    desenharModalGraf();
+    m.querySelector(".mg-fechar").focus();
+    const pp = await AoVivo.graficoPassado(code, p).catch(() => null);
+    if (!modalGraf || modalGraf.code !== code || modalGraf.id !== id) return;
+    modalGraf.pp = pp; modalGraf.carregando = false;
+    desenharModalGraf();
+  }
+  function fecharModalGraf() {
+    const m = document.getElementById("modal-graf");
+    if (m) m.hidden = true;
+    document.body.classList.remove("modal-aberto");
+    const volta = modalGraf && modalGraf.volta;
+    modalGraf = null;
+    if (volta && document.contains(volta)) volta.focus();
+  }
+  // o botão fica dentro de uma linha que abre o jogo: pega o clique antes dela
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest("[data-grafpass]");
+    if (b) { e.preventDefault(); e.stopPropagation(); const [code, id] = b.dataset.grafpass.split("|"); abrirModalGraf(code, id); return; }
+    if (e.target.closest && e.target.closest("[data-mgfechar]")) { fecharModalGraf(); return; }
+    if (e.target.id === "modal-graf") fecharModalGraf();
+  }, true);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modalGraf) { fecharModalGraf(); return; }
+    if ((e.key === "Enter" || e.key === " ") && e.target.closest && e.target.closest("[data-grafpass]")) e.stopPropagation();
+  }, true);
+
   // bolinha de quem marcou primeiro: bola de futebol = o time marcou primeiro, bola branca = sofreu primeiro
     const BOLA_FUT = `<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><defs><clipPath id="cb"><circle cx="10" cy="10" r="8.6"/></clipPath></defs><circle cx="10" cy="10" r="8.6" fill="#fff"/><g clip-path="url(#cb)"><g fill="#15212B"><polygon points="10.00,6.70 13.14,8.98 11.94,12.67 8.06,12.67 6.86,8.98"/><polygon points="18.35,-1.49 19.65,2.54 16.23,5.02 12.81,2.54 14.11,-1.49"/><polygon points="23.51,14.39 20.08,16.88 16.66,14.39 17.97,10.36 22.20,10.36"/><polygon points="10.00,24.20 6.58,21.71 7.88,17.69 12.12,17.69 13.42,21.71"/><polygon points="-3.51,14.39 -2.20,10.36 2.03,10.36 3.34,14.39 -0.08,16.88"/><polygon points="1.65,-1.49 5.89,-1.49 7.19,2.54 3.77,5.02 0.35,2.54"/></g><g stroke="#15212B" stroke-width="0.8"><line x1="10.00" y1="6.70" x2="10.00" y2="2.60"/><line x1="13.14" y1="8.98" x2="17.04" y2="7.71"/><line x1="11.94" y1="12.67" x2="14.35" y2="15.99"/><line x1="8.06" y1="12.67" x2="5.65" y2="15.99"/><line x1="6.86" y1="8.98" x2="2.96" y2="7.71"/></g></g><circle cx="10" cy="10" r="8.6" fill="none" stroke="#15212B" stroke-width="1.1"/></svg>`;
   const BOLA_BRANCA = `<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="8.6" fill="#fff" stroke="var(--tinta-3)" stroke-width="1.3"/></svg>`;
@@ -1623,6 +1692,7 @@
       return `<li class="clicavel" data-ir="jogo/${code}/${p.i}" role="link" tabindex="0">
         <span class="data">${dataCurta(p.d)}</span>
         <span class="conf"><span class="${casa ? "eu" : ""}">${h(nomeTime(p.h))}</span> <b>${p.fh} x ${p.fa}</b> <span class="${!casa ? "eu" : ""}">${h(nomeTime(p.a))}</span></span>
+        ${bolaPrimeiro(p, tid)}${botaoGraficoPassado(code, p)}
         <span class="r ${r}">${r}</span></li>`;
     }).join("");
     return `<div class="lateral">
@@ -2563,6 +2633,7 @@
   const ROLAVEIS = "#lista-jogos-corpo, .detalhe-lado, .radar-lista, .ev-lista, .tabela-rolagem, .esc-lado, .abas-jogo, .chips";
   function aoVivoAtualizado() {
     todasPartidas.cache = null;
+    if (modalGraf) desenharModalGraf();
     // guarda só a rolagem de quem rola de verdade (antes varria todos os elementos do painel: ~40 ms por atualização)
     const rol = [...document.querySelectorAll(ROLAVEIS)].map((el, i) => (el.scrollTop || el.scrollLeft ? [i, el.scrollTop, el.scrollLeft] : null)).filter(Boolean);
     const y = window.scrollY;

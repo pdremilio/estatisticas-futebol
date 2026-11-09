@@ -985,6 +985,7 @@
   const RESERVA_MS = 120000;
   function modoDe(p) {
     const vv = p && p.vv;
+    if (vv && vv.passado) return vv.d5 ? "5d" : "365";
     if (!vv || !fonte5d()) return "365";
     const d = vv.d5, agora = Date.now();
     if (d && d.em && agora - d.em < RESERVA_MS) return "5d";
@@ -1100,6 +1101,56 @@
     return mudou;
   }
   const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
+
+  // ---------- gráfico de um jogo que já acabou: narração da ESPN (buscada só quando alguém pede) + ataques e
+  // ataques perigosos por minuto que o servidor do ScanBall registrou enquanto o jogo estava ao vivo
+  const passados = new Map();
+  async function graficoPassado(code, p) {
+    const comp = dados.competicoes[code] || {};
+    const lg = comp.espn || ESPN[code];
+    const k = code + ":" + p.i;
+    if (passados.has(k)) return passados.get(k);
+    const pp = { i: p.i, d: p.d, h: p.h, a: p.a, fh: p.fh, fa: p.fa, hh: p.hh, ha: p.ha, s: "FINISHED",
+      vv: { espn: { code: code + "-passado", id: String(p.i), lg }, st: "post", passado: true } };
+    const [r, hist] = await Promise.all([lg ? buscarJSON(`${BASE}${lg}/summary?event=${p.i}`) : null, historico5d(p).catch(() => null)]);
+    if (r) lerDetalhe(r, pp);
+    if (hist) pp.vv.d5 = hist;
+    pp.vv.st = "post";
+    pp.ok = !!(r || hist);
+    if (pp.ok) passados.set(k, pp);
+    return pp;
+  }
+  // minuto a minuto guardado pelo servidor: transforma as "fotos" acumuladas em ataques por minuto do gráfico
+  async function historico5d(p) {
+    if (!WORKER5D) return null;
+    const dia = new Date(p.d).toISOString().slice(0, 10);
+    const ind = await buscarJSON(`${WORKER5D}/historico?dia=${dia}`);
+    if (!ind || !Array.isArray(ind.jogos) || !ind.jogos.length) return null;
+    const T = dados.times || {}, nome = (id) => [(T[id] || {}).n, (T[id] || {}).c, (T[id] || {}).t].join(" ");
+    const th = tokens(nome(p.h)), ta = tokens(nome(p.a));
+    let melhor = null, nota = 0;
+    for (const g of ind.jogos) {
+      const sh = parecido(th, tokens(g.h)), sa = parecido(ta, tokens(g.a));
+      if (sh && sa && sh + sa > nota) { melhor = g; nota = sh + sa; }
+    }
+    if (!melhor) return null;
+    const j = await buscarJSON(`${WORKER5D}/historico?id=${melhor.id}`);
+    if (!j || !j.m) return null;
+    const chave = (per, m) => (per === 1 ? (m > 45 ? `1:45:${m - 45}` : `1:${m}:0`) : m > 90 ? `2:90:${m - 90}` : `2:${m}:0`);
+    const fotos = Object.entries(j.m).map(([k, v]) => { const [per, m] = k.split(":").map(Number); return { per, m, v }; })
+      .sort((a, b) => a.per - b.per || a.m - b.m);
+    const d5 = { id: melhor.id, at: { h: {}, a: {} }, da: { h: {}, a: {} }, ult: null, passado: true };
+    let ant = null;
+    for (const f of fotos) {
+      if (ant) for (const q of ["at", "da"]) {
+        if (!f.v[q] || !ant[q]) continue;
+        [["h", 0], ["a", 1]].forEach(([l, i]) => { const d = f.v[q][i] - ant[q][i]; if (d > 0 && d < 60) d5[q][l][chave(f.per, f.m)] = (d5[q][l][chave(f.per, f.m)] || 0) + d; });
+      }
+      ant = f.v;
+    }
+    d5.ult = ant;
+    return d5;
+  }
 
   let timer365 = null;
   function ciclo365() {
@@ -1238,7 +1289,7 @@
   }
 
   window.AoVivo = {
-    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status, servidor5d: !!WORKER5D, modoDe,
+    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status, servidor5d: !!WORKER5D, modoDe, graficoPassado,
     _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); },
   };
 })();

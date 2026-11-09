@@ -640,7 +640,7 @@ table.odds-tabela { margin-top: 14px; }
 @media (max-width: 640px) { .pf-grade { grid-template-columns: 1fr; } .pf-campo .alternar button { padding: 4px 9px; } }
 
 /* bolinha de quem marcou primeiro */
-.lista-lateral li { grid-template-columns: 44px minmax(0, 1fr) 18px 22px; }
+.lista-lateral li { grid-template-columns: 44px minmax(0, 1fr) 18px 26px 22px; }
 .bola { display: inline-grid; place-items: center; width: 18px; height: 18px; }
 .bola svg { display: block; }
 .lista-mini .res .bola { margin-right: 2px; }
@@ -1143,3 +1143,17 @@ table.odds-tabela { margin-top: 14px; }
 .aviso-5d { margin: 4px 0 8px; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; background: var(--superficie-2); border: 1px solid var(--linha); color: var(--tinta-2); }
 .est-per { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
 .est-per .chip { font-size: 12px; }
+
+/* ================================================================ gráfico de jogos passados */
+.graf-pass { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--linha); border-radius: 7px; background: transparent; color: var(--tinta-2); cursor: pointer; }
+.graf-pass:hover, .graf-pass:focus-visible { color: var(--casa); border-color: var(--casa); }
+.graf-pass-vazio { width: 26px; }
+.modal-graf { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(5, 10, 18, .62); }
+.modal-graf[hidden] { display: none; }
+.mg-caixa { position: relative; width: min(860px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 16px 16px 12px; border-radius: 14px; background: var(--fundo); border: 1px solid var(--linha); box-shadow: 0 18px 50px rgba(0, 0, 0, .45); }
+.mg-fechar { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--linha); background: var(--superficie); color: var(--tinta); font-size: 15px; cursor: pointer; }
+.mg-cab { text-align: center; margin: 0 36px 10px; }
+.mg-cab h2 { margin: 2px 0; font-size: 18px; }
+.mg-msg { text-align: center; padding: 18px 0; }
+body.modal-aberto { overflow: hidden; }
+@media (max-width: 560px) { .modal-graf { padding: 8px; } .mg-caixa { padding: 12px 10px 10px; } .mg-cab h2 { font-size: 15px; } }
