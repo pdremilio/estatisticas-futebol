@@ -354,16 +354,23 @@
   // 5DollarFootballAPI (teste pessoal, só com a chave salva no navegador): cada ataque perigoso vale 0,6;
   // os ataques comuns (0,12 cada) só entram quando o 365Scores não tem o contador de ataques dele
   const PESO_DA = 0.6, PESO_AT5 = 0.12;
+  // minuto que o gráfico ainda não tem (ex.: acréscimo 45+3 sem narração): soma no minuto mais perto do mesmo tempo
+  function idxPerto(pr, k) {
+    if (pr.idx[k] != null) return pr.idx[k];
+    const [per, b, ad] = k.split(":").map(Number), m = b + (ad || 0);
+    let melhor = -1, dif = 1e9;
+    pr.slots.forEach((s, j) => { if (s.per !== per) return; const d = Math.abs(s.b + s.ad - m); if (d < dif) { dif = d; melhor = j; } });
+    return melhor >= 0 ? melhor : null;
+  }
   function somarD5(pr, d5, temAtk) {
     if (!d5 || !d5.da) return pr;
+    const soma = { h: {}, a: {} };
+    for (const l of ["h", "a"]) {
+      for (const k in d5.da[l]) { const i = idxPerto(pr, k); if (i != null) soma[l][i] = (soma[l][i] || 0) + d5.da[l][k] * PESO_DA; }
+      if (!temAtk) for (const k in d5.at[l]) { const i = idxPerto(pr, k); if (i != null) soma[l][i] = (soma[l][i] || 0) + d5.at[l][k] * PESO_AT5; }
+    }
     const h = pr.h.slice(), a = pr.a.slice();
-    pr.slots.forEach((s, i) => {
-      const k = s.per + ":" + s.b + ":" + s.ad;
-      for (const [l, arr] of [["h", h], ["a", a]]) {
-        const v = (d5.da[l][k] || 0) * PESO_DA + (temAtk ? 0 : (d5.at[l][k] || 0) * PESO_AT5);
-        if (v) arr[i] = Math.round(((arr[i] || 0) + Math.min(v, 4)) * 10) / 10;
-      }
-    });
+    for (const [l, arr] of [["h", h], ["a", a]]) for (const i in soma[l]) arr[i] = Math.round(((arr[i] || 0) + Math.min(soma[l][i], 4)) * 10) / 10;
     return Object.assign({}, pr, { h, a });
   }
   // quem alimenta as barras: com a 5Dollar em dia, ataques perigosos/ataques dela; na reserva (365Scores),

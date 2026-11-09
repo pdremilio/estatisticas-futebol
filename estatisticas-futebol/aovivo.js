@@ -902,7 +902,13 @@
     const atual = pr ? (pr.atual == null ? pr.ultimo : pr.atual) : -1;
     vv.prov = pr ? rap.pend.map((x) => {
       let i = pr.idx[x.per + ":" + (x.m > LIM[x.per] ? LIM[x.per] : x.m) + ":" + (x.m > LIM[x.per] ? x.m - LIM[x.per] : 0)];
-      if (i == null) i = Math.max(atual, 0);
+      // o gráfico ainda não tem aquele minuto (ex.: 45+3, quando a narração não abriu os acréscimos): vai para o
+      // minuto mais perto do mesmo tempo — nunca para o minuto atual, senão o lance "anda" junto com o relógio
+      if (i == null) {
+        let melhor = -1, dif = 1e9;
+        pr.slots.forEach((s, j) => { if (s.per !== x.per) return; const d = Math.abs(s.b + s.ad - x.m); if (d < dif) { dif = d; melhor = j; } });
+        i = melhor >= 0 ? melhor : Math.max(atual, 0);
+      }
       return { i, l: x.l, k: x.k, j: x.j || "", x: x.x || "", min: x.r + "'", prov: true, t: x.t };
     }) : null;
     // medidor: quanto o contador chegou antes da narração (positivo = contador primeiro)
