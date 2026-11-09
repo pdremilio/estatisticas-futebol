@@ -10,3 +10,7 @@ class_name = "AoVivo"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AoVivo"]
+
+# despertador: a cada minuto guarda o minuto a minuto dos jogos ao vivo, mesmo sem ninguém no site
+[triggers]
+crons = ["* * * * *"]
