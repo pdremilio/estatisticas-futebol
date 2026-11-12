@@ -292,8 +292,13 @@
     window.AoVivo.carregarEncerrado(code, p).then((ok) => { if (!ok) setTimeout(() => pedidosFim.delete(k), 60000); }).catch(() => pedidosFim.delete(k));
   }
   // aviso quando a ESPN não responde há alguns ciclos (o placar volta a ser o da football-data)
-  const avisoFonte = () => (window.AoVivo && window.AoVivo.indisponivel && window.AoVivo.indisponivel()
-    ? `<div class="aviso-fonte" role="status"><b>Dados ao vivo temporariamente indisponíveis.</b> A ESPN não está respondendo; tentando de novo a cada 20 s. Enquanto isso, o placar vem da football-data, que atrasa alguns minutos.</div>` : "");
+  // (com a 5Dollar em dia, placar, minuto e gráfico seguem normais: o aviso fica discreto)
+  const avisoFonte = () => {
+    const AV = window.AoVivo;
+    if (!(AV && AV.indisponivel && AV.indisponivel())) return "";
+    if (AV.d5EmDia && AV.d5EmDia()) return `<div class="aviso-fonte aviso-leve" role="status">A ESPN está fora do ar agora: os nomes dos jogadores nos lances podem atrasar. Placar, minuto e gráfico seguem normais pela 5Dollar.</div>`;
+    return `<div class="aviso-fonte" role="status"><b>Dados ao vivo temporariamente indisponíveis.</b> A ESPN e a 5Dollar não estão respondendo; tentando de novo a cada 20 s. Enquanto isso, o placar vem da football-data, que atrasa alguns minutos.</div>`;
+  };
   const horaCurta = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const horaAtualizacao = (p) => { const v = p.vv || {}, t = [v.emDet || v.em, v.emPbp].filter(Boolean).sort().pop(); if (!t) return ""; const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 
@@ -996,6 +1001,8 @@
     const do5 = (s, gols, esc) => {
       const o = {};
       if (s) { o.da = par(s.dangerous_attacks); o.atk = par(s.attacks); o.alvo = par(s.shots_on_target); o.fora5 = par(s.shots_off_target); o.posse = par(s.possession); }
+      // finalizações = no alvo + para fora, da mesma fonte (sem misturar com o total da ESPN)
+      if (o.alvo && o.fora5) o.chutes = [o.alvo[0] + o.fora5[0], o.alvo[1] + o.fora5[1]];
       if (esc) o.esc = esc;
       for (const k in o) if (!o[k]) delete o[k];
       return o;

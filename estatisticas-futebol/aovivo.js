@@ -159,7 +159,7 @@
       if (d5p && Date.now() - d5p.em < 45000) { p.fh = d5p.h; p.fa = d5p.a; }
       vv.min = p.s === "PAUSED" ? "Intervalo" : st.displayClock || tp.shortDetail || "";
     } else if (tp.state === "post" && tp.completed && !/POSTPONED|CANCEL|ABANDON/.test(tp.name || "")) {
-      p.s = "FINISHED"; p.fh = Number(casa.score); p.fa = Number(fora.score); vv.min = "";
+      p.s = "FINISHED"; p.fh = Number(casa.score); p.fa = Number(fora.score); vv.min = ""; vv.fimEspn = true;
       if (/AET|EXTRA/.test(tp.name || "")) p.du = "EXTRA_TIME";
       if (/PEN/.test(tp.name || "")) p.du = "PENALTY_SHOOTOUT";
     } else if (/POSTPONED/.test(tp.name || "")) {
@@ -176,8 +176,35 @@
       if (p.s === "IN_PLAY" && (st.period || 1) < 2) { p.hh = null; p.ha = null; }
       else { const ht = primeiroTempo(c, casa, fora); if (ht) { p.hh = ht[0]; p.ha = ht[1]; } }
     }
+    // a 5Dollar em dia manda no minuto, no intervalo e no placar (a ESPN só decide o fim do jogo)
+    if (!vv.fimEspn) {
+      if (vv.d5Fim) { p.s = "FINISHED"; vv.st = "post"; vv.min = ""; }
+      else if (aplicarStatus5d(p) && vv.d5Placar && Date.now() - vv.d5Placar.em < 45000) { p.fh = vv.d5Placar.h; p.fa = vv.d5Placar.a; }
+    }
     if (vv.pr) recalcularAtual(p);
     return antes !== JSON.stringify([p.s, p.fh, p.fa, p.du, p.hh, p.ha, vv.min]);
+  }
+  // situação do jogo pela 5Dollar (status_code): minuto ("48", "45+2"), intervalo ou fim
+  function estado5d(cod) {
+    const s = String(cod == null ? "" : cod).trim(), low = s.toLowerCase(), m = parseInt(s, 10);
+    if (m >= 1 && m <= 130) return { m, txt: (/\+/.test(s) ? s.replace(/\s+/g, "").replace(/'+$/, "") : String(m)) + "'" };
+    if (/(^|[^a-z])(ht|half|break|interval)/.test(low)) return { ht: true };
+    if (/(^|[^a-z])(ft|full|aet|pen|finish|ended|end)/.test(low)) return { fim: true };
+    return null;
+  }
+  function aplicarStatus5d(p) {
+    const vv = p.vv, s = vv && vv.d5St;
+    if (!s || vv.fimEspn || Date.now() - s.em > 45000) return false;
+    if (s.fim) { p.s = "FINISHED"; vv.st = "post"; vv.min = ""; vv.d5Fim = true; return true; }
+    if (s.ht) {
+      p.s = "PAUSED"; vv.st = "in"; vv.min = "Intervalo"; vv.ht5 = true;
+      const pl = vv.d5Placar && Date.now() - vv.d5Placar.em < 45000 ? [vv.d5Placar.h, vv.d5Placar.a] : [p.fh, p.fa];
+      if (p.hh == null && pl[0] != null) { p.hh = pl[0]; p.ha = pl[1]; } // placar do 1º tempo
+      return true;
+    }
+    p.s = "IN_PLAY"; vv.st = "in"; vv.min = s.txt; vv.clk = s.txt;
+    if (s.m > 45 && (vv.per || 1) < 2) vv.per = 2;
+    return true;
   }
 
   // ---------- gráfico de pressão: uma barra por minuto (acréscimos ganham barras próprias: 45+1, 45+2...)
@@ -972,14 +999,14 @@
   // todos os visitantes, com a chave escondida. Com ele ligado, a chave pessoal não é usada.
   const WORKER5D = String(((window.SB_CONFIG || {}).aoVivo5d) || "").replace(/\/+$/, "");
   const fonte5d = () => !!WORKER5D || !!chave5d();
-  let lista5W = null, lista5WEm = 0, lista5WBusca = null;
+  let lista5W = null, lista5WEm = 0, lista5WBusca = null, lista5WCheia = false; // cheia: pode ter cortado jogos (3 páginas)
   async function listaDoWorker() {
     if (lista5W && Date.now() - lista5WEm < 7000) return lista5W;
     if (!lista5WBusca) lista5WBusca = (async () => {
       try {
         const r = await fetch(WORKER5D + "/ao-vivo", { cache: "no-store" });
         const j = r.ok ? await r.json() : null;
-        if (j && j.ok) { lista5W = j.jogos || []; lista5WEm = Date.now(); d5Status.msg = "ok"; d5Status.em = Date.now(); d5Status.servidor = true; }
+        if (j && j.ok) { lista5W = j.jogos || []; lista5WEm = Date.now(); lista5WCheia = (j.n || lista5W.length) >= 150; d5Status.msg = "ok"; d5Status.em = Date.now(); d5Status.servidor = true; }
         else d5Status.msg = "servidor do ao vivo: " + ((j && j.erro) || "erro " + r.status);
       } catch (e) { d5Status.msg = "não consegui falar com o servidor do ao vivo"; }
       lista5WBusca = null;
@@ -1054,12 +1081,75 @@
     const id = await idDo5d(p);
     if (!id) { const antes = vv.d5 && vv.d5.semJogo; vv.d5 = vv.d5 && vv.d5.id ? vv.d5 : { semJogo: true }; return !antes; }
     let fx;
-    if (WORKER5D) { const lista = await listaDoWorker(); fx = (lista || []).find((x) => x.id === id) || null; if (!fx) d5Par.delete(ch); }
+    if (WORKER5D) {
+      const lista = await listaDoWorker();
+      fx = (lista || []).find((x) => x.id === id) || null;
+      if (!fx && lista) {
+        // a 5Dollar só lista jogos rolando: sumiu depois dos 88' e continua fora da lista 15 s depois = acabou
+        // (não espera a ESPN; se o jogo voltar à lista, o ao vivo religa sozinho)
+        const s5 = vv.d5St;
+        if (s5 && s5.m >= 88 && !vv.fimEspn && !lista5WCheia) {
+          if (!vv.d5SumiuEm) vv.d5SumiuEm = Date.now();
+          if (Date.now() - vv.d5SumiuEm >= 15000) { vv.d5Fim = true; vv.d5FimEm = Date.now(); p.s = "FINISHED"; vv.st = "post"; vv.min = ""; d5Par.delete(ch); return true; }
+        } else d5Par.delete(ch);
+      } else vv.d5SumiuEm = 0;
+    }
     else { const r = await buscar5d(`fixtures/${id}?include=events,stats`); fx = r && r.data; }
     if (!fx) return false;
     const mudou = lerFx5d(p, id, fx);
     const doHist = p === jogoAberto() ? await completarComHistorico(p, p.vv.d5).catch(() => false) : false;
     return mudou || doHist;
+  }
+  // jogo que a 5Dollar já mostra rolando, mas a ESPN ainda não (atrasou ou está fora do ar): liga o ao vivo
+  // dele pela 5Dollar. A ESPN entra depois só com nomes, narração e escalações.
+  let ligar5dEm = 0;
+  async function ligarPelo5d() {
+    if (!WORKER5D || dados.fonte !== "espn" || Date.now() - ligar5dEm < 30000) return false;
+    ligar5dEm = Date.now();
+    const lista = await listaDoWorker();
+    if (!lista || !lista.length) return false;
+    const agora = Date.now(), usados = new Set(d5Par.values());
+    const T = dados.times || {}, nome = (id) => [(T[id] || {}).n, (T[id] || {}).c, (T[id] || {}).t].join(" ");
+    const cands = [];
+    for (const code of codigos()) for (const p of ((dados.competicoes[code] || {}).partidas || [])) {
+      const fim5Recente = p.vv && p.vv.d5Fim && !p.vv.fimEspn && agora - (p.vv.d5FimEm || 0) < 10 * 60e3;
+      if (p.vv && (p.vv.st === "in" || p.vv.fimEspn || (p.vv.d5Fim && !fim5Recente))) continue;
+      if ((/FINISHED/.test(p.s) && !fim5Recente) || /POSTPONED|CANCELLED|SUSPENDED/.test(p.s) || !p.h || !p.a || !p.i) continue;
+      const q = Date.parse(p.d);
+      if (!(q - agora < 30 * 60e3 && agora - q < 4 * 3600e3)) continue;
+      cands.push({ code, p, q, th: tokens(nome(p.h)), ta: tokens(nome(p.a)) });
+    }
+    if (!cands.length) return false;
+    let mudou = false;
+    for (const g of lista) {
+      const e5 = estado5d(g.status_code);
+      if (usados.has(g.id) || !e5 || e5.fim) continue;
+      const t = g.teams || {}, gh = tokens((t.home || {}).name), ga = tokens((t.away || {}).name), ko = Date.parse(g.kickoff_utc);
+      let melhor = null, nota = 0;
+      for (const c of cands) {
+        const dif = Math.abs(ko - c.q);
+        if (!(dif <= 3 * 3600e3)) continue;
+        const sh = parecido(c.th, gh), sa = parecido(c.ta, ga);
+        if (!sh || !sa) continue;
+        const n = sh + sa - dif / 86400e3;
+        if (n > nota) { melhor = c; nota = n; }
+      }
+      if (!melhor) continue;
+      const { code, p } = melhor;
+      if (!p._orig) p._orig = { s: p.s, fh: p.fh, fa: p.fa, hh: p.hh, ha: p.ha };
+      const vv = (p.vv = p.vv || {});
+      vv.espn = vv.espn || { lg: lgDe(code), id: String(p.i), code };
+      vv.soEsc = false; vv.d5Fim = false; vv.d5SumiuEm = 0;
+      vv.tid = vv.tid || { h: String(p.h), a: String(p.a) };
+      vv.st = "in"; vv.fonte = "5Dollar"; vv.em = new Date().toISOString();
+      p.semEspn = false;
+      d5Par.set(chaveJogo(p), g.id);
+      usados.add(g.id);
+      cands.splice(cands.indexOf(melhor), 1);
+      lerFx5d(p, g.id, g);
+      mudou = true;
+    }
+    return mudou;
   }
   const par5 = (x) => (x && x.home != null && x.away != null ? [Number(x.home) || 0, Number(x.away) || 0] : null);
   // lê um jogo da 5Dollar: placar, lances (contadores + eventos), ataques por minuto e números do painel
@@ -1068,10 +1158,18 @@
     const d5 = (vv.d5 = vv.d5 && vv.d5.id === id ? vv.d5 : lerSessao(id, "d5") || { id, at: { h: {}, a: {} }, da: { h: {}, a: {} }, ult: null, desde: new Date().toISOString() });
     d5.log = d5.log || []; d5.subs = d5.subs || [];
     let mudou = false;
-    // placar: a 5Dollar é a principal (a ESPN não sobrescreve enquanto ela estiver em dia)
+    // minuto, intervalo e fim: a 5Dollar é a principal (atualiza a cada 8 s; a ESPN, a cada 20 s)
     const g = par5(fx.goals);
+    if (g) vv.d5Placar = { h: g[0], a: g[1], em: agora };
+    const est = estado5d(fx.status_code);
+    if (est) {
+      const antes = [p.s, vv.min, vv.st].join("|");
+      vv.d5St = Object.assign(est, { em: agora });
+      aplicarStatus5d(p);
+      if (antes !== [p.s, vv.min, vv.st].join("|")) mudou = true;
+    }
+    // placar: a 5Dollar é a principal (a ESPN não sobrescreve enquanto ela estiver em dia)
     if (g) {
-      vv.d5Placar = { h: g[0], a: g[1], em: agora };
       if ((p.s === "IN_PLAY" || p.s === "PAUSED") && (p.fh !== g[0] || p.fa !== g[1])) { p.fh = g[0]; p.fa = g[1]; mudou = true; }
     }
     // números completos para o painel de estatísticas (jogo todo / 1º tempo / 2º tempo)
@@ -1362,6 +1460,7 @@
         for (const [code, r] of placares) for (const ev of (r && r.events) || []) if (aplicarPlacar(code, ev)) mudou = true;
         if (marcarSemPar(placares)) mudou = true;
       }
+      if (await ligarPelo5d().catch(() => false)) mudou = true;
       const p = jogoAberto();
       if (await atualizarDetalhe(p, false)) mudou = true;
       if (p && (await atualizarElencos(p))) mudou = true;
@@ -1442,7 +1541,8 @@
   }
 
   window.AoVivo = {
-    ligado: LIGADO, iniciar, indisponivel: () => indisponivel, _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status, servidor5d: !!WORKER5D, modoDe, graficoPassado, carregarEncerrado, carregarEscalacoes,
+    ligado: LIGADO, iniciar, indisponivel: () => indisponivel,
+    d5EmDia: () => (WORKER5D ? Date.now() - lista5WEm < 60000 : d5Status.msg === "ok" && Date.now() - d5Status.em < 60000), _slotKey: (s) => chaveSlot(s), _estado: () => ({ rodando, inicioCiclo, falhasSeguidas }), _ciclo: () => ciclo(), _lerDetalhe: lerDetalhe, _lerElenco: lerElenco, _slotDe: slotDe, d5Status, servidor5d: !!WORKER5D, modoDe, graficoPassado, carregarEncerrado, carregarEscalacoes,
     _aplicarPlacar: (code, ev, d) => { dados = d || dados; return aplicarPlacar(code, ev); },
   };
 })();
