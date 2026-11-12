@@ -36,6 +36,10 @@
   }
 
   let dados = null, timer = null, rodando = false, inicioCiclo = 0, geracao = 0;
+  // página "dormindo" (aba em segundo plano, PC suspenso): o navegador segura os relógios; quando volta, anota a hora
+  let acordouEm = 0, pulsoEm = Date.now();
+  setInterval(() => { const t = Date.now(); if (t - pulsoEm > 30000) acordouEm = t; pulsoEm = t; }, 5000);
+  try { document.addEventListener("visibilitychange", () => { if (!document.hidden) acordouEm = Date.now(); }); } catch (e) {}
   let falhasSeguidas = 0, indisponivel = false; // ESPN fora do ar: 3 ciclos seguidos sem resposta
   const LIMITE_BUSCA = 10000, CICLO_TRAVADO = 45000, FALHAS_AVISO = 3;
   const casados = new Map(); // "code:idESPN" -> partida do site
@@ -817,13 +821,27 @@
   // cur = { gol: placar, alvo: chutes no gol, chutes: total de chutes OU fora: chutes para fora, trave, esc }
   // Se as duas fontes registram o mesmo lance, ele vale uma vez só, e o site anota qual chegou primeiro.
   const NOME_FONTE = { "365": "365Scores", "5d": "5Dollar" };
+  function anotarBuraco(rap, de, ate) {
+    const v = (x) => x.per * 1000 + x.m;
+    rap.buracos = rap.buracos || [];
+    const igual = rap.buracos.find((b) => !b.feito && v(b.de) <= v(ate) && v(de) <= v(b.ate));
+    if (igual) { if (v(de) < v(igual.de)) igual.de = de; if (v(ate) > v(igual.ate)) igual.ate = ate; }
+    else rap.buracos.push({ de, ate });
+  }
   function contarFonte(p, fonte, cur, sl, soBase) {
     const vv = p.vv, ch = chaveJogo(p);
     const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
     if (!rap.ult || Array.isArray(rap.ult) || rap.ult.gol !== undefined) rap.ult = {}; // formato antigo
     rap.corrida = rap.corrida || [];
     const ult = rap.ult[fonte];
-    if (!ult || soBase) {
+    // fonte parada (aba minimizada, PC suspenso, site fechado): o salto dos contadores não vai para o minuto
+    // atual; esse trecho vira um "buraco" que o histórico do servidor preenche, cada lance no minuto certo
+    rap.ultEm = rap.ultEm || {}; rap.ultMinF = rap.ultMinF || {};
+    const t0 = Date.now(), parado = !!(ult && rap.ultEm[fonte] && t0 - rap.ultEm[fonte] > 40000);
+    rap.ultEm[fonte] = t0;
+    if (parado && sl && rap.ultMinF[fonte]) anotarBuraco(rap, rap.ultMinF[fonte], minutoDe(sl));
+    if (sl) rap.ultMinF[fonte] = minutoDe(sl);
+    if (!ult || soBase || parado) {
       rap.ult[fonte] = Object.assign({}, ult || {}, cur);
       // a partir deste minuto os lances da 5Dollar são contados aqui; os de antes vêm do histórico do servidor
       if (!ult && fonte === "5d" && sl && !rap.base5d) rap.base5d = minutoDe(sl);
@@ -1043,6 +1061,7 @@
     if (!vv || !fonte5d()) return "365";
     const d = vv.d5, agora = Date.now();
     if (d && d.em && agora - d.em < RESERVA_MS) return "5d";
+    if (d && d.em && agora - acordouEm < 30000) return "5d"; // a página acabou de voltar: a 5Dollar ainda vai atualizar
     // servidor/API com erro e nenhum dado deste jogo: não adianta esperar, o 365Scores entra já
     if (!(d && d.em) && d5Status.msg && d5Status.msg !== "ok") return "365";
     if (vv.d5Tentou && agora - vv.d5Tentou > RESERVA_MS) return "365";
@@ -1180,6 +1199,11 @@
     const m5 = parseInt(String(fx.status_code || ""), 10);
     const sl = m5 >= 1 && m5 <= 130 ? slotDe(m5 + "'", m5 > 45 || (vv.per || 1) >= 2 ? 2 : 1) || slotDe(vv.clk, vv.per) : slotDe(vv.clk, vv.per);
     const ca = fx.cards || {}, cartao = (k) => (ca.home && ca.away ? [Number(ca.home[k]) || 0, Number(ca.away[k]) || 0] : null);
+    // buraco: este navegador ficou mais de 40 s sem ler este jogo (aba minimizada, PC suspenso, site fechado).
+    // O que aconteceu nesse meio-tempo NÃO vai para o minuto atual: o histórico do servidor coloca cada coisa
+    // no minuto certo (lances e barras); aqui só recomeça a contagem
+    const buraco = !!(d5.em && agora - d5.em > 40000);
+    if (buraco) { histUlt.delete(d5.id); vivosHistEm = 0; } // pede o histórico já
     if (sl) mudou = contarFonte(p, "5d", { gol: g, alvo: st && par5(st.shots_on_target), fora: st && par5(st.shots_off_target), esc: par5(fx.corners),
       amarelo: cartao("yellow"), vermelho: cartao("red") }, sl) || mudou;
     // substituições (com quem entra e quem sai), pelos eventos
@@ -1187,7 +1211,7 @@
     // ataques e ataques perigosos por minuto (+ registro com a hora, para a barra "viva" do minuto atual)
     if (st) {
       const cur = { at: par5(st.attacks), da: par5(st.dangerous_attacks) };
-      if (d5.ult && sl) {
+      if (d5.ult && sl && !buraco) {
         const k = chaveSlot(sl);
         for (const q of ["at", "da"]) {
           if (!cur[q] || !d5.ult[q]) continue;
@@ -1292,20 +1316,33 @@
       if (d5[q][l][k] !== m[q][l][k]) { d5[q][l][k] = m[q][l][k]; (d5.hist = d5.hist || {})[k] = 1; mudou = true; }
     }
     if (!d5.ult && m.ult) d5.ult = { at: m.ult.at, da: m.ult.da };
-    if (!vv.histLances && vv.pr) { vv.histLances = true; if (lancesDoHistorico(p, j.m)) mudou = true; }
+    if (vv.pr) {
+      const ch = chaveJogo(p);
+      const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
+      const val = (x) => x.per * 1000 + x.m;
+      const maxFoto = Math.max(0, ...Object.keys(j.m).map((k) => { const [pe, mi] = k.split(":").map(Number); return pe * 1000 + mi; }));
+      const faixas = [];
+      // minutos antes deste navegador começar a contar (uma vez por jogo)
+      if (!vv.histLances) { vv.histLances = true; faixas.push({ de: -1, ate: rap.base5d ? val(rap.base5d) : 1e9 }); }
+      // buracos (aba parada): só quando o servidor já tem as fotos até ali
+      for (const b of rap.buracos || []) if (!b.feito && maxFoto >= val(b.ate) - 1) { b.feito = true; faixas.push({ de: val(b.de), ate: val(b.ate) }); }
+      if (rap.buracos) rap.buracos = rap.buracos.filter((b) => !b.feito);
+      if (faixas.length && lancesDoHistorico(p, j.m, faixas)) mudou = true;
+      else if (faixas.length) gravarRap(ch, rap);
+    }
     return mudou;
   }
-  function lancesDoHistorico(p, mapa) {
+  // faixas: minutos (per*1000+m) que este navegador não contou: de < minuto < ate
+  function lancesDoHistorico(p, mapa, faixas) {
     const vv = p.vv, pr = vv.pr, ch = chaveJogo(p);
     const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
-    const base = rap.base5d;
     // lances da narração que já existem (cada um "cobre" um lance do contador perto dele)
     const narr = pr.ev.filter((e) => CONTAVEIS[e.k]).map((e) => ({ e, me: minutoDe(pr.slots[e.i]), usado: false }));
     const fotos = Object.entries(mapa).map(([k, v]) => { const [per, m] = k.split(":").map(Number); return { per, m, v }; }).sort((a, b) => a.per - b.per || a.m - b.m);
     let ant = null, criou = false;
     for (const f of fotos) {
-      const depoisDaBase = base && (f.per > base.per || (f.per === base.per && f.m >= base.m));
-      if (ant && !depoisDaBase) {
+      const v = f.per * 1000 + f.m, naoVisto = faixas.some((x) => v > x.de && v < x.ate);
+      if (ant && naoVisto) {
         for (const [l, i] of [["h", 0], ["a", 1]]) {
           const d = (k) => (f.v[k] && ant[k] ? Math.max(0, f.v[k][i] - ant[k][i]) : 0);
           const dg = d("g"), novos = [];
