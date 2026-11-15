@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0F6E5A">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icone-apple-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ScanBall">
 <meta name="description" content="ScanBall: estatísticas, projeções e Power Ranking de futebol.">
 <title>ScanBall · Estatísticas de futebol</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,6 +25,7 @@
       <span class="marca-nome">ScanBall</span><small class="versao">beta 6</small>
     </a>
     <div class="topo-meta" id="topo-meta"></div>
+    <button class="botao-conta botao-instalar" id="instalar" type="button" hidden title="Instalar o ScanBall como app"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M11 4h2v8.6l3.3-3.3 1.4 1.4L12 16.4 6.3 10.7l1.4-1.4L11 12.6zM5 18h14v2H5z"/></svg><span class="conta-rot">Instalar app</span></button>
     <button class="botao-conta" id="conta" type="button" hidden></button>
     <button class="botao-icone" id="tema" type="button" aria-label="Alternar tema claro e escuro" title="Tema">
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.5 0-1-.1-1.4A5.5 5.5 0 0 1 13.4 3.1 9 9 0 0 0 12 3z"/></svg>
@@ -46,5 +52,15 @@
   if (!ok) document.write('<script src="dados.js?v=' + VER + '"><\/script>');
 })();</script>
 <script>["config.js", "contas.js", "aovivo.js", "dados-demo.js", "extra5d.js", "motor.js", "app.js"].forEach(function (f) { document.write('<script src="' + f + '?v=' + VER + '"><\/script>'); });</script>
+<script>
+// app instalável: service worker + botão "Instalar app" (aparece só quando o navegador permite instalar)
+(function () {
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+  var pedido = null, bt = document.getElementById("instalar");
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); pedido = e; if (bt) bt.hidden = false; });
+  window.addEventListener("appinstalled", function () { pedido = null; if (bt) bt.hidden = true; });
+  if (bt) bt.addEventListener("click", function () { if (!pedido) return; pedido.prompt(); pedido.userChoice.finally(function () { pedido = null; bt.hidden = true; }); });
+})();
+</script>
 </body>
 </html>
