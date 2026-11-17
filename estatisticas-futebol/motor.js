@@ -173,6 +173,9 @@
       v1: pct(b.v1, b.j1), e1: pct(b.e1, b.j1), d1: pct(b.d1, b.j1),
       vir: b.vir, ced: b.ced,
       forma: b.forma.slice(-5),
+      pts5: b.forma.length ? b.forma.slice(-5).reduce((t, r) => t + (r === "V" ? 3 : r === "E" ? 1 : 0), 0) : null,
+      mp: pct(b.mp, b.mp + b.sp),
+      escF: med(b.escF, b.je), escC: med(b.escC, b.je), cgF: med(b.cgF, b.je), cgC: med(b.cgC, b.je), chF: med(b.chF, b.je),
     };
   }
   // gols no 2º tempo exatos quando todos os jogos têm 1º tempo
@@ -487,6 +490,10 @@
     { id: "btts", nome: "% ambas marcam", un: "%" }, { id: "cs", nome: "% sem sofrer gol", un: "%" },
     { id: "sm", nome: "% sem marcar", un: "%" }, { id: "ht05", nome: "% gol no 1º tempo", un: "%" },
     { id: "gm1", nome: "Gols marcados no 1º tempo", un: "" }, { id: "v1", nome: "% vencendo no intervalo", un: "%" },
+    { id: "pts5", nome: "Pontos nos últimos 5 jogos", un: "" }, { id: "mp", nome: "% marcou primeiro", un: "%" },
+    { id: "cgF", nome: "Chutes no gol por jogo", un: "" }, { id: "cgC", nome: "Chutes no gol sofridos por jogo", un: "" },
+    { id: "chF", nome: "Finalizações por jogo", un: "" },
+    { id: "escF", nome: "Escanteios a favor por jogo", un: "" }, { id: "escC", nome: "Escanteios contra por jogo", un: "" },
     { id: "jogos", nome: "Jogos disputados", un: "" }, { id: "elo", nome: "Rating Elo", un: "" },
   ];
   const METRICAS_PROJ = [

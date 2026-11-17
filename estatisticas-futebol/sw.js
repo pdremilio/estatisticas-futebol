@@ -24,3 +24,15 @@ self.addEventListener("fetch", (e) => {
     })
   );
 });
+
+// toque numa notificação: abre (ou traz para frente) o ScanBall no jogo do aviso
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const alvo = (e.notification.data && e.notification.data.url) || "./";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((lista) => {
+    for (const c of lista) {
+      if (new URL(c.url).origin === self.location.origin) { return c.focus().then((w) => (w && w.navigate ? w.navigate(new URL(alvo, self.location.origin).href) : w)).catch(() => {}); }
+    }
+    return self.clients.openWindow(alvo);
+  }));
+});

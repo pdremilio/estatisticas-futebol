@@ -7,7 +7,7 @@
   const C = window.SB_CONFIG || {};
   const ATIVO = !!(C.url && C.anonKey);
   const URL_SITE = location.origin + location.pathname;
-  const CHAVES_SYNC = ["favoritos", "fav_times", "fav_ligas", "filtros_lista", "filtro_lista", "rk_ordem", "rk_n", "ordem", "ocultar", "tema", "comp"];
+  const CHAVES_SYNC = ["favoritos", "fav_times", "fav_ligas", "filtros_lista", "filtro_lista", "rk_ordem", "rk_n", "ordem", "ocultar", "tema", "comp", "avisos_cfg", "pv_filtro"];
   const CONJUNTOS = ["favoritos", "fav_times", "fav_ligas"];
   const K_SESSAO = "sb_sessao";
 

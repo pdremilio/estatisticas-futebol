@@ -321,7 +321,7 @@
   const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, aviso: true, modo: "tendencia", saldo: true, som: false };
   estado.prOpc = Object.assign({}, OPC_PADRAO, ler("pr_opc", {}));
   estado.prConfig = false;
-  let infoPressao = "";
+  const infoPressao = {}; // texto da marca tocada, por jogo (cada gráfico tem o seu)
   const iconeMarca = (k) => (k === "gol" ? "⚽" : k === "sub" ? "⇄" : "");
 
   // peso de cada ataque (365Scores) na barra do minuto; os lances da ESPN (chutes, escanteios, gols) continuam valendo
@@ -442,7 +442,43 @@
     gol: { ic: "🔥", nivel: 2, prior: 3, nome: "Gol próximo" },
     fav: { ic: "⭐", nivel: 3, prior: 4, nome: "Favorito pressionando" },
   };
+  AV.meu = { ic: "🎯", nivel: 2, prior: 5, nome: "Meu aviso" };
   const PERIGO = ["alvo", "trave", "esc"], CHUTE = ["alvo", "trave", "fora", "bloq"], NO_GOL = ["alvo", "trave"];
+  // configuração dos avisos (quais aparecem, avisos próprios e notificações), guardada neste navegador / na conta
+  const CFG_AV_PADRAO = {
+    mostrar: { pressao: true, gol: true, fav: true, over: true },
+    notif: { ativo: false, avisos: { pressao: false, gol: true, fav: true, over: true, meu: true }, acoes: { gol: true, vermelho: true, inicio: false, intervalo: false, fim: false }, jogos: "todos" },
+    meus: [],
+  };
+  function lerCfgAv() {
+    const c = ler("avisos_cfg", {}) || {};
+    return {
+      mostrar: Object.assign({}, CFG_AV_PADRAO.mostrar, c.mostrar || {}),
+      notif: Object.assign({}, CFG_AV_PADRAO.notif, c.notif || {}, {
+        avisos: Object.assign({}, CFG_AV_PADRAO.notif.avisos, (c.notif || {}).avisos || {}),
+        acoes: Object.assign({}, CFG_AV_PADRAO.notif.acoes, (c.notif || {}).acoes || {}),
+      }),
+      meus: Array.isArray(c.meus) ? c.meus : [],
+    };
+  }
+  estado.cfgAv = lerCfgAv();
+  let cfgAvVer = 1;
+  const salvarCfgAv = () => { guardar("avisos_cfg", estado.cfgAv); cfgAvVer++; };
+  // avisos próprios: cada um é uma lista de condições; todas precisam valer no mesmo minuto
+  const LADOS = { qq: "um dos times", ambos: "os dois times", total: "os dois somados", h: "o mandante", a: "o visitante", fav: "o favorito", zebra: "a zebra" };
+  const COND_TIPOS = {
+    min: { rot: "Minuto do jogo", nova: { de: 60, ate: 90 } },
+    placar: { rot: "Placar", nova: { v: "empate" } },
+    pressao: { rot: "Pressão", nova: { lado: "qq", pct: 70, n: 8 } },
+    chutesGol: { rot: "Chutes no gol", nova: { lado: "ambos", k: 1, n: 10 } },
+    chutes: { rot: "Chutes (todos)", nova: { lado: "total", k: 4, n: 10 } },
+    esc: { rot: "Escanteios", nova: { lado: "qq", k: 2, n: 10 } },
+    perigo: { rot: "Lances perigosos", nova: { lado: "qq", k: 3, n: 8 } },
+    semChute: { rot: "Time sem chutar", nova: { lado: "zebra", n: 10 } },
+    ov25pre: { rot: "Over 2,5 no pré-jogo", nova: { pct: 55 } },
+    favPre: { rot: "Favorito do pré-jogo", nova: { pct: 60 } },
+  };
+  const PLACARES = { qualquer: "qualquer", empate: "empatado", "0x0": "0 × 0", dif1: "diferença de 1 gol", favSemVencer: "favorito sem vencer", favPerdendo: "favorito perdendo", favVencendo: "favorito vencendo", casaVence: "mandante vencendo", foraVence: "visitante vencendo" };
   const codeDoJogo = (p) => (p.vv && p.vv.espn && p.vv.espn.code) || p.code || null;
   // favorito do pré-jogo: odds das casas quando o jogo tem; senão, a chance do modelo do site.
   // Favorito = 55% ou mais de chance e 20 pontos acima do outro time.
@@ -476,7 +512,7 @@
     if (!pr || !pr.slots || !pr.slots.length) return { atual: null, marcas: [] };
     const atual = Math.min(pr.atual == null ? pr.ultimo : pr.atual, pr.slots.length - 1);
     const prov = vv.prov || [];
-    const chave = [atual, pr.ev.length, prov.length, vv.d5 && vv.d5.em, vv.atk && vv.atk.length, p.fh, p.fa, p.s].join("|");
+    const chave = [atual, pr.ev.length, prov.length, vv.d5 && vv.d5.em, vv.atk && vv.atk.length, p.fh, p.fa, p.s, cfgAvVer].join("|");
     const m0 = memoAv.get(vv);
     if (m0 && m0.chave === chave && Date.now() - m0.t < 3000) return m0.r;
     const r = calcularAvisos(p, pr, atual, prov);
@@ -501,6 +537,9 @@
     const fav = favoritoDe(p);
     const nome = (l) => h(nomeTime(l === "h" ? p.h : p.a));
     let ultGol = -1, ultGolLado = null, ph = 0, pa = 0;
+    const meus = estado.cfgAv.meus.filter((a) => a.ativo !== false && a.conds && a.conds.length).map((a) => ({ a, st: null }));
+    let ov25 = null;
+    if (meus.length) { const code = codeDoJogo(p), xp = code && preps[code] ? projecaoDo(code, p) : null; ov25 = xp && xp.proj ? xp.proj.ov[2] : null; }
     let st = null; // aviso ligado: { tipo, l, sub, ini, falhas, info }
     const marcas = [];
     const desligar = () => { st = null; };
@@ -547,6 +586,8 @@
       }
       // "marcou e continua" e "favorito perdendo e tomando contra-ataque" valem mais que pressão/gol próximo
       // (o recado ali é de jogo over); entre os over: favorito > continua > lá e cá
+      const mostrar = estado.cfgAv.mostrar;
+      for (let k = cand.length - 1; k >= 0; k--) if (mostrar[cand[k].tipo] === false) cand.splice(k, 1);
       const pri = (c) => (c.tipo !== "over" ? AV[c.tipo].prior : c.sub === "fav" ? 3.6 : c.sub === "continua" ? 3.5 : AV.over.prior);
       cand.sort((x, y) => pri(y) - pri(x));
       const melhor = cand[0];
@@ -567,6 +608,22 @@
         if (!(ult && ult.tipo === st.tipo && ult.l === st.l && i - ult.fim <= 3)) marcas.push({ i, tipo: st.tipo, l: st.l, sub: st.sub, fim: i });
       } else if (st && melhor && melhor.tipo === st.tipo && melhor.sub && melhor.sub !== st.sub) st.sub = melhor.sub;
       if (st && marcas.length) { const ult = marcas[marcas.length - 1]; if (ult.tipo === st.tipo && ult.l === st.l) ult.fim = i; }
+      // avisos próprios (cada um com seu liga/desliga e as mesmas 2 batidas para desligar)
+      if (meus.length) {
+        const ctx = { i, b, m: b + (pr.slots[i].ad || 0), val, cGol, cChu, cEsc, cPer, gols, ph, pa, fav, ov25 };
+        for (const mm of meus) {
+          const r = avaliarMeu(mm.a, ctx);
+          const e = mm.st;
+          if (r) {
+            if (!e) {
+              mm.st = { ini: i, l: r.l, falhas: 0 };
+              const ult = marcas.filter((x) => x.tipo === "meu" && x.id === mm.a.id).pop();
+              if (!(ult && i - ult.fim <= 3)) marcas.push({ i, tipo: "meu", id: mm.a.id, nome: mm.a.nome, l: r.l, fim: i });
+            } else { e.falhas = 0; e.l = r.l; }
+            const ult = marcas.filter((x) => x.tipo === "meu" && x.id === mm.a.id).pop(); if (ult) ult.fim = i;
+          } else if (e && ++e.falhas >= 2) mm.st = null;
+        }
+      }
       if (st) {
         // números para o texto
         let mins = 0;
@@ -594,12 +651,90 @@
         if (xp && xp.proj && xp.proj.ov[2] >= 0.5) txt += ` · pré-jogo: ${Math.round(xp.proj.ov[2] * 100)}% de over 2,5`;
       }
       if (dica) txt += `<br><small>💡 ${h(dica)}</small>`;
-      atualAv = { tipo: st.tipo, sub: st.sub, nivel: AV[st.tipo].nivel, ic: AV[st.tipo].ic, l: st.l, tid: st.l === "h" ? p.h : p.a, txt, mins: x.mins, share: x.share, perigo: x.perigo };
+      atualAv = { tipo: st.tipo, sub: st.sub, ini: st.ini, nivel: AV[st.tipo].nivel, ic: AV[st.tipo].ic, l: st.l, tid: st.l === "h" ? p.h : p.a, txt, mins: x.mins, share: x.share, perigo: x.perigo };
     }
-    return { atual: atualAv, marcas };
+    const ativos = atualAv ? [atualAv] : [];
+    if (vivo) for (const mm of meus) if (mm.st) {
+      const l = mm.st.l;
+      ativos.push({ tipo: "meu", id: mm.a.id, ini: mm.st.ini, nivel: AV.meu.nivel, ic: AV.meu.ic, l: l || "h", tid: l === "a" ? p.a : p.h,
+        txt: `<b>${h(mm.a.nome || "Meu aviso")}</b>${l ? ` · ${nome(l)}` : ""} · ${h(resumoMeu(mm.a))}` });
+    }
+    return { atual: atualAv, ativos, marcas };
   }
-  const alertaPressao = (p) => (p.vv && p.vv.pr && p.s === "IN_PLAY" ? avisosDoJogo(p).atual : null);
+  // um aviso próprio vale neste minuto? devolve { l } (o time de quem é o aviso, quando dá para saber) ou null
+  function avaliarMeu(a, x) {
+    const soma = (arr, n) => { let t = 0; for (let k = Math.max(0, x.i - n + 1); k <= x.i; k++) t += arr[k] || 0; return t; };
+    const outro = (l) => (l === "h" ? "a" : "h");
+    const ladoDe = (lado) => (lado === "fav" ? (x.fav ? x.fav.l : null) : lado === "zebra" ? (x.fav ? outro(x.fav.l) : null) : lado);
+    let quem = null;
+    // conta de um lado; "qq" = algum dos dois, "ambos" = os dois, "total" = soma
+    const conta = (lado, valor, k) => {
+      const l = ladoDe(lado);
+      if (lado === "total") return valor("h") + valor("a") >= k;
+      if (lado === "ambos") return valor("h") >= k && valor("a") >= k;
+      if (lado === "qq") { const vh = valor("h"), va = valor("a"); if (vh >= k || va >= k) { quem = quem || (vh >= va ? "h" : "a"); return true; } return false; }
+      if (!l) return false;
+      if (valor(l) >= k) { quem = quem || l; return true; }
+      return false;
+    };
+    for (const c of a.conds) {
+      const n = Math.max(1, Math.min(45, Number(c.n) || 10)), k = Number(c.k) || 0;
+      switch (c.t) {
+        case "min": if (x.m < (Number(c.de) || 0) || x.m > (Number(c.ate) || 130)) return null; break;
+        case "placar": {
+          const dif = x.ph - x.pa, fd = x.fav ? (x.fav.l === "h" ? dif : -dif) : null;
+          const ok = { qualquer: true, empate: dif === 0, "0x0": x.ph + x.pa === 0, dif1: Math.abs(dif) === 1, casaVence: dif > 0, foraVence: dif < 0,
+            favSemVencer: fd != null && fd <= 0, favPerdendo: fd != null && fd < 0, favVencendo: fd != null && fd > 0 }[c.v];
+          if (!ok) return null; break;
+        }
+        case "pressao": {
+          const pct = (Number(c.pct) || 0) / 100, ph = soma(x.val.h, n), pa = soma(x.val.a, n), t = ph + pa;
+          if (!t || t < 3) return null;
+          if (!conta(c.lado === "ambos" || c.lado === "total" ? "qq" : c.lado, (l) => (l === "h" ? ph : pa) / t, pct)) return null; break;
+        }
+        case "chutesGol": if (!conta(c.lado, (l) => soma(x.cGol[l], n), k)) return null; break;
+        case "chutes": if (!conta(c.lado, (l) => soma(x.cChu[l], n) + soma(x.gols[l], n), k)) return null; break;
+        case "esc": if (!conta(c.lado, (l) => soma(x.cEsc[l], n), k)) return null; break;
+        case "perigo": if (!conta(c.lado, (l) => soma(x.cPer[l], n), k)) return null; break;
+        case "semChute": {
+          const lados = c.lado === "ambos" ? ["h", "a"] : c.lado === "qq" ? null : [ladoDe(c.lado)];
+          const sem = (l) => soma(x.cChu[l], n) + soma(x.gols[l], n) === 0;
+          if (lados === null) { if (!(sem("h") || sem("a"))) return null; quem = quem || (sem("h") ? "a" : "h"); }
+          else if (lados.some((l) => !l || !sem(l))) return null;
+          break;
+        }
+        case "ov25pre": if (x.ov25 == null || x.ov25 * 100 < (Number(c.pct) || 0)) return null; break;
+        case "favPre": if (!x.fav || x.fav.p * 100 < (Number(c.pct) || 0)) return null; quem = quem || x.fav.l; break;
+        default: break;
+      }
+    }
+    return { l: quem };
+  }
+  function resumoMeu(a) {
+    return a.conds.map((c) => {
+      const lado = LADOS[c.lado] || "";
+      switch (c.t) {
+        case "min": return `entre ${c.de}' e ${c.ate}'`;
+        case "placar": return `placar: ${PLACARES[c.v] || c.v}`;
+        case "pressao": return `${lado} com ${c.pct}% da pressão (${c.n} min)`;
+        case "chutesGol": return `${lado} com ${c.k}+ chutes no gol (${c.n} min)`;
+        case "chutes": return `${lado} com ${c.k}+ chutes (${c.n} min)`;
+        case "esc": return `${lado} com ${c.k}+ escanteios (${c.n} min)`;
+        case "perigo": return `${lado} com ${c.k}+ lances perigosos (${c.n} min)`;
+        case "semChute": return `${lado} sem chutar (${c.n} min)`;
+        case "ov25pre": return `over 2,5 pré-jogo ≥ ${c.pct}%`;
+        case "favPre": return `favorito com ${c.pct}%+`;
+        default: return "";
+      }
+    }).filter(Boolean).join(" · ");
+  }
+  const alertaPressao = (p) => (p.vv && p.vv.pr && p.s === "IN_PLAY" ? avisosDoJogo(p).ativos[0] || null : null);
+  const avisosAtivos = (p) => (p.vv && p.vv.pr && p.s === "IN_PLAY" ? avisosDoJogo(p).ativos : []);
   const textoMarcaAviso = (p, m) => {
+    if (m.tipo === "meu") {
+      const a = estado.cfgAv.meus.find((x) => x.id === m.id);
+      return `${AV.meu.ic} ${m.nome || "Meu aviso"}${m.l ? " · " + nomeTime(m.l === "h" ? p.h : p.a) : ""}${a ? " (" + resumoMeu(a) + ")" : ""}`;
+    }
     const nomeL = nomeTime(m.l === "h" ? p.h : p.a), o = nomeTime(m.l === "h" ? p.a : p.h);
     const t = m.tipo === "pressao" ? `${nomeL} pressionando forte` : m.tipo === "gol" ? `${nomeL} com pressão absurda: gol pode sair`
       : m.tipo === "fav" ? `${nomeL} (favorito) pressionando e ${o} sem chutar`
@@ -607,10 +742,10 @@
     return `${AV[m.tipo].ic} ${t}`;
   };
   function blocoAlerta(p, compacto) {
-    const a = alertaPressao(p);
-    avisarSom(p, a);
-    if (!a) return "";
-    return `<div class="alerta-pressao n${a.nivel} av-${a.tipo} ${a.l === "h" ? "c" : "f"}${compacto ? " mini" : ""}" role="status"><span class="alerta-ic" aria-hidden="true">${a.ic}</span><span>${a.txt}</span></div>`;
+    const lista = avisosAtivos(p);
+    avisarSom(p, lista[0] || null);
+    // no máximo 2 (o do site e um próprio, ou dois próprios)
+    return lista.slice(0, 2).map((a) => `<div class="alerta-pressao n${a.nivel} av-${a.tipo} ${a.l === "h" ? "c" : "f"}${compacto ? " mini" : ""}" role="status"><span class="alerta-ic" aria-hidden="true">${a.ic}</span><span>${a.txt}</span></div>`).join("");
   }
   // som do alerta (opcional, ligado no "Exibir"): toca quando o alerta aparece ou sobe de nível
   const nivelAvisado = {};
@@ -619,6 +754,9 @@
     const ch = String(p.i), nivel = a ? a.nivel : 0, antes = nivelAvisado[ch] || 0;
     nivelAvisado[ch] = nivel;
     if (!estado.prOpc.som || nivel <= antes) return;
+    tocarAviso(nivel);
+  }
+  function tocarAviso(nivel = 2) {
     try {
       audio = audio || new (window.AudioContext || window.webkitAudioContext)();
       const tocar = (t0, freq) => { const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = freq; o.type = "sine";
@@ -798,10 +936,10 @@
         <div class="pc-linha pc-chave"><span class="sub">5Dollar</span>${servidor5d() ? `<span class="sub">ligado para todos pelo servidor do ScanBall ✓</span>` : temChave5d()
           ? `<span class="sub">chave salva neste navegador ✓</span><button type="button" class="chip" data-chave5d="remover">Remover chave</button>`
           : `<input id="chave5d" type="password" autocomplete="off" placeholder="cole a chave da 5DollarFootballAPI" aria-label="Chave da 5DollarFootballAPI"><button type="button" class="chip" data-chave5d="salvar">Salvar</button><small class="sub">A chave fica só neste navegador; nunca vai para o site nem para o GitHub.</small>`}</div>
-        <div class="pc-linha"><span class="sub">Alerta</span><button type="button" class="chip" data-propc="som" aria-pressed="${!!opc.som}">🔔 Som quando um time pressionar forte</button></div>
+        <div class="pc-linha"><span class="sub">Alerta</span><button type="button" class="chip" data-propc="som" aria-pressed="${!!opc.som}">🔔 Som quando um aviso acender</button><a class="chip chip-link" href="#avisos">⚙ Escolher avisos, criar os seus e notificações</a></div>
         <p class="sub">"Só o minuto": cada barra mostra só o que aconteceu naquele minuto. "Tendência": cada barra carrega um pouco dos minutos anteriores. "Só o saldo": em cada minuto aparece só o time que dominou (barra = a diferença entre os dois); minuto equilibrado vira um tracinho cinza.</p>
       </div>` : "";
-    return `<div class="pressao">
+    return `<div class="pressao" data-jogo="${h(String(p.i))}">
       <div class="pressao-avisos">${blocoAlerta(p)}${avisoReserva(p)}</div>
       <div class="pressao-cab"><h3>Pressão</h3><span class="sub">${subPressao(p)}</span>
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
@@ -812,7 +950,7 @@
       ${blocoPressao5(p)}
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
       <div class="pressao-simb">${simb}</div>
-      <p class="pressao-info" aria-live="polite">${infoPressao ? h(infoPressao) : "Toque numa marca para ver o lance."}</p>
+      <p class="pressao-info" aria-live="polite">${infoPressao[p.i] ? h(infoPressao[p.i]) : "Toque numa marca para ver o lance."}</p>
       ${notaPressao(p)}
     </div>`;
   }
@@ -830,9 +968,10 @@
       return;
     }
     if (t.classList.contains("mk")) {
-      infoPressao = t.dataset.info || "";
-      const caixa = t.closest(".pressao").querySelector(".pressao-info");
-      if (caixa) caixa.textContent = infoPressao;
+      const caixaP = t.closest(".pressao"), jogo = caixaP && caixaP.dataset.jogo;
+      if (jogo) infoPressao[jogo] = t.dataset.info || "";
+      const caixa = caixaP && caixaP.querySelector(".pressao-info");
+      if (caixa) caixa.textContent = t.dataset.info || "";
       if (t.closest(".painel-vivo-card")) e.stopPropagation();
       return;
     }
@@ -1124,16 +1263,17 @@
     const todos = todasPartidas();
     const todosVivos = todos.filter((x) => aoVivo(x.p));
     // filtro pelos avisos (⚡ 🔥 ⭐ 📈); os jogos com aviso vêm primeiro
-    const avDe = new Map(todosVivos.map((x) => [x, alertaPressao(x.p)]));
-    const FILTROS_PV = [["todos", "Todos"], ["aviso", "Com aviso"], ["fav", "⭐ Favorito pressionando"], ["gol", "🔥 Gol próximo"], ["over", "📈 Jogo over"], ["pressao", "⚡ Pressão"]];
+    const avDe = new Map(todosVivos.map((x) => [x, avisosAtivos(x.p)]));
+    const FILTROS_PV = [["todos", "Todos"], ["aviso", "Com aviso"], ["fav", "⭐ Favorito pressionando"], ["gol", "🔥 Gol próximo"], ["over", "📈 Jogo over"], ["pressao", "⚡ Pressão"], ["meu", "🎯 Meus avisos"]]
+      .filter(([k]) => k === "todos" || k === "aviso" || (k === "meu" ? estado.cfgAv.meus.length : estado.cfgAv.mostrar[k] !== false));
     const filtro = FILTROS_PV.some((f) => f[0] === estado.pvFiltro) ? estado.pvFiltro : "todos";
-    const passaPv = (x, f) => { const a = avDe.get(x); return f === "todos" || (f === "aviso" ? !!a : !!a && a.tipo === f); };
+    const passaPv = (x, f) => { const l = avDe.get(x) || []; return f === "todos" || (f === "aviso" ? l.length > 0 : l.some((a) => a.tipo === f)); };
     const vivos = todosVivos.filter((x) => passaPv(x, filtro));
     const chipsPv = todosVivos.length ? `<div class="chips pv-filtros" role="group" aria-label="Filtrar pelos avisos">${FILTROS_PV.map(([k, rot]) => {
       const q = todosVivos.filter((x) => passaPv(x, k)).length;
       return `<button type="button" class="chip${q ? "" : " chip-zero"}" data-pvfiltro="${k}" aria-pressed="${filtro === k}">${rot} <small>${q}</small></button>`;
     }).join("")}</div>` : "";
-    const pesoAv = (x) => { const a = avDe.get(x); return a ? AV[a.tipo].prior : 0; };
+    const pesoAv = (x) => { const l = avDe.get(x) || []; return l.length ? Math.max(...l.map((a) => AV[a.tipo].prior)) : 0; };
     const pesoFav = (x) => (favoritos.has(chaveFav(x.code, x.p)) ? 4 : 0) + (favTimes.has(String(x.p.h)) || favTimes.has(String(x.p.a)) ? 2 : 0) + (favLigas.has(x.code) ? 1 : 0);
     vivos.sort((a, b) => pesoFav(b) - pesoFav(a) || pesoAv(b) - pesoAv(a) || comps.indexOf(a.code) - comps.indexOf(b.code) || (a.p.d < b.p.d ? -1 : 1));
     const agora = Date.now();
@@ -1161,7 +1301,7 @@
     const linhaFim = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">Fim</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} <b>${x.p.fh}×${x.p.fa}</b> ${h(nomeTime(x.p.a))}</button></li>`;
     pintarApp("aovivo", `<section class="painel-vivo">
       ${avisoFonte()}<div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${todosVivos.length ? `${todosVivos.length} ${todosVivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho` : ""}</span></div>
-      ${chipsPv}
+      ${chipsPv ? chipsPv.replace(/<\/div>$/, `<a class="chip chip-link" href="#avisos">⚙ Avisos e notificações</a></div>`) : ""}
       ${vivos.length ? `<div class="pv-grade">${vivos.map(card).join("")}</div>` : todosVivos.length ? `<div class="painel"><div class="vazio vazio-curto"><strong>Nenhum jogo com esse aviso agora</strong>Os jogos aparecem aqui sozinhos quando o aviso acender.</div></div>` : `<div class="painel"><div class="vazio"><strong>Nenhum jogo rolando agora</strong>Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas.</div></div>`}
       ${proximos.length || encerradosHoje.length ? `<div class="pv-listas">
         ${proximos.length ? `<div class="painel"><div class="painel-cab"><h3>Próximos jogos</h3></div><ul class="lista-simples pv-lista">${proximos.map(linhaProx).join("")}</ul></div>` : ""}
@@ -1262,13 +1402,6 @@
 
   // ---------- filtros da lista
   const FILTRO_VAZIO = { quem: "qualquer", chanceMin: 0, ov25Min: 0, bttsMin: 0, valor: false, minJogos: 0, condicoes: [] };
-  const PRESETS_LISTA = [
-    { nome: "Favorito em casa", quem: "casa", chanceMin: 55, ov25Min: 0, bttsMin: 0, valor: false, minJogos: 5,
-      condicoes: [{ suj: "hc", met: "vit", op: ">=", val: 60 }, { suj: "af", met: "der", op: ">=", val: 50 }] },
-    { nome: "Favorito forte", quem: "qualquer", chanceMin: 65, ov25Min: 0, bttsMin: 0, valor: false, minJogos: 3, condicoes: [] },
-    { nome: "Jogo de gols", quem: "qualquer", chanceMin: 0, ov25Min: 55, bttsMin: 0, valor: false, minJogos: 3, condicoes: [] },
-    { nome: "Ambas marcam", quem: "qualquer", chanceMin: 0, ov25Min: 0, bttsMin: 55, valor: false, minJogos: 3, condicoes: [] },
-  ];
   const copiaFiltro = (f) => JSON.parse(JSON.stringify(f));
   estado.filtro = Object.assign(copiaFiltro(FILTRO_VAZIO), ler("filtro_lista", {}));
   if (!Array.isArray(estado.filtro.condicoes)) estado.filtro.condicoes = [];
@@ -1280,18 +1413,7 @@
     if (!nFiltros(f)) return true;
     if (!p.h || !p.a) return false;
     const { foto, proj } = projecaoDo(code, p);
-    const chance = f.quem === "casa" ? proj.p1 : f.quem === "fora" ? proj.p2 : Math.max(proj.p1, proj.p2);
-    if (chance * 100 < f.chanceMin) return false;
-    if (proj.ov[2] * 100 < f.ov25Min) return false;
-    if (proj.btts * 100 < f.bttsMin) return false;
-    if (f.valor) {
-      const o = oddsDo(code, p);
-      if (!o) return false;
-      const ok = f.quem === "casa" ? temValor(o.c, proj.p1) : f.quem === "fora" ? temValor(o.f, proj.p2)
-        : temValor(o.c, proj.p1) || temValor(o.e, proj.px) || temValor(o.f, proj.p2);
-      if (!ok) return false;
-    }
-    return M.passa({ minJogos: f.minJogos, condicoes: f.condicoes }, foto, proj);
+    return passaFiltroCom(f, code, p, foto, proj);
   }
 
   function jogosVisiveis() {
@@ -1314,22 +1436,80 @@
     return l;
   }
 
+  // ---------- criador de filtros: chance/over/ambas nas faixas, condições como frase (um seletor só, agrupado)
+  // e o resultado do filtro nos jogos que já aconteceram, na hora
+  const UN = (suj, met) => { const l = suj === "pj" ? M.METRICAS_PROJ : suj === "cmp" ? M.METRICAS_CMP : M.METRICAS_TIME; const m = l.find((x) => x.id === met); return m ? m.un : ""; };
+  function opcoesCond(c) {
+    return M.SUJEITOS.map((s) => {
+      const mets = s.id === "pj" ? M.METRICAS_PROJ : s.id === "cmp" ? M.METRICAS_CMP : M.METRICAS_TIME;
+      return `<optgroup label="${h(s.nome)}">${mets.map((m) => `<option value="${s.id}|${m.id}" ${s.id === c.suj && m.id === c.met ? "selected" : ""}>${h(s.nome + " · " + m.nome)}</option>`).join("")}</optgroup>`;
+    }).join("");
+  }
+  const MERCADOS_TESTE = [{ id: "fav", nome: "Favorito vence" }].concat(M.MERCADOS.map((m) => ({ id: m.id, nome: m.nome })));
+  function mercadoPadrao(f) {
+    if (f.mercado) return f.mercado;
+    if (f.quem === "casa") return "casa";
+    if (f.quem === "fora") return "fora";
+    if (f.ov25Min > 0) return "ov25";
+    if (f.bttsMin > 0) return "btts";
+    return "fav";
+  }
+  // o filtro (sem as condições de dia/busca) num jogo encerrado, com os números de antes do jogo
+  function backtestLista() {
+    const f = estado.filtro, mid = mercadoPadrao(f), mer = M.MERCADOS.find((m) => m.id === mid);
+    let n = 0, g = 0, seq = 0, pior = 0, somaOdd = 0, nOdd = 0;
+    const ents = [];
+    for (const code of comps) {
+      const prep = preps[code];
+      for (const p of prep.partidas) {
+        if (!prep.fotos[p.i] || (mer && mer.ht && p.hh == null)) continue;
+        const { foto, proj } = projecaoDo(code, p); // (guardada: a mesma da lista)
+        if (!passaFiltroCom(f, code, p, foto, proj)) continue;
+        const ok = mid === "fav" ? (proj.p1 >= proj.p2 ? p.fh > p.fa : p.fa > p.fh) : mer.ok(p);
+        ents.push({ d: p.d, ok });
+        const o = oddsDo(code, p);
+        if (o && (mid === "casa" || mid === "fora" || mid === "fav")) { const odd = mid === "casa" ? o.c : mid === "fora" ? o.f : (proj.p1 >= proj.p2 ? o.c : o.f); if (odd) { somaOdd += odd; nOdd++; } }
+      }
+    }
+    ents.sort((a, b) => (a.d < b.d ? -1 : 1));
+    for (const e of ents) { n++; if (e.ok) { g++; seq = 0; } else { seq++; pior = Math.max(pior, seq); } }
+    return { n, g, taxa: n ? g / n : null, oddMin: g ? n / g : null, pior, oddMedia: nOdd ? somaOdd / nOdd : null, mid };
+  }
+  function passaFiltroCom(f, code, p, foto, proj) {
+    if (!p.h || !p.a) return false;
+    const chance = f.quem === "casa" ? proj.p1 : f.quem === "fora" ? proj.p2 : Math.max(proj.p1, proj.p2);
+    if (chance * 100 < f.chanceMin) return false;
+    if (proj.ov[2] * 100 < f.ov25Min) return false;
+    if (proj.btts * 100 < f.bttsMin) return false;
+    if (f.valor) {
+      const o = oddsDo(code, p);
+      if (!o) return false;
+      const ok = f.quem === "casa" ? temValor(o.c, proj.p1) : f.quem === "fora" ? temValor(o.f, proj.p2)
+        : temValor(o.c, proj.p1) || temValor(o.e, proj.px) || temValor(o.f, proj.p2);
+      if (!ok) return false;
+    }
+    return M.passa({ minJogos: f.minJogos, condicoes: f.condicoes }, foto, proj);
+  }
+  function resumoBacktest() {
+    if (!nFiltros(estado.filtro)) return `<span class="sub">Ajuste algum filtro para ver como ele foi nos jogos que já aconteceram.</span>`;
+    const r = backtestLista(), nomeM = (MERCADOS_TESTE.find((m) => m.id === r.mid) || {}).nome || r.mid;
+    if (!r.n) return `<span class="sub">Nenhum jogo do passado passou nesse filtro.</span>`;
+    return `<b>${fNum(r.taxa * 100, 0)}%</b> de acerto em <b>${r.n}</b> jogos (${h(nomeM)}) · odd mínima para empatar <b>${fNum(r.oddMin, 2)}</b>${r.oddMedia ? ` · odd média das casas ${fNum(r.oddMedia, 2)}` : ""} · pior sequência: ${r.pior} erro${r.pior === 1 ? "" : "s"}`;
+  }
   function painelFiltros() {
     const f = estado.filtro;
     const faixa = (id, rot, val) => `<div class="pf-campo"><label for="${id}">${rot}</label>
       <div class="faixa"><input type="range" id="${id}" min="0" max="90" step="5" value="${val}"><b id="${id}-v">${val ? "≥ " + val + "%" : "qualquer"}</b></div></div>`;
     const conds = f.condicoes.map((c, i) => {
-      const mets = c.suj === "pj" ? M.METRICAS_PROJ : c.suj === "cmp" ? M.METRICAS_CMP : M.METRICAS_TIME;
-      return `<div class="cond" data-i="${i}">
-        <select data-campo="suj" aria-label="Quem">${M.SUJEITOS.map((s) => `<option value="${s.id}" ${s.id === c.suj ? "selected" : ""}>${s.nome}</option>`).join("")}</select>
-        <select data-campo="met" aria-label="Estatística">${mets.map((m) => `<option value="${m.id}" ${m.id === c.met ? "selected" : ""}>${m.nome}</option>`).join("")}</select>
-        <div class="op-val">
-          <select data-campo="op" aria-label="Comparação"><option value=">=" ${c.op === ">=" ? "selected" : ""}>≥</option><option value="<=" ${c.op === "<=" ? "selected" : ""}>≤</option></select>
-          <input data-campo="val" type="number" step="any" value="${c.val}" aria-label="Valor">
-          <button class="remover" type="button" data-lremover="${i}" aria-label="Remover condição">✕</button>
-        </div></div>`;
+      const un = UN(c.suj, c.met);
+      return `<div class="cond cond-frase" data-i="${i}">
+        <select data-campo="sm" aria-label="Estatística">${opcoesCond(c)}</select>
+        <select data-campo="op" aria-label="Comparação"><option value=">=" ${c.op === ">=" ? "selected" : ""}>pelo menos</option><option value="<=" ${c.op === "<=" ? "selected" : ""}>no máximo</option></select>
+        <span class="cond-val"><input data-campo="val" type="number" step="any" inputmode="decimal" value="${c.val}" aria-label="Valor">${un ? `<span class="sub">${un}</span>` : ""}</span>
+        <button class="remover" type="button" data-lremover="${i}" aria-label="Remover condição">✕</button></div>`;
     }).join("");
     const salvos = ler("filtros_lista", []);
+    const mid = mercadoPadrao(f);
     return `<div class="painel-filtros">
       <div class="pf-grade">
         <div class="pf-campo"><span class="rotulo">Chance de vitória de</span>
@@ -1341,16 +1521,32 @@
         <div class="pf-campo"><label for="f-minj">Mínimo de jogos de cada time</label><input id="f-minj" type="number" min="0" value="${f.minJogos}" class="campo-num"></div>
         ${TEM_ODDS ? `<label class="check"><input type="checkbox" id="f-valor" ${f.valor ? "checked" : ""}> Só jogos com valor: odd média das casas acima da odd justa${f.quem !== "qualquer" ? " (no " + (f.quem === "casa" ? "mandante" : "visitante") + ")" : ""}</label>` : ""}
       </div>
-      <details class="pf-avancado" ${f.condicoes.length ? "open" : ""}><summary>Condições avançadas${f.condicoes.length ? ` (${f.condicoes.length})` : ""}</summary>
-        <p class="sub">Use as estatísticas dos times (casa, fora, geral) ou da projeção. Todas as condições precisam ser verdadeiras.</p>
-        ${conds}<button class="botao-q" type="button" id="l-add">Adicionar condição</button></details>
-      <div class="pf-acoes">
-        <span class="sub">Prontos:</span>${PRESETS_LISTA.map((p, i) => `<button class="chip" type="button" data-lpreset="${i}">${h(p.nome)}</button>`).join("")}
-        ${salvos.map((p, i) => `<span class="chip salvo-chip"><button type="button" data-lsalvo="${i}">${h(p.nome)}</button><button type="button" class="x" data-lapagar="${i}" aria-label="Apagar ${h(p.nome)}">✕</button></span>`).join("")}
-        <span class="pf-botoes"><button class="botao-q" type="button" id="l-salvar">Salvar filtro</button>
-        <button class="botao-q" type="button" id="l-limpar">Limpar filtros</button></span>
+      <div class="pf-conds">
+        <div class="pf-conds-cab"><b>Condições</b><span class="sub">estatísticas dos times (casa, fora, geral), da projeção ou a comparação entre eles · todas precisam valer</span></div>
+        ${conds}
+        <button class="botao-q" type="button" id="l-add">+ Adicionar condição</button>
       </div>
+      <div class="pf-teste">
+        <label class="pf-teste-merc">Testar no passado: <select id="f-mercado" aria-label="Mercado para testar">${MERCADOS_TESTE.map((m) => `<option value="${m.id}" ${m.id === mid ? "selected" : ""}>${h(m.nome)}</option>`).join("")}</select></label>
+        <div id="f-teste-res" aria-live="polite">${resumoBacktest()}</div>
+      </div>
+      <div class="pf-acoes">
+        ${salvos.length ? `<span class="sub">Meus filtros:</span>` : ""}
+        ${salvos.map((p, i) => estado.apagandoFiltro === i
+          ? `<span class="chip salvo-chip apagando">Apagar "${h(p.nome)}"? <button type="button" data-lapagar="${i}" data-sim="1">Sim</button><button type="button" data-lapagar="${i}" data-sim="0">Não</button></span>`
+          : `<span class="chip salvo-chip"><button type="button" data-lsalvo="${i}" aria-pressed="${f.nome === p.nome}">${h(p.nome)}</button><button type="button" class="x" data-lapagar="${i}" aria-label="Apagar ${h(p.nome)}">✕</button></span>`).join("")}
+        <span class="pf-botoes">
+          <input type="text" id="l-nome" class="campo-nome" placeholder="Nome do filtro" value="${h(f.nome || "")}" aria-label="Nome do filtro">
+          <button class="botao-q" type="button" id="l-salvar">Salvar filtro</button>
+          <button class="botao-q" type="button" id="l-limpar">Limpar</button></span>
+      </div>
+      <p class="sub pf-msg" id="l-msg" aria-live="polite"></p>
     </div>`;
+  }
+  let testeTimer = null;
+  function atualizarTeste() {
+    clearTimeout(testeTimer);
+    testeTimer = setTimeout(() => { const el = document.getElementById("f-teste-res"); if (el) el.innerHTML = resumoBacktest(); }, 250);
   }
 
   function iconeRecolher() {
@@ -1434,22 +1630,24 @@
       el.addEventListener("input", () => {
         estado.filtro[chave] = Number(el.value);
         document.getElementById(id + "-v").textContent = el.value > 0 ? "≥ " + el.value + "%" : "qualquer";
-        salvarFiltro(); atualizarBotaoFiltros(); renderListaJogos();
+        salvarFiltro(); atualizarBotaoFiltros(); renderListaJogos(); atualizarTeste();
       });
     };
     faixa("f-chance", "chanceMin"); faixa("f-ov25", "ov25Min"); faixa("f-btts", "bttsMin");
+    const merc = document.getElementById("f-mercado");
+    if (merc) merc.addEventListener("change", () => { estado.filtro.mercado = merc.value; salvarFiltro(); atualizarTeste(); });
     const mj = document.getElementById("f-minj");
-    if (mj) mj.addEventListener("input", () => { estado.filtro.minJogos = Number(mj.value) || 0; salvarFiltro(); atualizarBotaoFiltros(); renderListaJogos(); });
+    if (mj) mj.addEventListener("input", () => { estado.filtro.minJogos = Number(mj.value) || 0; salvarFiltro(); atualizarBotaoFiltros(); renderListaJogos(); atualizarTeste(); });
     const v = document.getElementById("f-valor");
-    if (v) v.addEventListener("change", () => { estado.filtro.valor = v.checked; salvarFiltro(); atualizarBotaoFiltros(); renderListaJogos(); });
+    if (v) v.addEventListener("change", () => { estado.filtro.valor = v.checked; salvarFiltro(); atualizarBotaoFiltros(); renderListaJogos(); atualizarTeste(); });
     pf.querySelectorAll(".cond").forEach((el) => {
       const c = estado.filtro.condicoes[Number(el.dataset.i)];
       el.querySelectorAll("[data-campo]").forEach((campo) => {
         campo.addEventListener(campo.tagName === "INPUT" ? "input" : "change", () => {
           const k = campo.dataset.campo;
+          if (k === "sm") { const [suj, met] = campo.value.split("|"); c.suj = suj; c.met = met; salvarFiltro(); redesenharPainel(); return; }
           c[k] = k === "val" ? Number(campo.value) : campo.value;
-          if (k === "suj") { c.met = (c.suj === "pj" ? M.METRICAS_PROJ : c.suj === "cmp" ? M.METRICAS_CMP : M.METRICAS_TIME)[0].id; salvarFiltro(); redesenharPainel(); return; }
-          salvarFiltro(); renderListaJogos();
+          salvarFiltro(); renderListaJogos(); atualizarTeste();
         });
       });
     });
@@ -2511,6 +2709,198 @@
   }
 
   // ------------------------------------------------------------ ARTILHARIA
+  // ------------------------------------------------------------ avisos e notificações
+  const DESCR_AV = {
+    pressao: "um time com ~68% da pressão por 5 min ou mais, sem gol no meio",
+    gol: "pressão muito alta e lances perigosos se acumulando",
+    fav: "favorito do pré-jogo sem vencer, dominando, e a zebra sem chutar",
+    over: "marcou e continua pressionando, jogo lá e cá, ou favorito perdendo e tomando contra-ataque",
+  };
+  const ACOES_NOTIF = [["gol", "Gol"], ["vermelho", "Cartão vermelho"], ["inicio", "Início do jogo"], ["intervalo", "Intervalo"], ["fim", "Fim do jogo"]];
+  const temNotificacao = () => typeof Notification !== "undefined";
+  function campoCond(c, ci, mid) {
+    const num = (k, min, max, larg) => `<input type="number" class="campo-num" inputmode="numeric" min="${min}" max="${max}" value="${h(String(c[k] ?? ""))}" data-condcampo="${k}" data-ci="${ci}" data-mid="${mid}" aria-label="${k}" style="width:${larg || 64}px">`;
+    const sel = (k, opts) => `<select data-condcampo="${k}" data-ci="${ci}" data-mid="${mid}" aria-label="${k}">${Object.entries(opts).map(([v, r]) => `<option value="${v}" ${String(c[k]) === v ? "selected" : ""}>${h(r)}</option>`).join("")}</select>`;
+    const L = (lista) => Object.fromEntries(lista.map((k) => [k, LADOS[k]]));
+    switch (c.t) {
+      case "min": return `entre ${num("de", 0, 130)}' e ${num("ate", 0, 130)}'`;
+      case "placar": return sel("v", PLACARES);
+      case "pressao": return `${sel("lado", L(["qq", "h", "a", "fav", "zebra"]))} com pelo menos ${num("pct", 50, 100)}% da pressão nos últimos ${num("n", 1, 45)} min`;
+      case "chutesGol": case "chutes": case "esc": case "perigo":
+        return `${sel("lado", L(["qq", "ambos", "total", "h", "a", "fav", "zebra"]))} com pelo menos ${num("k", 1, 30)} nos últimos ${num("n", 1, 45)} min`;
+      case "semChute": return `${sel("lado", L(["zebra", "fav", "h", "a", "qq", "ambos"]))} sem chutar nos últimos ${num("n", 1, 45)} min`;
+      case "ov25pre": return `chance de over 2,5 de pelo menos ${num("pct", 0, 100)}%`;
+      case "favPre": return `o jogo tem favorito com pelo menos ${num("pct", 50, 100)}% de chance`;
+      default: return "";
+    }
+  }
+  function telaAvisos() {
+    const cfg = estado.cfgAv;
+    const perm = temNotificacao() ? Notification.permission : "indisponivel";
+    const statusNotif = !temNotificacao() ? "Este navegador não mostra notificações."
+      : perm === "denied" ? "As notificações estão bloqueadas para este site. Libere no cadeado ao lado do endereço (Notificações → Permitir) e recarregue."
+      : cfg.notif.ativo && perm === "granted" ? "Ligadas neste aparelho." : "Desligadas neste aparelho.";
+    const tipos = ["fav", "gol", "over", "pressao"];
+    const meus = cfg.meus.map((a) => `<div class="meu-av" data-meu="${h(a.id)}">
+        <div class="meu-cab">
+          <span class="alerta-ic" aria-hidden="true">${AV.meu.ic}</span>
+          <input type="text" class="meu-nome" value="${h(a.nome || "")}" data-meucampo="nome" data-mid="${h(a.id)}" aria-label="Nome do aviso" placeholder="Nome do aviso">
+          <label class="check"><input type="checkbox" data-meucampo="ativo" data-mid="${h(a.id)}" ${a.ativo !== false ? "checked" : ""}> Ligado</label>
+          <label class="check"><input type="checkbox" data-meucampo="notificar" data-mid="${h(a.id)}" ${a.notificar !== false ? "checked" : ""}> Notificar</label>
+          ${estado.apagandoMeu === a.id
+            ? `<span class="meu-apagar">Apagar este aviso? <button type="button" class="botao-q" data-meuapagar="${h(a.id)}" data-sim="1">Sim</button><button type="button" class="botao-q" data-meuapagar="${h(a.id)}" data-sim="0">Não</button></span>`
+            : `<button type="button" class="botao-q" data-meuapagar="${h(a.id)}">Apagar</button>`}
+        </div>
+        <ol class="meu-conds">${a.conds.map((c, ci) => `<li><span class="meu-rot">${h(COND_TIPOS[c.t] ? COND_TIPOS[c.t].rot : c.t)}</span><span class="meu-campos">${campoCond(c, ci, a.id)}</span>
+          <button type="button" class="remover" data-condremover="${ci}" data-mid="${h(a.id)}" aria-label="Remover condição">✕</button></li>`).join("")}</ol>
+        <div class="meu-pe"><select data-condadd="${h(a.id)}" aria-label="Adicionar condição"><option value="">+ Adicionar condição</option>${Object.entries(COND_TIPOS).map(([k, t]) => `<option value="${k}">${h(t.rot)}</option>`).join("")}</select>
+          <span class="sub">${a.conds.length ? "Acende quando <b>todas</b> as condições valem no mesmo minuto." : "Adicione pelo menos uma condição."}</span></div>
+      </div>`).join("");
+    app.innerHTML = `<section class="painel tela-avisos"><div class="painel-cab"><h2>Avisos e notificações</h2><span class="sub">fica salvo neste navegador${window.Contas ? " (e na sua conta, se estiver logado)" : ""}</span></div><div class="painel-corpo">
+      <h3>Quais avisos aparecem</h3>
+      <p class="sub">Os desligados somem do gráfico, da lista de jogos e do painel Ao vivo.</p>
+      <div class="av-tipos">${tipos.map((k) => `<label class="av-tipo"><input type="checkbox" data-avmostrar="${k}" ${cfg.mostrar[k] !== false ? "checked" : ""}><span class="alerta-ic" aria-hidden="true">${AV[k].ic}</span><span><b>${AV[k].nome}</b><small>${DESCR_AV[k]}</small></span></label>`).join("")}</div>
+
+      <h3>Meus avisos</h3>
+      <p class="sub">Monte o seu: escolha as condições do jogo ao vivo. O aviso acende quando todas valem ao mesmo tempo, aparece no gráfico (${AV.meu.ic}) e pode virar notificação.</p>
+      ${meus || `<p class="sub vazio-curto">Nenhum aviso criado ainda.</p>`}
+      <button type="button" class="botao-q" data-meunovo>+ Criar aviso</button>
+
+      <h3>Notificações</h3>
+      <p class="sub">Chegam no PC e no celular enquanto o ScanBall estiver aberto, mesmo em segundo plano (minimizado ou em outra aba). Com o site na tela, aparecem num quadrinho no canto.</p>
+      <div class="notif-status"><span>${statusNotif}</span>
+        ${temNotificacao() && perm !== "denied" ? `<button type="button" class="botao-q ${cfg.notif.ativo && perm === "granted" ? "" : "botao-primario"}" data-notifativar>${cfg.notif.ativo && perm === "granted" ? "Desligar" : "Ligar notificações"}</button>` : ""}
+        <button type="button" class="botao-q" data-notiftestar>Testar</button></div>
+      <div class="notif-grade">
+        <div><h4>Avisar quando acender</h4>${tipos.concat(["meu"]).map((k) => `<label class="check"><input type="checkbox" data-notifaviso="${k}" ${cfg.notif.avisos[k] ? "checked" : ""}> ${AV[k].ic} ${k === "meu" ? "Meus avisos (os marcados com Notificar)" : AV[k].nome}</label>`).join("")}</div>
+        <div><h4>Ações do jogo</h4>${ACOES_NOTIF.map(([k, r]) => `<label class="check"><input type="checkbox" data-notifacao="${k}" ${cfg.notif.acoes[k] ? "checked" : ""}> ${r}</label>`).join("")}</div>
+        <div><h4>De quais jogos</h4>${[["todos", "Todos os jogos"], ["favoritos", "Só jogos, times e ligas favoritos"]].map(([k, r]) => `<label class="check"><input type="radio" name="notif-jogos" data-notifjogos="${k}" ${cfg.notif.jogos === k ? "checked" : ""}> ${r}</label>`).join("")}</div>
+      </div>
+      <p class="sub nota">Com o site em segundo plano o navegador desacelera as atualizações para economizar bateria; a notificação pode chegar até ~1 min depois. No celular, deixe o ScanBall aberto (instalado como app ou numa aba) — se o sistema fechar o app, as notificações param até você abrir de novo.</p>
+    </div></section>`;
+  }
+  function novoIdAviso() { return "a" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36); }
+  function achaMeu(id) { return estado.cfgAv.meus.find((a) => a.id === id); }
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest && e.target.closest("[data-meunovo], [data-meuapagar], [data-condremover], [data-notifativar], [data-notiftestar]");
+    if (!t) return;
+    const cfg = estado.cfgAv;
+    if (t.hasAttribute("data-meunovo")) {
+      cfg.meus.push({ id: novoIdAviso(), nome: "Meu aviso " + (cfg.meus.length + 1), ativo: true, notificar: true, conds: [Object.assign({ t: "min" }, COND_TIPOS.min.nova)] });
+      salvarCfgAv(); telaAvisos(); return;
+    }
+    if (t.dataset.meuapagar) {
+      const id = t.dataset.meuapagar;
+      if (t.dataset.sim === "1") { cfg.meus = cfg.meus.filter((a) => a.id !== id); estado.apagandoMeu = null; salvarCfgAv(); }
+      else estado.apagandoMeu = t.dataset.sim === "0" ? null : id;
+      telaAvisos(); return;
+    }
+    if (t.dataset.condremover != null) { const a = achaMeu(t.dataset.mid); if (a) { a.conds.splice(Number(t.dataset.condremover), 1); salvarCfgAv(); telaAvisos(); } return; }
+    if (t.hasAttribute("data-notifativar")) {
+      if (cfg.notif.ativo && temNotificacao() && Notification.permission === "granted") { cfg.notif.ativo = false; salvarCfgAv(); telaAvisos(); return; }
+      if (!temNotificacao()) return;
+      Notification.requestPermission().then((r) => { cfg.notif.ativo = r === "granted"; salvarCfgAv(); telaAvisos(); });
+      return;
+    }
+    if (t.hasAttribute("data-notiftestar")) {
+      notificar({ chave: "teste:" + Date.now(), titulo: "ScanBall · teste", corpo: "É assim que os avisos chegam. ⚡🔥⭐📈", url: "#avisos" }, true);
+      return;
+    }
+  });
+  document.addEventListener("change", (e) => {
+    const t = e.target;
+    if (!t || !t.dataset) return;
+    const cfg = estado.cfgAv, ds = t.dataset;
+    if (ds.avmostrar) { cfg.mostrar[ds.avmostrar] = t.checked; salvarCfgAv(); return; }
+    if (ds.notifaviso) { cfg.notif.avisos[ds.notifaviso] = t.checked; salvarCfgAv(); return; }
+    if (ds.notifacao) { cfg.notif.acoes[ds.notifacao] = t.checked; salvarCfgAv(); return; }
+    if (ds.notifjogos) { cfg.notif.jogos = ds.notifjogos; salvarCfgAv(); return; }
+    if (ds.meucampo) { const a = achaMeu(ds.mid); if (!a) return; a[ds.meucampo] = t.type === "checkbox" ? t.checked : t.value.trim(); salvarCfgAv(); return; }
+    if (ds.condcampo) {
+      const a = achaMeu(ds.mid), c = a && a.conds[Number(ds.ci)];
+      if (!c) return;
+      c[ds.condcampo] = t.type === "number" ? Number(t.value) : t.value;
+      salvarCfgAv(); return;
+    }
+    if (ds.condadd) {
+      const a = achaMeu(ds.condadd), tipo = t.value;
+      if (a && COND_TIPOS[tipo]) { a.conds.push(Object.assign({ t: tipo }, COND_TIPOS[tipo].nova)); salvarCfgAv(); telaAvisos(); }
+    }
+  });
+
+  // ---------- notificações: avisos e ações dos jogos ao vivo (sem repetir; a 1ª vez que o site vê um jogo só
+  // anota como ele está, para não disparar tudo o que já aconteceu)
+  const notifBase = new Map();
+  const textoPuro = (html) => { const d = document.createElement("div"); d.innerHTML = html; return d.textContent || ""; };
+  const notifVistos = (() => { const o = ler("notif_vistos", {}) || {}, lim = Date.now() - 36 * 3600e3; for (const k in o) if (o[k] < lim) delete o[k]; return o; })();
+  let toastsEl = null;
+  function toast(n) {
+    if (!toastsEl) { toastsEl = document.createElement("div"); toastsEl.className = "toasts"; toastsEl.setAttribute("aria-live", "polite"); document.body.appendChild(toastsEl); }
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "toast";
+    b.innerHTML = `<b>${h(n.titulo)}</b><span>${h(n.corpo)}</span>`;
+    b.addEventListener("click", () => { if (n.url) location.hash = n.url.replace(/^#/, ""); b.remove(); });
+    toastsEl.appendChild(b);
+    while (toastsEl.children.length > 4) toastsEl.firstChild.remove();
+    setTimeout(() => b.remove(), 9000);
+  }
+  function notificar(n, forcar) {
+    if (!forcar) {
+      if (notifVistos[n.chave]) return;
+      notifVistos[n.chave] = Date.now(); guardar("notif_vistos", notifVistos);
+    }
+    const visivel = document.visibilityState === "visible";
+    const podeSistema = temNotificacao() && Notification.permission === "granted" && (estado.cfgAv.notif.ativo || forcar);
+    if (visivel || !podeSistema) { toast(n); if (estado.prOpc.som) tocarAviso(); return; }
+    const op = { body: n.corpo, tag: n.chave, icon: "icone-192.png", badge: "icone-192.png", data: { url: location.pathname + n.url } };
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then((r) => r.showNotification(n.titulo, op)).catch(() => new Notification(n.titulo, op));
+      else new Notification(n.titulo, op);
+    } catch (e) {}
+  }
+  function verificarNotificacoes() {
+    const cfg = estado.cfgAv.notif;
+    if (!cfg.ativo) return;
+    const agora = Date.now();
+    for (const x of todasPartidas()) {
+      const p = x.p;
+      const recente = aoVivo(p) || (encerrada(p) && p.vv && agora - Date.parse(p.d) < 4 * 3600e3) || (p.vv && p.vv.st === "in");
+      if (!recente) continue;
+      if (cfg.jogos === "favoritos" && !(favoritos.has(chaveFav(x.code, p)) || favTimes.has(String(p.h)) || favTimes.has(String(p.a)) || favLigas.has(x.code))) continue;
+      const jogo = `${nomeTime(p.h)} ${p.fh ?? 0}×${p.fa ?? 0} ${nomeTime(p.a)}`, url = `#jogo/${x.code}/${p.i}`, min = p.vv && p.vv.min ? ` · ${p.vv.min}` : "";
+      const pr = p.vv && p.vv.pr;
+      const verm = { h: 0, a: 0 };
+      if (pr) for (const e of pr.ev) if (e.k === "vermelho" || e.k === "2amarelo") verm[e.l] = (verm[e.l] || 0) + 1;
+      const atual = { s: p.s, fh: p.fh ?? 0, fa: p.fa ?? 0, vh: verm.h, va: verm.a };
+      const base = notifBase.get(p.i);
+      notifBase.set(p.i, atual);
+      if (!base) { // 1ª vez: só anota (inclusive os avisos já acesos), para não disparar tudo o que já aconteceu
+        for (const a of avisosAtivos(p)) { const k = `${p.i}:${a.tipo}:${a.id || ""}:${a.ini}`; if (!notifVistos[k]) notifVistos[k] = Date.now(); }
+        continue;
+      }
+      const A = cfg.acoes;
+      if (A.gol && (atual.fh > base.fh || atual.fa > base.fa)) {
+        const quem = atual.fh > base.fh ? p.h : p.a;
+        notificar({ chave: `${p.i}:gol:${atual.fh}-${atual.fa}`, titulo: `⚽ Gol do ${nomeTime(quem)}!`, corpo: jogo + min, url });
+      }
+      if (A.vermelho && (atual.vh > base.vh || atual.va > base.va)) {
+        const quem = atual.vh > base.vh ? p.h : p.a;
+        notificar({ chave: `${p.i}:verm:${atual.vh}-${atual.va}`, titulo: `🟥 Cartão vermelho para o ${nomeTime(quem)}`, corpo: jogo + min, url });
+      }
+      const rolando = (s) => s === "IN_PLAY" || s === "PAUSED" || s === "LIVE";
+      if (A.inicio && atual.s === "IN_PLAY" && !rolando(base.s) && base.s !== "FINISHED") notificar({ chave: `${p.i}:ini`, titulo: "▶ Começou", corpo: `${nomeTime(p.h)} × ${nomeTime(p.a)}`, url });
+      if (A.intervalo && atual.s === "PAUSED" && base.s === "IN_PLAY") notificar({ chave: `${p.i}:int`, titulo: "⏸ Intervalo", corpo: jogo, url });
+      if (A.fim && atual.s === "FINISHED" && rolando(base.s)) notificar({ chave: `${p.i}:fim`, titulo: "🏁 Fim de jogo", corpo: jogo, url });
+      for (const a of avisosAtivos(p)) {
+        if (a.tipo === "meu" ? !(cfg.avisos.meu && (achaMeu(a.id) || {}).notificar !== false) : !cfg.avisos[a.tipo]) continue;
+        const nomeAv = a.tipo === "meu" ? (achaMeu(a.id) || {}).nome || "Meu aviso" : AV[a.tipo].nome;
+        const corpo = textoPuro(a.txt.replace(/<br>.*$/, ""));
+        notificar({ chave: `${p.i}:${a.tipo}:${a.id || ""}:${a.ini}`, titulo: `${a.ic} ${nomeAv} · ${nomeTime(p.h)} × ${nomeTime(p.a)}${min}`, corpo, url });
+      }
+    }
+  }
+  setInterval(() => { try { verificarNotificacoes(); } catch (e) {} }, 20000);
+
   // como a chance de vitória é calculada + teste do modelo novo contra o antigo nos jogos que já aconteceram
   function telaModelo() {
     const r = M.compararModelos(comps.map((c) => preps[c]));
@@ -2533,14 +2923,14 @@
       <p>No início da temporada os números são puxados para a média da liga, para poucos jogos não exagerarem. Há também um ajuste para os placares baixos (0x0, 1x0, 0x1, 1x1), que deixa a chance de empate mais realista.</p>
       <p class="sub">A chance não usa as odds das casas: assim ela continua servindo para comparar com elas (o "valor" da coluna de odds).</p></div></section>
       <section class="painel"><div class="painel-cab"><h3>Teste nos jogos que já aconteceram</h3><span class="sub">${r.n} jogos · cada um com os números que os times tinham antes dele</span></div><div class="painel-corpo">
-      ${r.n ? `<table class="dados"><thead><tr><th class="esq"></th><th>Modelo antigo</th><th>Modelo novo</th></tr></thead><tbody>
+      ${r.n ? `<div style="overflow-x:auto"><table class="dados tabela-modelo"><thead><tr><th class="esq"></th><th>Modelo antigo</th><th>Modelo novo</th></tr></thead><tbody>
         ${linha("Acerto do resultado mais provável", (o) => pc(o.ac), false)}
         ${linha("Log-loss", (o) => n3(o.ll), true, "erro das chances: menor é melhor")}
         ${linha("Brier", (o) => n3(o.br), true, "outra medida de erro: menor é melhor")}
         ${linha("Favoritos que venceram", (o) => `${pc(o.favTaxa)} <small class="sub">(${o.favOk}/${o.fav}, previsto ${pc(o.favP)})</small>`, false, "favorito = 55% ou mais e 20 pontos acima do outro")}
-      </tbody></table>
+      </tbody></table></div>
       <h4 class="sub" style="margin:14px 0 6px">Modelo novo: chance prevista × o que aconteceu</h4>
-      <table class="dados"><thead><tr><th class="esq">Chance do favorito</th><th>Jogos</th><th>Previsto</th><th>Venceu</th></tr></thead><tbody>${faixas(r.v2)}</tbody></table>
+      <div style="overflow-x:auto"><table class="dados"><thead><tr><th class="esq">Chance do favorito</th><th>Jogos</th><th>Previsto</th><th>Venceu</th></tr></thead><tbody>${faixas(r.v2)}</tbody></table></div>
       <p class="sub nota">Se "Previsto" e "Venceu" ficam perto, a chance está bem calibrada.</p>` : `<p class="sub">Ainda não há jogos suficientes.</p>`}
       </div></section>`;
   }
@@ -2707,7 +3097,7 @@
 
   // ------------------------------------------------------------ eventos
   app.addEventListener("click", (ev) => {
-    const alvo = ev.target.closest("[data-tempo],#abrir-filtros,[data-fquem],#l-add,[data-lremover],[data-lpreset],[data-lsalvo],[data-lapagar],#l-salvar,#l-limpar,[data-rkordem],[data-rkn],[data-rkfiltro],[data-favtime],[data-favliga],[data-subclass],[data-fav],[data-ir],[data-dia],[data-passo],[data-recolher],[data-ultimos],[data-recorte],[data-abajogo],[data-voltar],#ocultar,#so-fav,#recolher,[data-tabela],[data-fcomp],[data-remover],[data-preset],[data-salvo],[data-apagar],#f-add,#f-rodar,#f-salvar");
+    const alvo = ev.target.closest("[data-tempo],#abrir-filtros,[data-fquem],#l-add,[data-lremover],[data-lsalvo],[data-lapagar],#l-salvar,#l-limpar,[data-rkordem],[data-rkn],[data-rkfiltro],[data-favtime],[data-favliga],[data-subclass],[data-fav],[data-ir],[data-dia],[data-passo],[data-recolher],[data-ultimos],[data-recorte],[data-abajogo],[data-voltar],#ocultar,#so-fav,#recolher,[data-tabela],[data-fcomp],[data-remover],[data-preset],[data-salvo],[data-apagar],#f-add,#f-rodar,#f-salvar");
     if (!alvo) return;
     const ds = alvo.dataset;
     const manterRolagem = (fn) => { const y = window.scrollY; fn(); window.scrollTo(0, y); };
@@ -2729,19 +3119,20 @@
       return;
     }
     if (ds.fquem) { estado.filtro.quem = ds.fquem; salvarFiltro(); redesenharPainel(); return; }
-    if (alvo.id === "l-add") { estado.filtro.condicoes.push({ suj: "hc", met: "vit", op: ">=", val: 50 }); salvarFiltro(); redesenharPainel(); return; }
+    if (alvo.id === "l-add") { estado.filtro.condicoes.push({ suj: "pj", met: "p1", op: ">=", val: 55 }); salvarFiltro(); redesenharPainel(); return; }
     if (ds.lremover != null) { estado.filtro.condicoes.splice(Number(ds.lremover), 1); salvarFiltro(); redesenharPainel(); return; }
-    if (ds.lpreset != null) { estado.filtro = Object.assign(copiaFiltro(FILTRO_VAZIO), copiaFiltro(PRESETS_LISTA[Number(ds.lpreset)])); salvarFiltro(); redesenharPainel(); return; }
     if (ds.lsalvo != null) { const l = ler("filtros_lista", []); estado.filtro = Object.assign(copiaFiltro(FILTRO_VAZIO), copiaFiltro(l[Number(ds.lsalvo)])); salvarFiltro(); redesenharPainel(); return; }
     if (ds.lapagar != null) {
-      const l = ler("filtros_lista", []); const nome = (l[Number(ds.lapagar)] || {}).nome;
-      if (confirm(`Apagar o filtro "${nome}"?`)) { l.splice(Number(ds.lapagar), 1); guardar("filtros_lista", l); redesenharPainel(); }
-      return;
+      const i = Number(ds.lapagar);
+      if (ds.sim === "1") { const l = ler("filtros_lista", []); l.splice(i, 1); guardar("filtros_lista", l); estado.apagandoFiltro = null; }
+      else estado.apagandoFiltro = ds.sim === "0" ? null : i;
+      redesenharPainel(); return;
     }
     if (alvo.id === "l-salvar") {
-      if (!nFiltros(estado.filtro)) { alert("Ajuste algum filtro antes de salvar."); return; }
-      const nome = (prompt("Nome do filtro:", estado.filtro.nome || "") || "").trim();
-      if (!nome) return;
+      const msg = (t) => { const el = document.getElementById("l-msg"); if (el) el.textContent = t; };
+      if (!nFiltros(estado.filtro)) { msg("Ajuste algum filtro antes de salvar."); return; }
+      const nome = ((document.getElementById("l-nome") || {}).value || "").trim();
+      if (!nome) { msg("Dê um nome ao filtro."); const el = document.getElementById("l-nome"); if (el) el.focus(); return; }
       const l = ler("filtros_lista", []);
       const novo = Object.assign(copiaFiltro(estado.filtro), { nome });
       const i = l.findIndex((x) => x.nome === nome);
@@ -2831,6 +3222,51 @@
   function ir(rota) {
     if (location.hash === "#" + rota) render(); else location.hash = rota;
   }
+  // ---------- barras que rolam de lado (abas do jogo, chips, dias): em monitor pequeno, a roda do mouse e o
+  // arrasto com o mouse rolam a barra (a barra de rolagem fica escondida)
+  const ROLA_X = ".abas-jogo, .abas, .chips, .dias, .est-per, .pv-filtros";
+  const rolavel = (el) => el && el.scrollWidth > el.clientWidth + 2;
+  document.addEventListener("wheel", (e) => {
+    const el = e.target.closest && e.target.closest(ROLA_X);
+    if (!rolavel(el) || e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const max = el.scrollWidth - el.clientWidth;
+    if ((e.deltaY < 0 && el.scrollLeft <= 0) || (e.deltaY > 0 && el.scrollLeft >= max - 1)) return; // na ponta: deixa a página rolar
+    el.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+  let arrasto = null;
+  document.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    const el = e.target.closest && e.target.closest(ROLA_X);
+    if (rolavel(el)) arrasto = { el, x: e.clientX, ini: el.scrollLeft, moveu: false };
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!arrasto) return;
+    const dx = e.clientX - arrasto.x;
+    if (!arrasto.moveu && Math.abs(dx) < 6) return;
+    arrasto.moveu = true;
+    arrasto.el.scrollLeft = arrasto.ini - dx;
+    arrasto.el.classList.add("arrastando");
+  });
+  document.addEventListener("pointerup", () => {
+    if (!arrasto) return;
+    const a = arrasto; arrasto = null;
+    a.el.classList.remove("arrastando");
+    // arrastou: o clique que vem junto com o soltar não vale
+    if (a.moveu) {
+      const bloq = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      document.addEventListener("click", bloq, { capture: true, once: true });
+      setTimeout(() => document.removeEventListener("click", bloq, { capture: true }), 60);
+    }
+  });
+  function abaAtivaAVista() {
+    const nav = document.querySelector(".abas-jogo");
+    const at = nav && nav.querySelector('[aria-current="true"]');
+    if (!at || !rolavel(nav)) return;
+    const r = at.getBoundingClientRect(), n = nav.getBoundingClientRect();
+    if (r.left < n.left || r.right > n.right) nav.scrollLeft += r.left < n.left ? r.left - n.left - 24 : r.right - n.right + 24;
+  }
+
   let ultimaAba = null;
   function render() {
     const partes = decodeURIComponent(location.hash.slice(1)).split("/");
@@ -2855,10 +3291,12 @@
       case "ranking": telaRanking(partes[1]); break;
       case "artilharia": telaArtilharia(partes[1]); break;
       case "modelo": telaModelo(); break;
+      case "avisos": telaAvisos(); break;
       case "filtros": estado.painelFiltro = true; telaJogos(); break; // backtest desligado por enquanto
       default: telaJogos();
     }
     contadorVivo();
+    requestAnimationFrame(abaAtivaAVista);
     const chave = aba + "/" + (partes[1] || "") + "/" + (partes[2] || "");
     const noPainel = aba === "jogo" && estado.sel;
     if (ultimaAba !== chave && !noPainel && !(aba === "jogos" && /^jogo\//.test(ultimaAba || "") && ladoALado())) window.scrollTo(0, 0);
@@ -2887,6 +3325,8 @@
     estado.rkOrdem = ler("rk_ordem", estado.rkOrdem);
     estado.rkN = ler("rk_n", estado.rkN);
     const c = ler("comp", ""); if (comps.includes(c)) estado.comp = c;
+    estado.cfgAv = lerCfgAv(); cfgAvVer++;
+    estado.pvFiltro = ler("pv_filtro", estado.pvFiltro);
     const t = ler("tema", null); if (t) document.documentElement.dataset.tema = t;
     render();
   }
@@ -2912,6 +3352,8 @@
     const y = window.scrollY;
     const aba = decodeURIComponent(location.hash.slice(1)).split("/")[0] || "jogos";
     // na lista de jogos só a lista e o painel ao lado mudam: a barra de ferramentas (busca, filtros, data) fica como está
+    verificarNotificacoes();
+    if (aba === "avisos") { contadorVivo(); return; } // página de configuração: não redesenha enquanto a pessoa edita
     if (aba === "jogos" && !MODO_JANELA && document.getElementById("lista-jogos-corpo")) { renderListaJogos(); contadorVivo(); }
     else render();
     if (rol.length) {
