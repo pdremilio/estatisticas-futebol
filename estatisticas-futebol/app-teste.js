@@ -312,7 +312,7 @@
   // a barra do minuto atual vai crescendo conforme os lances chegam; minuto sem lance fica sem barra
   const TIPOS_MARCA = [
     ["gol", "Gols"], ["alvo", "Chutes no gol"], ["fora", "Chutes para fora"], ["bloq", "Chutes bloqueados"],
-    ["trave", "Bola na trave"], ["esc", "Escanteios"], ["cartao", "Cartões"], ["sub", "Substituições"], ["aviso", "Avisos ⚡🔥⭐📈"],
+    ["trave", "Bola na trave"], ["esc", "Escanteios"], ["cartao", "Cartões"], ["sub", "Substituições"], ["aviso", "Ícones dos avisos"],
   ];
   const NOME_MARCA = { gol: "gol", alvo: "chute no gol", fora: "chute para fora", bloq: "chute bloqueado", trave: "bola na trave",
     esc: "escanteio", amarelo: "cartão amarelo", vermelho: "cartão vermelho", "2amarelo": "2º amarelo (expulso)", sub: "substituição" };
@@ -459,11 +459,19 @@
         acoes: Object.assign({}, CFG_AV_PADRAO.notif.acoes, (c.notif || {}).acoes || {}),
       }),
       meus: Array.isArray(c.meus) ? c.meus : [],
+      icones: c.icones && typeof c.icones === "object" ? c.icones : {},
     };
   }
+  // ícones dos avisos: o usuário pode trocar (base de emojis abaixo ou qualquer um colado)
+  const IC_PADRAO = { pressao: "⚡", gol: "🔥", fav: "⭐", over: "📈", meu: "🎯" };
+  const EMOJIS_BASE = ["⚡", "🔥", "⭐", "📈", "🎯", "🚨", "💣", "💥", "⚠️", "❗", "🔔", "📣", "🔊", "👀", "🧨", "🌪️", "🌊", "🚀",
+    "⚽", "🥅", "🧤", "🏆", "👑", "💰", "💎", "🍀", "🎲", "📊", "📉", "⏰", "⏱️", "🔴", "🟠", "🟡", "🟢", "🔵", "🟣", "⚫",
+    "🦁", "🐺", "🐯", "🦅", "🦈", "🐍", "✅", "❌", "➕", "🔝", "🆙", "💯", "🎉", "😱", "🤑", "🧠"];
+  const icAv = (tipo, a) => (tipo === "meu" ? (a && a.ic) || (estado.cfgAv.icones || {}).meu || IC_PADRAO.meu : (estado.cfgAv.icones || {})[tipo] || IC_PADRAO[tipo]);
+  function aplicarIcones() { for (const k in IC_PADRAO) AV[k].ic = icAv(k); }
   estado.cfgAv = lerCfgAv();
   let cfgAvVer = 1;
-  const salvarCfgAv = () => { guardar("avisos_cfg", estado.cfgAv); cfgAvVer++; };
+  const salvarCfgAv = () => { guardar("avisos_cfg", estado.cfgAv); aplicarIcones(); cfgAvVer++; };
   // avisos próprios: cada um é uma lista de condições; todas precisam valer no mesmo minuto
   const LADOS = { qq: "um dos times", ambos: "os dois times", total: "os dois somados", h: "o mandante", a: "o visitante", fav: "o favorito", zebra: "a zebra" };
   const COND_TIPOS = {
@@ -506,6 +514,7 @@
     if (ps >= 0.25) return `${nomeTime(l === "h" ? p.a : p.h)} sofre ${Math.round(ps * 100)}% dos gols entre ${FAIXAS_MIN[per]}`;
     return "";
   }
+  aplicarIcones();
   const memoAv = new WeakMap();
   function avisosDoJogo(p) {
     const vv = p.vv, pr = vv && vv.pr;
@@ -618,7 +627,7 @@
             if (!e) {
               mm.st = { ini: i, l: r.l, falhas: 0 };
               const ult = marcas.filter((x) => x.tipo === "meu" && x.id === mm.a.id).pop();
-              if (!(ult && i - ult.fim <= 3)) marcas.push({ i, tipo: "meu", id: mm.a.id, nome: mm.a.nome, l: r.l, fim: i });
+              if (!(ult && i - ult.fim <= 3)) marcas.push({ i, tipo: "meu", id: mm.a.id, nome: mm.a.nome, ic: icAv("meu", mm.a), l: r.l, fim: i });
             } else { e.falhas = 0; e.l = r.l; }
             const ult = marcas.filter((x) => x.tipo === "meu" && x.id === mm.a.id).pop(); if (ult) ult.fim = i;
           } else if (e && ++e.falhas >= 2) mm.st = null;
@@ -656,7 +665,7 @@
     const ativos = atualAv ? [atualAv] : [];
     if (vivo) for (const mm of meus) if (mm.st) {
       const l = mm.st.l;
-      ativos.push({ tipo: "meu", id: mm.a.id, ini: mm.st.ini, nivel: AV.meu.nivel, ic: AV.meu.ic, l: l || "h", tid: l === "a" ? p.a : p.h,
+      ativos.push({ tipo: "meu", id: mm.a.id, ini: mm.st.ini, nivel: AV.meu.nivel, ic: icAv("meu", mm.a), l: l || "h", tid: l === "a" ? p.a : p.h,
         txt: `<b>${h(mm.a.nome || "Meu aviso")}</b>${l ? ` · ${nome(l)}` : ""} · ${h(resumoMeu(mm.a))}` });
     }
     return { atual: atualAv, ativos, marcas };
@@ -733,7 +742,7 @@
   const textoMarcaAviso = (p, m) => {
     if (m.tipo === "meu") {
       const a = estado.cfgAv.meus.find((x) => x.id === m.id);
-      return `${AV.meu.ic} ${m.nome || "Meu aviso"}${m.l ? " · " + nomeTime(m.l === "h" ? p.h : p.a) : ""}${a ? " (" + resumoMeu(a) + ")" : ""}`;
+      return `${icAv("meu", a)} ${m.nome || "Meu aviso"}${m.l ? " · " + nomeTime(m.l === "h" ? p.h : p.a) : ""}${a ? " (" + resumoMeu(a) + ")" : ""}`;
     }
     const nomeL = nomeTime(m.l === "h" ? p.h : p.a), o = nomeTime(m.l === "h" ? p.a : p.h);
     const t = m.tipo === "pressao" ? `${nomeL} pressionando forte` : m.tipo === "gol" ? `${nomeL} com pressão absurda: gol pode sair`
@@ -902,7 +911,7 @@
       juntos.push({ i: m.i, m, info });
     }
     const marcasAv = juntos.map(({ i, m, info }) =>
-      `<button type="button" class="mk mk-aviso av-${m.tipo} ${m.l === "h" ? "mk-c" : "mk-f"}" style="left:${(((i + 0.5) / n) * 100).toFixed(2)}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${AV[m.tipo].ic}</button>`).join("");
+      `<button type="button" class="mk mk-aviso av-${m.tipo} ${m.l === "h" ? "mk-c" : "mk-f"}" style="left:${(((i + 0.5) / n) * 100).toFixed(2)}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${m.ic || AV[m.tipo].ic}</button>`).join("");
 
     // eixo de 5 em 5 minutos
     let eixo = `<span style="left:0">0</span>`;
@@ -925,7 +934,7 @@
       const ex = k === "cartao" ? '<i class="mk-ex mk-amarelo"></i><i class="mk-ex mk-vermelho"></i>' : `<i class="mk-ex mk-${k}">${iconeMarca(k)}</i>`;
       return `<span>${ex}${{ gol: "gol", alvo: "no gol", fora: "para fora", bloq: "bloqueado", trave: "trave", cartao: "cartões", sub: "substituição" }[k]}</span>`;
     }).join("") + (opc.esc ? `<span><i class="mk-ex mk-esc"></i>escanteio</span>` : "")
-      + (opc.aviso && marcasAv ? `<span title="⚡ pressão · 🔥 gol próximo · ⭐ favorito pressionando · 📈 jogo over">⚡🔥⭐📈 avisos</span>` : "");
+      + (opc.aviso && marcasAv ? `<span title="${AV.pressao.ic} pressão · ${AV.gol.ic} gol próximo · ${AV.fav.ic} favorito pressionando · ${AV.over.ic} jogo over">${AV.pressao.ic}${AV.gol.ic}${AV.fav.ic}${AV.over.ic} avisos</span>` : "");
     const config = estado.prConfig ? `<div class="pressao-config" role="group" aria-label="O que aparece no gráfico">
         <div class="pc-linha"><span class="sub">Mostrar</span>${TIPOS_MARCA.map(([k, rot]) => `<button type="button" class="chip" data-propc="${k}" aria-pressed="${!!opc[k]}">${rot}</button>`).join("")}</div>
         <div class="pc-linha"><span class="sub">Barras</span>
@@ -1264,7 +1273,7 @@
     const todosVivos = todos.filter((x) => aoVivo(x.p));
     // filtro pelos avisos (⚡ 🔥 ⭐ 📈); os jogos com aviso vêm primeiro
     const avDe = new Map(todosVivos.map((x) => [x, avisosAtivos(x.p)]));
-    const FILTROS_PV = [["todos", "Todos"], ["aviso", "Com aviso"], ["fav", "⭐ Favorito pressionando"], ["gol", "🔥 Gol próximo"], ["over", "📈 Jogo over"], ["pressao", "⚡ Pressão"], ["meu", "🎯 Meus avisos"]]
+    const FILTROS_PV = [["todos", "Todos"], ["aviso", "Com aviso"], ["fav", `${AV.fav.ic} Favorito pressionando`], ["gol", `${AV.gol.ic} Gol próximo`], ["over", `${AV.over.ic} Jogo over`], ["pressao", `${AV.pressao.ic} Pressão`], ["meu", `${AV.meu.ic} Meus avisos`]]
       .filter(([k]) => k === "todos" || k === "aviso" || (k === "meu" ? estado.cfgAv.meus.length : estado.cfgAv.mostrar[k] !== false));
     const filtro = FILTROS_PV.some((f) => f[0] === estado.pvFiltro) ? estado.pvFiltro : "todos";
     const passaPv = (x, f) => { const l = avDe.get(x) || []; return f === "todos" || (f === "aviso" ? l.length > 0 : l.some((a) => a.tipo === f)); };
@@ -1307,7 +1316,7 @@
         ${proximos.length ? `<div class="painel"><div class="painel-cab"><h3>Próximos jogos</h3></div><ul class="lista-simples pv-lista">${proximos.map(linhaProx).join("")}</ul></div>` : ""}
         ${encerradosHoje.length ? `<div class="painel"><div class="painel-cab"><h3>Terminaram há pouco</h3></div><ul class="lista-simples pv-lista">${encerradosHoje.map(linhaFim).join("")}</ul></div>` : ""}
       </div>` : ""}
-      <p class="sub nota">Placar, minuto e gráfico: 5Dollar (a cada ~8 s); nomes e narração: ESPN; xG: 365Scores. Avisos: ⚡ pressão forte · 🔥 gol próximo · ⭐ favorito pressionando com a zebra sem chutar · 📈 jogo over (marcou e continua pressionando, jogo lá e cá ou favorito perdendo e tomando contra-ataque). O gol zera a contagem dos avisos. Toque num jogo para ver tudo.</p>
+      <p class="sub nota">Placar, minuto e gráfico: 5Dollar (a cada ~8 s); nomes e narração: ESPN; xG: 365Scores. Avisos: ${AV.pressao.ic} pressão forte · ${AV.gol.ic} gol próximo · ${AV.fav.ic} favorito pressionando com a zebra sem chutar · ${AV.over.ic} jogo over (marcou e continua pressionando, jogo lá e cá ou favorito perdendo e tomando contra-ataque). O gol zera a contagem dos avisos. Toque num jogo para ver tudo.</p>
     </section>`);
   }
   // estatísticas do painel ao vivo por período (Jogo todo / 1º tempo / 2º tempo). Os períodos usam os números
@@ -2743,7 +2752,7 @@
     const tipos = ["fav", "gol", "over", "pressao"];
     const meus = cfg.meus.map((a) => `<div class="meu-av" data-meu="${h(a.id)}">
         <div class="meu-cab">
-          <span class="alerta-ic" aria-hidden="true">${AV.meu.ic}</span>
+          <button type="button" class="botao-ic" data-trocaric="meu:${h(a.id)}" aria-label="Trocar o ícone deste aviso" title="Trocar o ícone">${icAv("meu", a)}</button>
           <input type="text" class="meu-nome" value="${h(a.nome || "")}" data-meucampo="nome" data-mid="${h(a.id)}" aria-label="Nome do aviso" placeholder="Nome do aviso">
           <label class="check"><input type="checkbox" data-meucampo="ativo" data-mid="${h(a.id)}" ${a.ativo !== false ? "checked" : ""}> Ligado</label>
           <label class="check"><input type="checkbox" data-meucampo="notificar" data-mid="${h(a.id)}" ${a.notificar !== false ? "checked" : ""}> Notificar</label>
@@ -2751,6 +2760,7 @@
             ? `<span class="meu-apagar">Apagar este aviso? <button type="button" class="botao-q" data-meuapagar="${h(a.id)}" data-sim="1">Sim</button><button type="button" class="botao-q" data-meuapagar="${h(a.id)}" data-sim="0">Não</button></span>`
             : `<button type="button" class="botao-q" data-meuapagar="${h(a.id)}">Apagar</button>`}
         </div>
+        ${estado.trocandoIc === "meu:" + a.id ? seletorIcone("meu:" + a.id, icAv("meu", a)) : ""}
         <ol class="meu-conds">${a.conds.map((c, ci) => `<li><span class="meu-rot">${h(COND_TIPOS[c.t] ? COND_TIPOS[c.t].rot : c.t)}</span><span class="meu-campos">${campoCond(c, ci, a.id)}</span>
           <button type="button" class="remover" data-condremover="${ci}" data-mid="${h(a.id)}" aria-label="Remover condição">✕</button></li>`).join("")}</ol>
         <div class="meu-pe"><select data-condadd="${h(a.id)}" aria-label="Adicionar condição"><option value="">+ Adicionar condição</option>${Object.entries(COND_TIPOS).map(([k, t]) => `<option value="${k}">${h(t.rot)}</option>`).join("")}</select>
@@ -2759,7 +2769,11 @@
     app.innerHTML = `<section class="painel tela-avisos"><div class="painel-cab"><h2>Avisos e notificações</h2><span class="sub">fica salvo neste navegador${window.Contas ? " (e na sua conta, se estiver logado)" : ""}</span></div><div class="painel-corpo">
       <h3>Quais avisos aparecem</h3>
       <p class="sub">Os desligados somem do gráfico, da lista de jogos e do painel Ao vivo.</p>
-      <div class="av-tipos">${tipos.map((k) => `<label class="av-tipo"><input type="checkbox" data-avmostrar="${k}" ${cfg.mostrar[k] !== false ? "checked" : ""}><span class="alerta-ic" aria-hidden="true">${AV[k].ic}</span><span><b>${AV[k].nome}</b><small>${DESCR_AV[k]}</small></span></label>`).join("")}</div>
+      <div class="av-tipos">${tipos.map((k) => `<div class="av-tipo"><input type="checkbox" id="avm-${k}" data-avmostrar="${k}" ${cfg.mostrar[k] !== false ? "checked" : ""}>
+        <button type="button" class="botao-ic" data-trocaric="${k}" aria-label="Trocar o ícone de ${AV[k].nome}" title="Trocar o ícone">${AV[k].ic}</button>
+        <label for="avm-${k}"><b>${AV[k].nome}</b><small>${DESCR_AV[k]}</small></label></div>`).join("")}</div>
+      ${tipos.includes(estado.trocandoIc) ? seletorIcone(estado.trocandoIc, AV[estado.trocandoIc].ic) : ""}
+      <p class="sub">Toque no ícone de um aviso para trocar.</p>
 
       <h3>Meus avisos</h3>
       <p class="sub">Monte o seu: escolha as condições do jogo ao vivo. O aviso acende quando todas valem ao mesmo tempo, aparece no gráfico (${AV.meu.ic}) e pode virar notificação.</p>
@@ -2779,12 +2793,30 @@
       <p class="sub nota">Com o site em segundo plano o navegador desacelera as atualizações para economizar bateria; a notificação pode chegar até ~1 min depois. No celular, deixe o ScanBall aberto (instalado como app ou numa aba) — se o sistema fechar o app, as notificações param até você abrir de novo.</p>
     </div></section>`;
   }
+  // seletor de ícone: base de emojis + um campo para colar qualquer emoji
+  function seletorIcone(chave, atual) {
+    const nome = chave.startsWith("meu:") ? (achaMeu(chave.slice(4)) || {}).nome || "Meu aviso" : AV[chave].nome;
+    return `<div class="seletor-ic" role="group" aria-label="Escolher ícone para ${h(nome)}">
+      <div class="seletor-ic-cab"><b>Ícone de “${h(nome)}”</b><button type="button" class="botao-q" data-icpadrao="${h(chave)}">Voltar ao padrão</button><button type="button" class="botao-q" data-trocaric="">Fechar</button></div>
+      <div class="seletor-ic-grade">${EMOJIS_BASE.map((e) => `<button type="button" data-icescolher="${h(chave)}" data-ic="${e}" aria-pressed="${e === atual}" aria-label="${e}">${e}</button>`).join("")}</div>
+      <label class="seletor-ic-outro">Outro: <input type="text" maxlength="8" data-icoutro="${h(chave)}" placeholder="cole um emoji" aria-label="Colar outro emoji"></label>
+    </div>`;
+  }
+  function definirIcone(chave, ic) {
+    const cfg = estado.cfgAv;
+    if (chave.startsWith("meu:")) { const a = achaMeu(chave.slice(4)); if (!a) return; if (ic) a.ic = ic; else delete a.ic; }
+    else { cfg.icones = cfg.icones || {}; if (ic) cfg.icones[chave] = ic; else delete cfg.icones[chave]; }
+    salvarCfgAv();
+  }
   function novoIdAviso() { return "a" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36); }
   function achaMeu(id) { return estado.cfgAv.meus.find((a) => a.id === id); }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest("[data-meunovo], [data-meuapagar], [data-condremover], [data-notifativar], [data-notiftestar]");
+    const t = e.target.closest && e.target.closest("[data-meunovo], [data-meuapagar], [data-condremover], [data-notifativar], [data-notiftestar], [data-trocaric], [data-icescolher], [data-icpadrao]");
     if (!t) return;
     const cfg = estado.cfgAv;
+    if (t.dataset.trocaric != null) { estado.trocandoIc = t.dataset.trocaric && estado.trocandoIc !== t.dataset.trocaric ? t.dataset.trocaric : null; telaAvisos(); return; }
+    if (t.dataset.icescolher) { definirIcone(t.dataset.icescolher, t.dataset.ic); estado.trocandoIc = null; telaAvisos(); return; }
+    if (t.dataset.icpadrao) { definirIcone(t.dataset.icpadrao, null); estado.trocandoIc = null; telaAvisos(); return; }
     if (t.hasAttribute("data-meunovo")) {
       cfg.meus.push({ id: novoIdAviso(), nome: "Meu aviso " + (cfg.meus.length + 1), ativo: true, notificar: true, conds: [Object.assign({ t: "min" }, COND_TIPOS.min.nova)] });
       salvarCfgAv(); telaAvisos(); return;
@@ -2803,7 +2835,7 @@
       return;
     }
     if (t.hasAttribute("data-notiftestar")) {
-      notificar({ chave: "teste:" + Date.now(), titulo: "ScanBall · teste", corpo: "É assim que os avisos chegam. ⚡🔥⭐📈", url: "#avisos" }, true);
+      notificar({ chave: "teste:" + Date.now(), titulo: "ScanBall · teste", corpo: `É assim que os avisos chegam. ${AV.pressao.ic}${AV.gol.ic}${AV.fav.ic}${AV.over.ic}`, url: "#avisos" }, true);
       return;
     }
   });
@@ -2812,6 +2844,13 @@
     if (!t || !t.dataset) return;
     const cfg = estado.cfgAv, ds = t.dataset;
     if (ds.avmostrar) { cfg.mostrar[ds.avmostrar] = t.checked; salvarCfgAv(); return; }
+    if (ds.icoutro) {
+      // só o 1º "caractere visível" (um emoji pode ter vários códigos)
+      const v = t.value.trim(), seg = typeof Intl !== "undefined" && Intl.Segmenter ? [...new Intl.Segmenter("pt", { granularity: "grapheme" }).segment(v)][0] : null;
+      const ic = seg ? seg.segment : Array.from(v)[0];
+      if (ic) { definirIcone(ds.icoutro, ic); estado.trocandoIc = null; telaAvisos(); }
+      return;
+    }
     if (ds.notifaviso) { cfg.notif.avisos[ds.notifaviso] = t.checked; salvarCfgAv(); return; }
     if (ds.notifacao) { cfg.notif.acoes[ds.notifacao] = t.checked; salvarCfgAv(); return; }
     if (ds.notifjogos) { cfg.notif.jogos = ds.notifjogos; salvarCfgAv(); return; }
@@ -3325,7 +3364,7 @@
     estado.rkOrdem = ler("rk_ordem", estado.rkOrdem);
     estado.rkN = ler("rk_n", estado.rkN);
     const c = ler("comp", ""); if (comps.includes(c)) estado.comp = c;
-    estado.cfgAv = lerCfgAv(); cfgAvVer++;
+    estado.cfgAv = lerCfgAv(); aplicarIcones(); cfgAvVer++;
     estado.pvFiltro = ler("pv_filtro", estado.pvFiltro);
     const t = ler("tema", null); if (t) document.documentElement.dataset.tema = t;
     render();
