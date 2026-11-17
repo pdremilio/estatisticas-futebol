@@ -76,7 +76,7 @@
     dia: null, compJogos: "todas", vistaTabela: "TOTAL",
     ordem: ler("ordem", "hora"), ocultarEncerrados: ler("ocultar", false), soFavoritos: false, busca: "",
     abaJogo: "inteiro", recorte: "lado", ultimos: 5, subClass: "tabela", tempo: 1,
-    rkOrdem: ler("rk_ordem", "elo"), rkN: ler("rk_n", 5), rkFiltro: "todos",
+    rkOrdem: ler("rk_ordem", "elo"), rkN: ler("rk_n", 5), rkFiltro: "todos", pvFiltro: ler("pv_filtro", "todos"),
   };
 
   // ------------------------------------------------------------ utilidades
@@ -203,7 +203,13 @@
   }
   function projecaoCalc(code, p) {
     const prep = preps[code];
-    const foto = prep.fotos[p.i] || { h: M.fotoAtual(prep, p.h), a: M.fotoAtual(prep, p.a), liga: prep.liga };
+    let foto = prep.fotos[p.i];
+    if (!foto) {
+      // jogo futuro: estado atual dos times + xG da temporada (FotMob), quando a liga tem
+      foto = { h: M.fotoAtual(prep, p.h), a: M.fotoAtual(prep, p.a), liga: prep.liga };
+      const xg = (DADOS.competicoes[code] || {}).xg;
+      if (xg) { foto.h.xg = xg[p.h] || xg[String(p.h)] || null; foto.a.xg = xg[p.a] || xg[String(p.a)] || null; }
+    }
     return { foto, proj: M.projetar(foto.h, foto.a, foto.liga), previa: !!prep.fotos[p.i] };
   }
 
@@ -306,13 +312,13 @@
   // a barra do minuto atual vai crescendo conforme os lances chegam; minuto sem lance fica sem barra
   const TIPOS_MARCA = [
     ["gol", "Gols"], ["alvo", "Chutes no gol"], ["fora", "Chutes para fora"], ["bloq", "Chutes bloqueados"],
-    ["trave", "Bola na trave"], ["esc", "Escanteios"], ["cartao", "Cartões"], ["sub", "Substituições"],
+    ["trave", "Bola na trave"], ["esc", "Escanteios"], ["cartao", "Cartões"], ["sub", "Substituições"], ["aviso", "Avisos ⚡🔥⭐📈"],
   ];
   const NOME_MARCA = { gol: "gol", alvo: "chute no gol", fora: "chute para fora", bloq: "chute bloqueado", trave: "bola na trave",
     esc: "escanteio", amarelo: "cartão amarelo", vermelho: "cartão vermelho", "2amarelo": "2º amarelo (expulso)", sub: "substituição" };
   const PRIOR = { gol: 9, vermelho: 8, "2amarelo": 8, trave: 7, alvo: 6, amarelo: 5, fora: 4, bloq: 3, sub: 2, esc: 1 };
   const grupoMarca = (k) => (k === "amarelo" || k === "vermelho" || k === "2amarelo" ? "cartao" : k);
-  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, modo: "tendencia", saldo: true, som: false };
+  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, aviso: true, modo: "tendencia", saldo: true, som: false };
   estado.prOpc = Object.assign({}, OPC_PADRAO, ler("pr_opc", {}));
   estado.prConfig = false;
   let infoPressao = "";
@@ -422,44 +428,189 @@
   const temChave5d = () => { try { return !!localStorage.getItem("sb_5d_chave"); } catch (e) { return false; } };
   const servidor5d = () => !!(window.AoVivo && AoVivo.servidor5d);
   const fonte5d = () => servidor5d() || temChave5d();
-  // ---------- alerta de pressão: quem está dominando os últimos minutos (lances da ESPN + ataques do 365Scores)
-  // nível 1 "pressão forte": ≥ 68% da pressão das últimas 8 barras; nível 2 "gol pode sair": ≥ 75% e
-  // pelo menos 3 lances perigosos (chute no gol, trave ou escanteio) nesse período.
-  function alertaPressao(p) {
-    const pr = p.vv && p.vv.pr;
-    if (!pr || pr.fim || pr.intervalo || p.s !== "IN_PLAY") return null;
-    const atual = pr.atual == null ? pr.ultimo : pr.atual;
-    if (atual < 6) return null;
-    const val = valoresPressao(pr, "minuto", p.vv.atk, p.vv.prov, p.vv.pas, p.vv);
-    const ini = Math.max(0, atual - 7);
-    let sh = 0, sa = 0;
-    for (let i = ini; i <= atual; i++) { sh += val.h[i] || 0; sa += val.a[i] || 0; }
-    const l = sh >= sa ? "h" : "a", forte = Math.max(sh, sa), total = sh + sa;
-    if (!total) return null;
-    const share = forte / total;
-    const perigo = pr.ev.concat(p.vv.prov || []).filter((e) => e.l === l && e.i >= ini && ["alvo", "trave", "esc"].includes(e.k)).length;
-    // há quantos minutos o time está por cima (média de 3 barras)
-    let mins = 0;
-    for (let i = atual; i >= 2; i--) {
-      const mh = (val.h[i] || 0) + (val.h[i - 1] || 0) + (val.h[i - 2] || 0), ma = (val.a[i] || 0) + (val.a[i - 1] || 0) + (val.a[i - 2] || 0);
-      if ((l === "h" ? mh - ma : ma - mh) > 0.5) mins++; else break;
-    }
-    // gol do próprio time há menos de 2 minutos: a pressão "virou" gol, não alerta
-    if (pr.ev.some((e) => e.k === "gol" && e.l === l && e.i >= atual - 1)) return null;
-    let nivel = 0;
-    if (share >= 0.75 && forte >= 9 && perigo >= 3) nivel = 2;
-    else if (share >= 0.68 && forte >= 6) nivel = 1;
-    if (!nivel) return null;
-    return { nivel, l, mins: Math.max(mins, 3), share: Math.round(share * 100), perigo, tid: l === "h" ? p.h : p.a };
+  // ---------- avisos do ao vivo
+  // O jogo é relido minuto a minuto (do 1º minuto até agora) com as mesmas regras; assim o aviso de agora e as
+  // marcas no gráfico (onde cada aviso começou) saem iguais em qualquer computador, mesmo abrindo o jogo tarde.
+  // Regra base: o gol zera o relógio. O gol não conta como pressão e, depois dele, a contagem recomeça.
+  //  ⚡ pressão     um time com ~68% da pressão por 5+ min seguidos, sem gol no meio
+  //  🔥 gol próximo ~75% da pressão + 3 lances perigosos (chute no gol, trave, escanteio)
+  //  ⭐ favorito    o favorito do pré-jogo sem vencer, dominando, e a zebra sem chutar
+  //  📈 jogo over   marcou e continua pressionando · jogo lá e cá · favorito perdendo e tomando contra-ataque
+  const AV = {
+    pressao: { ic: "⚡", nivel: 1, prior: 1, nome: "Pressão" },
+    over: { ic: "📈", nivel: 2, prior: 2, nome: "Jogo over" },
+    gol: { ic: "🔥", nivel: 2, prior: 3, nome: "Gol próximo" },
+    fav: { ic: "⭐", nivel: 3, prior: 4, nome: "Favorito pressionando" },
+  };
+  const PERIGO = ["alvo", "trave", "esc"], CHUTE = ["alvo", "trave", "fora", "bloq"], NO_GOL = ["alvo", "trave"];
+  const codeDoJogo = (p) => (p.vv && p.vv.espn && p.vv.espn.code) || p.code || null;
+  // favorito do pré-jogo: odds das casas quando o jogo tem; senão, a chance do modelo do site.
+  // Favorito = 55% ou mais de chance e 20 pontos acima do outro time.
+  function favoritoDe(p) {
+    const code = codeDoJogo(p);
+    if (!code || !preps[code]) return null;
+    let ph, pa, fonte;
+    const o = oddsDo(code, p);
+    if (o && o.c && o.e && o.f) { const t = 1 / o.c + 1 / o.e + 1 / o.f; ph = 1 / o.c / t; pa = 1 / o.f / t; fonte = "odds"; }
+    else { const x = projecaoDo(code, p); if (!x || !x.proj) return null; ph = x.proj.p1; pa = x.proj.p2; fonte = "modelo"; }
+    const pf = Math.max(ph, pa), po = Math.min(ph, pa);
+    return pf >= 0.55 && pf - po >= 0.2 ? { l: ph >= pa ? "h" : "a", p: pf, fonte } : null;
   }
-  const textoAlerta = (a) => a.nivel === 2
-    ? `<b>${h(nomeTime(a.tid))}</b> com pressão absurda há ${a.mins} min · ${a.perigo} lances perigosos · gol pode estar próximo`
-    : `<b>${h(nomeTime(a.tid))}</b> pressionando forte há ${a.mins} min (${a.share}% da pressão)`;
+  // dica do pré-jogo: o time costuma marcar (ou o adversário costuma sofrer) nesse pedaço do jogo
+  const FAIXAS_MIN = ["1' e 15'", "16' e 30'", "31' e 45'", "46' e 60'", "61' e 75'", "76' e 90'"];
+  function dicaHorario(p, l, b) {
+    const code = codeDoJogo(p);
+    const x = code && preps[code] ? projecaoDo(code, p) : null;
+    if (!x || !x.foto) return "";
+    const per = b <= 15 ? 0 : b <= 30 ? 1 : b <= 45 ? 2 : b <= 60 ? 3 : b <= 75 ? 4 : 5;
+    const eu = x.foto[l].geral, ele = x.foto[l === "h" ? "a" : "h"].geral;
+    const tm = eu.pm.reduce((s, v) => s + v, 0), ts = ele.ps.reduce((s, v) => s + v, 0);
+    const pm = tm >= 8 ? eu.pm[per] / tm : 0, ps = ts >= 8 ? ele.ps[per] / ts : 0;
+    if (pm >= 0.25 && pm >= ps) return `${nomeTime(l === "h" ? p.h : p.a)} faz ${Math.round(pm * 100)}% dos gols entre ${FAIXAS_MIN[per]}`;
+    if (ps >= 0.25) return `${nomeTime(l === "h" ? p.a : p.h)} sofre ${Math.round(ps * 100)}% dos gols entre ${FAIXAS_MIN[per]}`;
+    return "";
+  }
+  const memoAv = new WeakMap();
+  function avisosDoJogo(p) {
+    const vv = p.vv, pr = vv && vv.pr;
+    if (!pr || !pr.slots || !pr.slots.length) return { atual: null, marcas: [] };
+    const atual = Math.min(pr.atual == null ? pr.ultimo : pr.atual, pr.slots.length - 1);
+    const prov = vv.prov || [];
+    const chave = [atual, pr.ev.length, prov.length, vv.d5 && vv.d5.em, vv.atk && vv.atk.length, p.fh, p.fa, p.s].join("|");
+    const m0 = memoAv.get(vv);
+    if (m0 && m0.chave === chave && Date.now() - m0.t < 3000) return m0.r;
+    const r = calcularAvisos(p, pr, atual, prov);
+    memoAv.set(vv, { chave, t: Date.now(), r });
+    return r;
+  }
+  function calcularAvisos(p, pr, atual, prov) {
+    const val = valoresPressao(pr, "minuto", p.vv.atk, prov, p.vv.pas, p.vv);
+    const evs = pr.ev.concat(prov);
+    const n = atual + 1, Z = () => ({ h: new Array(n).fill(0), a: new Array(n).fill(0) });
+    const cPer = Z(), cChu = Z(), cGol = Z(), cEsc = Z(), gols = Z();
+    for (const e of evs) {
+      if (e.i == null || e.i < 0 || e.i > atual || (e.l !== "h" && e.l !== "a")) continue;
+      if (e.k === "gol") { gols[e.l][e.i]++; cGol[e.l][e.i]++; continue; }
+      if (PERIGO.includes(e.k)) cPer[e.l][e.i]++;
+      if (CHUTE.includes(e.k)) cChu[e.l][e.i]++;
+      if (NO_GOL.includes(e.k)) cGol[e.l][e.i]++;
+      if (e.k === "esc") cEsc[e.l][e.i]++;
+    }
+    const soma = (arr, a, b) => { let t = 0; for (let k = Math.max(0, a); k <= b; k++) t += arr[k] || 0; return t; };
+    const outro = (l) => (l === "h" ? "a" : "h");
+    const fav = favoritoDe(p);
+    const nome = (l) => h(nomeTime(l === "h" ? p.h : p.a));
+    let ultGol = -1, ultGolLado = null, ph = 0, pa = 0;
+    let st = null; // aviso ligado: { tipo, l, sub, ini, falhas, info }
+    const marcas = [];
+    const desligar = () => { st = null; };
+    for (let i = 0; i <= atual; i++) {
+      // gol neste minuto: zera o relógio e encerra os avisos de pressão (a pressão "virou" gol)
+      const gh = gols.h[i], ga = gols.a[i];
+      if (gh || ga) {
+        ph += gh; pa += ga; ultGol = i; ultGolLado = gh && !ga ? "h" : ga && !gh ? "a" : (gh >= ga ? "h" : "a");
+        if (st && st.tipo !== "over") desligar();
+        continue;
+      }
+      if (i < 5) continue;
+      const b = pr.slots[i].b;
+      // pressão desde o último gol (no máximo as últimas 8 barras)
+      const a = Math.max(ultGol + 1, i - 7), len = i - a + 1;
+      const sh = soma(val.h, a, i), sa = soma(val.a, a, i), tot = sh + sa;
+      const lado = sh >= sa ? "h" : "a", forte = Math.max(sh, sa), share = tot ? forte / tot : 0;
+      const perigo = (l, x) => soma(cPer[l], x, i), chutes = (l, x) => soma(cChu[l], x, i), noGol = (l, x) => soma(cGol[l], x, i);
+      const cand = [];
+      if (len >= 5 && share >= 0.68 && forte >= 5) cand.push({ tipo: "pressao", l: lado });
+      if (len >= 5 && share >= 0.75 && forte >= 8 && perigo(lado, a) >= 3) cand.push({ tipo: "gol", l: lado });
+      // favorito: sem vencer, dominando os últimos ~10 min (desde o último gol) e a zebra sem chutar
+      let fShare = 0, fLen = 0, aF = 0;
+      if (fav) {
+        aF = Math.max(ultGol + 1, i - 9); fLen = i - aF + 1;
+        const fx = soma(val[fav.l], aF, i), zx = soma(val[outro(fav.l)], aF, i);
+        fShare = fx + zx ? fx / (fx + zx) : 0;
+        const semVencer = (fav.l === "h" ? ph - pa : pa - ph) <= 0;
+        if (semVencer && b >= 15 && fLen >= 6 && fShare >= 0.7 && fx >= 6 && perigo(fav.l, aF) >= 2 && chutes(outro(fav.l), aF) === 0 && soma(cEsc[outro(fav.l)], aF, i) <= 1)
+          cand.push({ tipo: "fav", l: fav.l });
+      }
+      // jogo over
+      const a10 = Math.max(0, i - 9);
+      if (ultGol >= 0 && ultGolLado && i - ultGol >= 5 && i - ultGol <= 15) { // marcou e continua pressionando
+        const s = ultGolLado, xs = soma(val[s], ultGol + 1, i), xo = soma(val[outro(s)], ultGol + 1, i);
+        if (xs + xo && xs / (xs + xo) >= 0.6 && perigo(s, ultGol + 1) >= 2) cand.push({ tipo: "over", l: s, sub: "continua" });
+      }
+      const t10h = soma(val.h, a10, i), t10a = soma(val.a, a10, i);
+      if (chutes("h", a10) + soma(gols.h, a10, i) >= 2 && chutes("a", a10) + soma(gols.a, a10, i) >= 2 && noGol("h", a10) >= 1 && noGol("a", a10) >= 1 && t10h + t10a >= 12)
+        cand.push({ tipo: "over", l: t10h >= t10a ? "h" : "a", sub: "laecá" });
+      if (fav && (fav.l === "h" ? ph - pa : pa - ph) < 0) { // favorito perdendo, pressionando e tomando contra-ataque
+        const fx = soma(val[fav.l], a10, i), zx = soma(val[outro(fav.l)], a10, i), z = outro(fav.l);
+        if (fx + zx && fx / (fx + zx) >= 0.55 && chutes(fav.l, a10) >= 2 && chutes(z, a10) >= 2 && noGol(z, a10) >= 1) cand.push({ tipo: "over", l: fav.l, sub: "fav" });
+      }
+      // "marcou e continua" e "favorito perdendo e tomando contra-ataque" valem mais que pressão/gol próximo
+      // (o recado ali é de jogo over); entre os over: favorito > continua > lá e cá
+      const pri = (c) => (c.tipo !== "over" ? AV[c.tipo].prior : c.sub === "fav" ? 3.6 : c.sub === "continua" ? 3.5 : AV.over.prior);
+      cand.sort((x, y) => pri(y) - pri(x));
+      const melhor = cand[0];
+      // continua ligado? (limites um pouco mais baixos para não ficar piscando; desliga após 2 minutos fora)
+      if (st) {
+        let segue = false;
+        if (st.tipo === "pressao") segue = lado === st.l && len >= 3 && share >= 0.6 && forte >= 4;
+        else if (st.tipo === "gol") segue = lado === st.l && share >= 0.68 && perigo(st.l, a) >= 2;
+        else if (st.tipo === "fav") segue = fav && fShare >= 0.62 && chutes(outro(fav.l), aF) <= 1;
+        else if (st.tipo === "over") segue = cand.some((c) => c.tipo === "over") || (i - st.ini <= 12 && (chutes("h", i - 4) + chutes("a", i - 4) >= 1));
+        st.falhas = segue ? 0 : st.falhas + 1;
+        if (st.falhas >= 2) desligar();
+      }
+      if (melhor && (!st || pri(melhor) > pri(st) || (melhor.tipo === st.tipo && melhor.l !== st.l && melhor.tipo !== "over"))) {
+        const ult = marcas[marcas.length - 1];
+        st = { tipo: melhor.tipo, l: melhor.l, sub: melhor.sub, ini: i, falhas: 0 };
+        // mesmo aviso voltando logo depois (até 3 min): não repete a marca
+        if (!(ult && ult.tipo === st.tipo && ult.l === st.l && i - ult.fim <= 3)) marcas.push({ i, tipo: st.tipo, l: st.l, sub: st.sub, fim: i });
+      } else if (st && melhor && melhor.tipo === st.tipo && melhor.sub && melhor.sub !== st.sub) st.sub = melhor.sub;
+      if (st && marcas.length) { const ult = marcas[marcas.length - 1]; if (ult.tipo === st.tipo && ult.l === st.l) ult.fim = i; }
+      if (st) {
+        // números para o texto
+        let mins = 0;
+        for (let k = i; k >= Math.max(2, ultGol + 3); k--) {
+          const mh = soma(val.h, k - 2, k), ma = soma(val.a, k - 2, k);
+          if ((st.l === "h" ? mh - ma : ma - mh) > 0.5) mins++; else break;
+        }
+        st.info = { mins: Math.max(mins, Math.min(len, 3)), share: Math.round((st.tipo === "fav" ? fShare : share) * 100), perigo: perigo(st.l, st.tipo === "fav" ? aF : a), b };
+      }
+    }
+    const vivo = !pr.fim && !pr.intervalo && p.s === "IN_PLAY";
+    let atualAv = null;
+    if (vivo && st) {
+      const x = st.info || { mins: 3, share: 0, perigo: 0, b: 0 };
+      const dica = st.tipo === "over" ? "" : dicaHorario(p, st.l, x.b);
+      let txt;
+      if (st.tipo === "pressao") txt = `<b>${nome(st.l)}</b> pressionando forte há ${x.mins} min (${x.share}% da pressão)`;
+      else if (st.tipo === "gol") txt = `<b>${nome(st.l)}</b> com pressão absurda há ${x.mins} min · ${x.perigo} lances perigosos · gol pode estar próximo`;
+      else if (st.tipo === "fav") txt = `<b>${nome(st.l)}</b> (favorito) pressionando há ${x.mins} min e <b>${nome(outro(st.l))}</b> sem chutar · gol do favorito pode sair`;
+      else if (st.sub === "continua") txt = `<b>${nome(st.l)}</b> marcou e continua pressionando · jogo com cara de mais gols`;
+      else if (st.sub === "fav") txt = `<b>${nome(st.l)}</b> (favorito) perdendo: pressiona, mas toma contra-ataque · jogo com cara de mais gols`;
+      else txt = `Jogo lá e cá: <b>${nome("h")}</b> e <b>${nome("a")}</b> chegando com perigo · jogo com cara de mais gols`;
+      if (st.tipo === "over") {
+        const code = codeDoJogo(p), xp = code && preps[code] ? projecaoDo(code, p) : null;
+        if (xp && xp.proj && xp.proj.ov[2] >= 0.5) txt += ` · pré-jogo: ${Math.round(xp.proj.ov[2] * 100)}% de over 2,5`;
+      }
+      if (dica) txt += `<br><small>💡 ${h(dica)}</small>`;
+      atualAv = { tipo: st.tipo, sub: st.sub, nivel: AV[st.tipo].nivel, ic: AV[st.tipo].ic, l: st.l, tid: st.l === "h" ? p.h : p.a, txt, mins: x.mins, share: x.share, perigo: x.perigo };
+    }
+    return { atual: atualAv, marcas };
+  }
+  const alertaPressao = (p) => (p.vv && p.vv.pr && p.s === "IN_PLAY" ? avisosDoJogo(p).atual : null);
+  const textoMarcaAviso = (p, m) => {
+    const nomeL = nomeTime(m.l === "h" ? p.h : p.a), o = nomeTime(m.l === "h" ? p.a : p.h);
+    const t = m.tipo === "pressao" ? `${nomeL} pressionando forte` : m.tipo === "gol" ? `${nomeL} com pressão absurda: gol pode sair`
+      : m.tipo === "fav" ? `${nomeL} (favorito) pressionando e ${o} sem chutar`
+      : m.sub === "continua" ? `${nomeL} marcou e continuou pressionando: jogo over` : m.sub === "fav" ? `${nomeL} (favorito) perdendo e tomando contra-ataque: jogo over` : "Jogo lá e cá: jogo over";
+    return `${AV[m.tipo].ic} ${t}`;
+  };
   function blocoAlerta(p, compacto) {
     const a = alertaPressao(p);
     avisarSom(p, a);
     if (!a) return "";
-    return `<div class="alerta-pressao n${a.nivel} ${a.l === "h" ? "c" : "f"}${compacto ? " mini" : ""}" role="status"><span class="alerta-ic" aria-hidden="true">${a.nivel === 2 ? "🔥" : "⚡"}</span><span>${textoAlerta(a)}</span></div>`;
+    return `<div class="alerta-pressao n${a.nivel} av-${a.tipo} ${a.l === "h" ? "c" : "f"}${compacto ? " mini" : ""}" role="status"><span class="alerta-ic" aria-hidden="true">${a.ic}</span><span>${a.txt}</span></div>`;
   }
   // som do alerta (opcional, ligado no "Exibir"): toca quando o alerta aparece ou sobe de nível
   const nivelAvisado = {};
@@ -603,6 +754,18 @@
       return ord.slice(0, 2).map((e, j) => `<button type="button" class="mk mk-${e.k} ${e.l === "h" ? "mk-c" : "mk-f"} mk-n${j}${j === 1 && g.length > 2 ? " mk-mais" : ""}" style="left:${left}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${iconeMarca(e.k)}</button>`).join("");
     }).join("");
 
+    // avisos: o ícone fica no meio do gráfico, no minuto em que o aviso começou (toque mostra o texto)
+    // (dois avisos muito perto viram um ícone só, o mais forte, com os dois textos)
+    const pertoAv = compacto || window.innerWidth < 560 ? 4 : 2, juntos = [];
+    if (opc.aviso) for (const m of avisosDoJogo(p).marcas) {
+      if (m.i >= n) continue;
+      const info = `${pr.slots[m.i].r}' ${textoMarcaAviso(p, m)}`, ult = juntos[juntos.length - 1];
+      if (ult && m.i - ult.i < pertoAv) { ult.info += " | " + info; if (AV[m.tipo].prior >= AV[ult.m.tipo].prior) ult.m = m; continue; }
+      juntos.push({ i: m.i, m, info });
+    }
+    const marcasAv = juntos.map(({ i, m, info }) =>
+      `<button type="button" class="mk mk-aviso av-${m.tipo} ${m.l === "h" ? "mk-c" : "mk-f"}" style="left:${(((i + 0.5) / n) * 100).toFixed(2)}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${AV[m.tipo].ic}</button>`).join("");
+
     // eixo de 5 em 5 minutos
     let eixo = `<span style="left:0">0</span>`;
     const passo = n > 100 && window.innerWidth < 560 ? 15 : 5;
@@ -618,12 +781,13 @@
     const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${faixa}
           <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/>${linhas}${barras}</svg>`;
     if (compacto) {
-      return `<div class="pressao-avisos">${blocoAlerta(p, true)}</div><div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}</div>${blocoPressao5(p, true)}</div>`;
+      return `<div class="pressao-avisos">${blocoAlerta(p, true)}</div><div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}${marcasAv}</div>${blocoPressao5(p, true)}</div>`;
     }
-    const simb = TIPOS_MARCA.filter(([k]) => opc[k] && k !== "esc").map(([k]) => {
+    const simb = TIPOS_MARCA.filter(([k]) => opc[k] && k !== "esc" && k !== "aviso").map(([k]) => {
       const ex = k === "cartao" ? '<i class="mk-ex mk-amarelo"></i><i class="mk-ex mk-vermelho"></i>' : `<i class="mk-ex mk-${k}">${iconeMarca(k)}</i>`;
       return `<span>${ex}${{ gol: "gol", alvo: "no gol", fora: "para fora", bloq: "bloqueado", trave: "trave", cartao: "cartões", sub: "substituição" }[k]}</span>`;
-    }).join("") + (opc.esc ? `<span><i class="mk-ex mk-esc"></i>escanteio</span>` : "");
+    }).join("") + (opc.esc ? `<span><i class="mk-ex mk-esc"></i>escanteio</span>` : "")
+      + (opc.aviso && marcasAv ? `<span title="⚡ pressão · 🔥 gol próximo · ⭐ favorito pressionando · 📈 jogo over">⚡🔥⭐📈 avisos</span>` : "");
     const config = estado.prConfig ? `<div class="pressao-config" role="group" aria-label="O que aparece no gráfico">
         <div class="pc-linha"><span class="sub">Mostrar</span>${TIPOS_MARCA.map(([k, rot]) => `<button type="button" class="chip" data-propc="${k}" aria-pressed="${!!opc[k]}">${rot}</button>`).join("")}</div>
         <div class="pc-linha"><span class="sub">Barras</span>
@@ -643,7 +807,7 @@
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Exibir</button></div>
       ${config}
-      <div class="pressao-area">${svg}${marcas}</div>
+      <div class="pressao-area">${svg}${marcas}${marcasAv}</div>
       <div class="pressao-eixo" aria-hidden="true">${eixo}</div>
       ${blocoPressao5(p)}
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
@@ -653,9 +817,10 @@
     </div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-chave5d], [data-prdev], [data-estper]");
+    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-chave5d], [data-prdev], [data-estper], [data-pvfiltro]");
     if (!t) return;
     if (t.dataset.estper) { estado.estPer = t.dataset.estper; aoVivoAtualizado(); return; }
+    if (t.dataset.pvfiltro) { estado.pvFiltro = t.dataset.pvfiltro; guardar("pv_filtro", estado.pvFiltro); telaPainelVivo(); return; }
     if (t.dataset.chave5d) {
       try {
         if (t.dataset.chave5d === "salvar") { const v = ((document.getElementById("chave5d") || {}).value || "").trim(); if (v) localStorage.setItem("sb_5d_chave", v); }
@@ -957,9 +1122,20 @@
   function telaPainelVivo() {
     estado.sel = null;
     const todos = todasPartidas();
-    const vivos = todos.filter((x) => aoVivo(x.p));
+    const todosVivos = todos.filter((x) => aoVivo(x.p));
+    // filtro pelos avisos (⚡ 🔥 ⭐ 📈); os jogos com aviso vêm primeiro
+    const avDe = new Map(todosVivos.map((x) => [x, alertaPressao(x.p)]));
+    const FILTROS_PV = [["todos", "Todos"], ["aviso", "Com aviso"], ["fav", "⭐ Favorito pressionando"], ["gol", "🔥 Gol próximo"], ["over", "📈 Jogo over"], ["pressao", "⚡ Pressão"]];
+    const filtro = FILTROS_PV.some((f) => f[0] === estado.pvFiltro) ? estado.pvFiltro : "todos";
+    const passaPv = (x, f) => { const a = avDe.get(x); return f === "todos" || (f === "aviso" ? !!a : !!a && a.tipo === f); };
+    const vivos = todosVivos.filter((x) => passaPv(x, filtro));
+    const chipsPv = todosVivos.length ? `<div class="chips pv-filtros" role="group" aria-label="Filtrar pelos avisos">${FILTROS_PV.map(([k, rot]) => {
+      const q = todosVivos.filter((x) => passaPv(x, k)).length;
+      return `<button type="button" class="chip${q ? "" : " chip-zero"}" data-pvfiltro="${k}" aria-pressed="${filtro === k}">${rot} <small>${q}</small></button>`;
+    }).join("")}</div>` : "";
+    const pesoAv = (x) => { const a = avDe.get(x); return a ? AV[a.tipo].prior : 0; };
     const pesoFav = (x) => (favoritos.has(chaveFav(x.code, x.p)) ? 4 : 0) + (favTimes.has(String(x.p.h)) || favTimes.has(String(x.p.a)) ? 2 : 0) + (favLigas.has(x.code) ? 1 : 0);
-    vivos.sort((a, b) => pesoFav(b) - pesoFav(a) || comps.indexOf(a.code) - comps.indexOf(b.code) || (a.p.d < b.p.d ? -1 : 1));
+    vivos.sort((a, b) => pesoFav(b) - pesoFav(a) || pesoAv(b) - pesoAv(a) || comps.indexOf(a.code) - comps.indexOf(b.code) || (a.p.d < b.p.d ? -1 : 1));
     const agora = Date.now();
     const proximos = todos.filter((x) => !aoVivo(x.p) && !encerrada(x.p) && Date.parse(x.p.d) > agora - 15 * 60e3 && Date.parse(x.p.d) < agora + 18 * 3600e3 && x.p.h && x.p.a).slice(0, 8);
     const encerradosHoje = todos.filter((x) => encerrada(x.p) && x.p.vv && x.p.vv.fonte && agora - Date.parse(x.p.d) < 5 * 3600e3);
@@ -984,13 +1160,14 @@
     const linhaProx = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">${hora(x.p.d)}</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button></li>`;
     const linhaFim = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">Fim</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} <b>${x.p.fh}×${x.p.fa}</b> ${h(nomeTime(x.p.a))}</button></li>`;
     pintarApp("aovivo", `<section class="painel-vivo">
-      ${avisoFonte()}<div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${vivos.length ? `${vivos.length} ${vivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho a cada 20 s` : ""}</span></div>
-      ${vivos.length ? `<div class="pv-grade">${vivos.map(card).join("")}</div>` : `<div class="painel"><div class="vazio"><strong>Nenhum jogo rolando agora</strong>Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas.</div></div>`}
+      ${avisoFonte()}<div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${todosVivos.length ? `${todosVivos.length} ${todosVivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho` : ""}</span></div>
+      ${chipsPv}
+      ${vivos.length ? `<div class="pv-grade">${vivos.map(card).join("")}</div>` : todosVivos.length ? `<div class="painel"><div class="vazio vazio-curto"><strong>Nenhum jogo com esse aviso agora</strong>Os jogos aparecem aqui sozinhos quando o aviso acender.</div></div>` : `<div class="painel"><div class="vazio"><strong>Nenhum jogo rolando agora</strong>Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas.</div></div>`}
       ${proximos.length || encerradosHoje.length ? `<div class="pv-listas">
         ${proximos.length ? `<div class="painel"><div class="painel-cab"><h3>Próximos jogos</h3></div><ul class="lista-simples pv-lista">${proximos.map(linhaProx).join("")}</ul></div>` : ""}
         ${encerradosHoje.length ? `<div class="painel"><div class="painel-cab"><h3>Terminaram há pouco</h3></div><ul class="lista-simples pv-lista">${encerradosHoje.map(linhaFim).join("")}</ul></div>` : ""}
       </div>` : ""}
-      <p class="sub nota">Placar e minuto: ESPN (a cada 20 s). Gráfico e lances: ataques e narração do 365Scores (quando a liga tem) junto com a narração da ESPN. Toque num jogo para ver tudo.</p>
+      <p class="sub nota">Placar, minuto e gráfico: 5Dollar (a cada ~8 s); nomes e narração: ESPN; xG: 365Scores. Avisos: ⚡ pressão forte · 🔥 gol próximo · ⭐ favorito pressionando com a zebra sem chutar · 📈 jogo over (marcou e continua pressionando, jogo lá e cá ou favorito perdendo e tomando contra-ataque). O gol zera a contagem dos avisos. Toque num jogo para ver tudo.</p>
     </section>`);
   }
   // estatísticas do painel ao vivo por período (Jogo todo / 1º tempo / 2º tempo). Os períodos usam os números
@@ -1338,7 +1515,7 @@
 
   const CAB_COLUNAS = `<div class="jogo-v2 cab-colunas" aria-hidden="true"><span></span><span>Horário</span><span class="situacao">Situação</span><span>Jogo</span>
     <span class="chance">Chance de vitória</span><span class="odds">Odd justa*</span>${TEM_ODDS ? '<span class="odds">Odd casas**</span>' : ""}<span class="gols">Placar</span></div>`;
-  const NOTA_ODD = `<p class="nota-odd">*Odd justa = 1 ÷ chance calculada pela projeção do site. Não é a odd das casas de apostas: serve para comparar com ela.${TEM_ODDS ? "<br>**Odd casas = média das casas de apostas (The Odds API). Em verde quando está acima da odd justa, ou seja, quando há valor segundo a projeção." : ""}</p>`;
+  const NOTA_ODD = `<p class="nota-odd">*Odd justa = 1 ÷ chance calculada pela projeção do site (<a href="#modelo">como a chance é calculada</a>). Não é a odd das casas de apostas: serve para comparar com ela.${TEM_ODDS ? "<br>**Odd casas = média das casas de apostas (The Odds API). Em verde quando está acima da odd justa, ou seja, quando há valor segundo a projeção." : ""}</p>`;
 
   function linhaJogo(code, p) {
     const fim = encerrada(p), vivo = aoVivo(p);
@@ -1361,7 +1538,7 @@
     const marcaFav = (tid) => (favTimes.has(String(tid)) ? `<i class="fav-time" title="Time favorito">${ESTRELA_SVG(12)}</i>` : "");
     return `<div class="jogo-v2" role="link" tabindex="0" data-ir="jogo/${code}/${p.i}">
       ${botaoEstrela("data-fav", k, fav, "este jogo")}
-      <span class="quando">${vivo && p.vv && p.vv.min ? `<span>${hora(p.d)}</span><b class="vivo-min">${h(p.vv.min)}</b>${(() => { const al = alertaPressao(p); return al ? `<i class="alerta-lista n${al.nivel} ${al.l === "h" ? "c" : "f"}" title="${h(nomeTime(al.tid))} pressionando forte">${al.nivel === 2 ? "🔥" : "⚡"}</i>` : ""; })()}` : `<span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b>`}</span>
+      <span class="quando">${vivo && p.vv && p.vv.min ? `<span>${hora(p.d)}</span><b class="vivo-min">${h(p.vv.min)}</b>${(() => { const al = alertaPressao(p); return al ? `<i class="alerta-lista n${al.nivel} av-${al.tipo} ${al.l === "h" ? "c" : "f"}" title="${h(AV[al.tipo].nome)}: ${h(al.txt.replace(/<br>.*$/, "").replace(/<[^>]+>/g, ""))}">${al.ic}</i>` : ""; })()}` : `<span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b>`}</span>
       <span class="situacao">${ROT_STATUS(p)}</span>
       <span class="equipes">
         <span class="${vH ? "venc" : perdeu(vH, vA)}">${escudo(p.h)}<span>${h(nomeTime(p.h))}</span>${marcaFav(p.h)}</span>
@@ -2334,6 +2511,39 @@
   }
 
   // ------------------------------------------------------------ ARTILHARIA
+  // como a chance de vitória é calculada + teste do modelo novo contra o antigo nos jogos que já aconteceram
+  function telaModelo() {
+    const r = M.compararModelos(comps.map((c) => preps[c]));
+    const pc = (x) => (x == null ? "–" : fNum(x * 100, 1) + "%");
+    const n3 = (x) => fNum(x, 3);
+    const melhor = (a, b, menor) => (a === b ? "" : (menor ? b < a : b > a) ? ' class="ok"' : ' class="ruim"');
+    const linha = (rot, f, menor, dica) => `<tr><td class="esq">${rot}${dica ? `<br><small class="sub">${dica}</small>` : ""}</td><td>${f(r.v1)}</td><td${melhor(valor(r.v1, rot), valor(r.v2, rot), menor)}>${f(r.v2)}</td></tr>`;
+    const valor = (o, rot) => (/Acerto/.test(rot) ? o.ac : /Log/.test(rot) ? o.ll : /Brier/.test(rot) ? o.br : o.favTaxa);
+    const faixas = (o) => o.faixas.map((z) => `<tr><td class="esq">${fNum(z.a * 100, 0)}–${fNum(Math.min(z.b, 1) * 100, 0)}%</td><td>${z.n}</td><td>${z.n ? pc(z.p / z.n) : "–"}</td><td>${z.n ? pc(z.ok / z.n) : "–"}</td></tr>`).join("");
+    app.innerHTML = `<section class="painel"><div class="painel-cab"><h2>Como a chance de vitória é calculada</h2></div><div class="painel-corpo texto-modelo">
+      <p>A chance vem dos <b>gols esperados</b> de cada time no jogo. Com eles, o site calcula a chance de cada placar (0x0 até 10x10) e soma: vitória do mandante, empate, vitória do visitante, overs e ambas marcam.</p>
+      <p>Os gols esperados juntam:</p>
+      <ol>
+        <li><b>Gols da temporada</b> como mandante e como visitante, comparados com a média da liga.</li>
+        <li><b>Forma recente com peso</b>: o último jogo vale mais que o anterior, e assim por diante. Cada gol é ajustado pela força do adversário: marcar num time forte vale mais, sofrer de um time forte pesa menos.</li>
+        <li><b>Chutes no gol</b> (quando os jogos têm estatística): mostram quem cria de verdade, com menos "sorte" que os gols.</li>
+        <li><b>xG da temporada</b> (FotMob), nas ligas que têm, só para os próximos jogos.</li>
+        <li><b>Rating Elo</b> (o do Power Ranking), que acumula a força considerando contra quem cada time jogou. Ele puxa o favoritismo para o lado certo quando o time é forte de verdade.</li>
+      </ol>
+      <p>No início da temporada os números são puxados para a média da liga, para poucos jogos não exagerarem. Há também um ajuste para os placares baixos (0x0, 1x0, 0x1, 1x1), que deixa a chance de empate mais realista.</p>
+      <p class="sub">A chance não usa as odds das casas: assim ela continua servindo para comparar com elas (o "valor" da coluna de odds).</p></div></section>
+      <section class="painel"><div class="painel-cab"><h3>Teste nos jogos que já aconteceram</h3><span class="sub">${r.n} jogos · cada um com os números que os times tinham antes dele</span></div><div class="painel-corpo">
+      ${r.n ? `<table class="dados"><thead><tr><th class="esq"></th><th>Modelo antigo</th><th>Modelo novo</th></tr></thead><tbody>
+        ${linha("Acerto do resultado mais provável", (o) => pc(o.ac), false)}
+        ${linha("Log-loss", (o) => n3(o.ll), true, "erro das chances: menor é melhor")}
+        ${linha("Brier", (o) => n3(o.br), true, "outra medida de erro: menor é melhor")}
+        ${linha("Favoritos que venceram", (o) => `${pc(o.favTaxa)} <small class="sub">(${o.favOk}/${o.fav}, previsto ${pc(o.favP)})</small>`, false, "favorito = 55% ou mais e 20 pontos acima do outro")}
+      </tbody></table>
+      <h4 class="sub" style="margin:14px 0 6px">Modelo novo: chance prevista × o que aconteceu</h4>
+      <table class="dados"><thead><tr><th class="esq">Chance do favorito</th><th>Jogos</th><th>Previsto</th><th>Venceu</th></tr></thead><tbody>${faixas(r.v2)}</tbody></table>
+      <p class="sub nota">Se "Previsto" e "Venceu" ficam perto, a chance está bem calibrada.</p>` : `<p class="sub">Ainda não há jogos suficientes.</p>`}
+      </div></section>`;
+  }
   function telaArtilharia(code) {
     code = comps.includes(code) ? code : estado.comp;
     estado.comp = code; guardar("comp", code);
@@ -2644,6 +2854,7 @@
       case "time": telaTime(partes[1], partes[2]); break;
       case "ranking": telaRanking(partes[1]); break;
       case "artilharia": telaArtilharia(partes[1]); break;
+      case "modelo": telaModelo(); break;
       case "filtros": estado.painelFiltro = true; telaJogos(); break; // backtest desligado por enquanto
       default: telaJogos();
     }
@@ -2679,7 +2890,7 @@
     const t = ler("tema", null); if (t) document.documentElement.dataset.tema = t;
     render();
   }
-  window.App = { dados: DADOS, jogoAberto, abaAberta: () => (jogoAberto() ? estado.abaVista : null), recarregarPreferencias, render: () => render(), aoVivoAtualizado };
+  window.App = { _avisos: (p) => avisosDoJogo(p), dados: DADOS, jogoAberto, abaAberta: () => (jogoAberto() ? estado.abaVista : null), recarregarPreferencias, render: () => render(), aoVivoAtualizado };
   function jogoAberto() {
     if (estado.sel) return { code: estado.sel.code, id: estado.sel.id };
     const m = location.hash.match(/^#jogo\/([^/]+)\/([^/]+)/);

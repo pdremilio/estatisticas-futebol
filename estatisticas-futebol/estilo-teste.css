@@ -1163,3 +1163,20 @@ body.modal-aberto { overflow: hidden; }
 /* escalações antes do jogo: provável titular e titular nas últimas 5 */
 .esc-prov { font-size: 10.5px; color: var(--tinta-2); border: 1px dashed var(--linha); border-radius: 999px; padding: 0 5px; margin-left: 4px; white-space: nowrap; }
 .esc-tab td.t5-cheio { font-weight: 700; }
+/* ESPN fora com a 5Dollar em dia: aviso discreto */
+.aviso-fonte.aviso-leve { border-color: var(--linha); background: var(--superficie-2); color: var(--tinta-2); font-size: 12.5px; padding: 7px 12px; }
+/* página "como a chance é calculada" */
+.texto-modelo p, .texto-modelo li { line-height: 1.55; max-width: 72ch; }
+.texto-modelo ol { padding-left: 20px; }
+table.dados td.ok { color: var(--verde, #2BA672); font-weight: 600; }
+table.dados td.ruim { color: var(--vermelho, #D9534F); }
+/* avisos do ao vivo: ícone no minuto em que o aviso começou (no meio do gráfico) */
+.pressao .mk.mk-aviso { top: 50%; transform: translate(-50%, -50%); width: 17px; height: 17px; font-size: 10px; line-height: 17px; text-align: center;
+  border-radius: 50%; background: var(--superficie); box-shadow: 0 0 0 1.5px currentColor, 0 1px 4px rgba(0,0,0,.35); z-index: 3; }
+.pressao-mini .mk.mk-aviso { width: 14px; height: 14px; font-size: 8.5px; line-height: 14px; }
+.alerta-pressao.n3 { background: color-mix(in srgb, var(--cartao) 16%, var(--superficie)); border-color: var(--cartao); }
+.alerta-pressao.av-over { background: color-mix(in srgb, var(--vitoria, #2BA672) 13%, var(--superficie)); border-color: var(--vitoria, #2BA672); }
+.alerta-pressao small { color: var(--tinta-2); font-size: 12px; }
+.pv-filtros { margin: 0 0 12px; }
+.pv-filtros .chip small { color: var(--tinta-3); font-weight: 600; margin-left: 2px; }
+.pv-filtros .chip-zero:not([aria-pressed="true"]) { opacity: .6; }

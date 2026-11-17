@@ -139,7 +139,7 @@
   }
 
   function fotoTime(t) {
-    return { geral: copiarBucket(t.geral), casa: copiarBucket(t.casa), fora: copiarBucket(t.fora), elo: t.elo };
+    return { geral: copiarBucket(t.geral), casa: copiarBucket(t.casa), fora: copiarBucket(t.fora), elo: t.elo, rec: recente(t, t.jogos.length) };
   }
 
   // estatísticas de um time somando só os jogos passados (ex.: últimos 5 em casa)
@@ -208,7 +208,119 @@
     return { lh: Lh * ataqueH * defesaA, la: La * ataqueA * defesaH, ataqueH, defesaH, ataqueA, defesaA };
   }
 
+  // ------------------------------------------------------------ modelo de chance (versão 2)
+  // Gols esperados de cada time somando 4 coisas, cada uma com seu peso:
+  //  1. gols da temporada como mandante/visitante (o modelo antigo);
+  //  2. forma recente com peso, ajustada pela força dos adversários (Elo);
+  //  3. chutes no gol (recentes, ajustados pelo adversário), quando os jogos têm estatística;
+  //  4. xG da temporada (FotMob), só para jogos futuros.
+  // Depois o Elo (que mede a força real acumulada, considerando contra quem cada time jogou) puxa o favoritismo,
+  // e a correção de placares baixos (Dixon-Coles) acerta melhor a chance de empate.
+  function forcas2(fh, fa, liga) {
+    const f = forcas(fh, fa, liga); // parte 1
+    const Lt = ((liga.mh || 1.4) + (liga.ma || 1.1)) / 2, Lc = liga.cg;
+    const lado = (T, atk1, def1) => {
+      const r = T.rec, n = T.geral.j;
+      if (!r || !r.w || !n) return { atk: atk1, def: def1 };
+      const pesoRec = 0.45 * Math.min(1, n / 6);
+      let atk = (1 - pesoRec) * atk1 + pesoRec * encolher((r.gm / r.w) / Lt, n, 6);
+      let def = (1 - pesoRec) * def1 + pesoRec * encolher((r.gs / r.w) / Lt, n, 6);
+      if (Lc && r.wc && r.nc >= 3) {
+        const pesoCg = 0.35 * Math.min(1, r.nc / 8);
+        atk = (1 - pesoCg) * atk + pesoCg * encolher((r.cf / r.wc) / Lc, r.nc, 6);
+        def = (1 - pesoCg) * def + pesoCg * encolher((r.cc / r.wc) / Lc, r.nc, 6);
+      }
+      if (T.xg && T.xg[2] >= 5) { // [xG, xG sofrido, jogos]
+        atk = 0.75 * atk + 0.25 * encolher(T.xg[0] / T.xg[2] / Lt, T.xg[2], 6);
+        def = 0.75 * def + 0.25 * encolher(T.xg[1] / T.xg[2] / Lt, T.xg[2], 6);
+      }
+      return { atk, def };
+    };
+    const H = lado(fh, f.ataqueH, f.defesaH), A = lado(fa, f.ataqueA, f.defesaA);
+    const Lh = liga.mh || 1.4, La = liga.ma || 1.1;
+    return { lh: Lh * H.atk * A.def, la: La * A.atk * H.def, ataqueH: H.atk, defesaH: H.def, ataqueA: A.atk, defesaA: A.def };
+  }
+  const RHO = -0.1; // correção de placares baixos (0x0, 1x0, 0x1, 1x1)
+  function grade(lh, la, rho) {
+    const N = 10, ph = [], pa = [];
+    for (let i = 0; i <= N; i++) { ph.push(pPoisson(lh, i)); pa.push(pPoisson(la, i)); }
+    const m = [];
+    let tot = 0;
+    for (let i = 0; i <= N; i++) {
+      m.push([]);
+      for (let k = 0; k <= N; k++) {
+        let p = ph[i] * pa[k];
+        if (rho) {
+          if (i === 0 && k === 0) p *= 1 - lh * la * rho; else if (i === 0 && k === 1) p *= 1 + lh * rho;
+          else if (i === 1 && k === 0) p *= 1 + la * rho; else if (i === 1 && k === 1) p *= 1 - rho;
+        }
+        m[i].push(p); tot += p;
+      }
+    }
+    return { m, tot, N };
+  }
+  function esperadoCasa(lh, la) { // pontos esperados do mandante (vitória 1, empate 0,5)
+    const { m, tot, N } = grade(lh, la, RHO);
+    let p1 = 0, px = 0;
+    for (let i = 0; i <= N; i++) for (let k = 0; k <= N; k++) { if (i > k) p1 += m[i][k]; else if (i === k) px += m[i][k]; }
+    return (p1 + px / 2) / tot;
+  }
   function projetar(fh, fa, liga) {
+    const f = forcas2(fh, fa, liga);
+    let lh = Math.min(Math.max(f.lh, 0.15), 5), la = Math.min(Math.max(f.la, 0.15), 5);
+    // Elo: puxa o favoritismo (peso cresce com os jogos disputados, até 35%)
+    const nMin = Math.min(fh.geral.j, fa.geral.j);
+    if (fh.elo != null && fa.elo != null && nMin >= 3) {
+      const wE = 0.35 * Math.min(1, nMin / 10);
+      const eElo = 1 / (1 + Math.pow(10, -((fh.elo + ELO_MANDO) - fa.elo) / 400));
+      const e0 = esperadoCasa(lh, la), alvo = (1 - wE) * e0 + wE * eElo;
+      let a = -1, b = 1;
+      for (let it = 0; it < 14; it++) { const c = (a + b) / 2; if (esperadoCasa(lh * Math.exp(c), la * Math.exp(-c)) < alvo) a = c; else b = c; }
+      const c = (a + b) / 2;
+      lh = Math.min(Math.max(lh * Math.exp(c), 0.15), 5); la = Math.min(Math.max(la * Math.exp(-c), 0.15), 5);
+    }
+    const { m, N } = grade(lh, la, RHO);
+    let p1 = 0, px = 0, p2 = 0, btts = 0; const ov = [0, 0, 0, 0, 0]; const placares = [];
+    for (let i = 0; i <= N; i++) for (let k = 0; k <= N; k++) {
+      const p = m[i][k];
+      if (i > k) p1 += p; else if (i === k) px += p; else p2 += p;
+      if (i > 0 && k > 0) btts += p;
+      for (let j = 0; j < LINHAS.length; j++) if (i + k > LINHAS[j]) ov[j] += p;
+      placares.push({ h: i, a: k, p });
+    }
+    const soma = p1 + px + p2; p1 /= soma; px /= soma; p2 /= soma; btts /= soma;
+    for (let j = 0; j < ov.length; j++) ov[j] /= soma;
+    placares.forEach((x) => (x.p /= soma));
+    placares.sort((x, y) => y.p - x.p);
+    const l1 = (lh + la) * 0.44;
+    const ht05 = 1 - Math.exp(-l1), ht15 = 1 - Math.exp(-l1) * (1 + l1);
+    return { lh, la, p1, px, p2, btts, ov, ht05, ht15, placares: placares.slice(0, 6),
+             casaMarca: 1 - Math.exp(-lh), foraMarca: 1 - Math.exp(-la), v: 2 };
+  }
+  // comparação dos dois modelos nos jogos encerrados (cada jogo com os números de antes dele)
+  function compararModelos(preps) {
+    const novo = () => ({ ll: 0, br: 0, ac: 0, fav: 0, favOk: 0, favP: 0, faixas: [[0.5, 0.6], [0.6, 0.7], [0.7, 1.01]].map(([a, b]) => ({ a, b, n: 0, ok: 0, p: 0 })) });
+    const r = { n: 0, v1: novo(), v2: novo() };
+    for (const prep of preps) for (const p of prep.partidas) {
+      const foto = prep.fotos[p.i];
+      if (!foto || foto.h.geral.j < 3 || foto.a.geral.j < 3) continue;
+      const res = p.fh > p.fa ? 0 : p.fh === p.fa ? 1 : 2;
+      r.n++;
+      for (const [k, x] of [["v1", projetarV1(foto.h, foto.a, foto.liga)], ["v2", projetar(foto.h, foto.a, foto.liga)]]) {
+        const pr = [x.p1, x.px, x.p2], o = r[k];
+        o.ll -= Math.log(Math.max(pr[res], 1e-6));
+        o.br += pr.reduce((s, q, i) => s + Math.pow(q - (i === res ? 1 : 0), 2), 0);
+        const top = pr.indexOf(Math.max(...pr)); if (top === res) o.ac++;
+        const fav = x.p1 >= x.p2 ? 0 : 2, pf = Math.max(x.p1, x.p2), po = Math.min(x.p1, x.p2);
+        if (pf >= 0.55 && pf - po >= 0.2) { o.fav++; o.favP += pf; if (res === fav) o.favOk++; }
+        const fx = o.faixas.find((z) => pf >= z.a && pf < z.b);
+        if (fx) { fx.n++; fx.p += pf; if (res === fav) fx.ok++; }
+      }
+    }
+    for (const k of ["v1", "v2"]) { const o = r[k]; if (r.n) { o.ll /= r.n; o.br /= r.n; o.ac /= r.n; } o.favTaxa = o.fav ? o.favOk / o.fav : null; o.favP = o.fav ? o.favP / o.fav : null; }
+    return r;
+  }
+  function projetarV1(fh, fa, liga) {
     const f = forcas(fh, fa, liga);
     const lh = Math.min(Math.max(f.lh, 0.15), 5), la = Math.min(Math.max(f.la, 0.15), 5);
     const N = 10, m = [];
@@ -253,10 +365,11 @@
     // todos os jogos (milhares de cópias ao abrir o site); agora só guarda quantos jogos o time tinha e monta a foto
     // quando alguém pede (e guarda para a próxima vez). O resultado é o mesmo.
     const marcas = new Map();
-    let liga = { gh: 0, ga: 0, n: 0 };
+    let liga = { gh: 0, ga: 0, n: 0, cg: 0, je: 0 };
     const ligaMed = () => ({
       mh: liga.n >= 10 ? liga.gh / liga.n : 1.4,
       ma: liga.n >= 10 ? liga.ga / liga.n : 1.1,
+      cg: liga.je >= 10 ? liga.cg / (2 * liga.je) : null, // chutes no gol por time por jogo
       n: liga.n,
     });
 
@@ -270,10 +383,13 @@
       somarNoBucket(th.casa, p.fh, p.fa, p.hh, p.ha, p, true);
       somarNoBucket(ta.geral, p.fa, p.fh, p.ha, p.hh, p, false);
       somarNoBucket(ta.fora, p.fa, p.fh, p.ha, p.hh, p, false);
+      const eloH0 = th.elo, eloA0 = ta.elo;
       const delta = atualizarElo(th, ta, p.fh, p.fa);
-      th.jogos.push({ p, casa: true, elo: th.elo, delta });
-      ta.jogos.push({ p, casa: false, elo: ta.elo, delta: -delta });
+      th.jogos.push({ p, casa: true, elo: th.elo, delta, eloAdv: eloA0 });
+      ta.jogos.push({ p, casa: false, elo: ta.elo, delta: -delta, eloAdv: eloH0 });
       liga.gh += p.fh; liga.ga += p.fa; liga.n++;
+      const e = p.es;
+      if (e && e[8] != null && e[9] != null) { liga.cg += (e[8] || 0) + (e[9] || 0); liga.je++; }
     }
     const prontas = new Map();
     const fotos = new Proxy({}, {
@@ -299,7 +415,25 @@
       if (j.casa) { somarNoBucket(g, p.fh, p.fa, p.hh, p.ha, p, true); somarNoBucket(c, p.fh, p.fa, p.hh, p.ha, p, true); }
       else { somarNoBucket(g, p.fa, p.fh, p.ha, p.hh, p, false); somarNoBucket(f, p.fa, p.fh, p.ha, p.hh, p, false); }
     }
-    return { geral: g, casa: c, fora: f, elo: t.eloHist[n] };
+    return { geral: g, casa: c, fora: f, elo: t.eloHist[n], rec: recente(t, n) };
+  }
+  // forma recente com peso: o último jogo vale 1, o anterior 0,88, o outro 0,77... (meia-vida de ~5 jogos).
+  // Cada gol é ajustado pela força do adversário (Elo antes do jogo): marcar num time forte vale mais, sofrer de
+  // um time forte pesa menos. Também os chutes no gol (menos "sorte" que os gols), quando o jogo tem estatística.
+  function recente(t, n) {
+    const r = { w: 0, gm: 0, gs: 0, wc: 0, cf: 0, cc: 0, nc: 0 };
+    for (let i = n - 1, k = 0; i >= 0; i--, k++) {
+      const j = t.jogos[i], p = j.p, peso = Math.pow(0.88, k);
+      const adv = j.eloAdv != null ? (j.eloAdv - ELO_INICIAL) / 400 : 0, fA = Math.exp(0.35 * adv);
+      const meus = j.casa ? p.fh : p.fa, deles = j.casa ? p.fa : p.fh;
+      r.w += peso; r.gm += peso * meus * fA; r.gs += peso * deles / fA;
+      const e = p.es;
+      if (e && e[8] != null && e[9] != null) {
+        const a = j.casa ? 0 : 1;
+        r.wc += peso; r.nc++; r.cf += peso * (e[8 + a] || 0) * fA; r.cc += peso * (e[9 - a] || 0) / fA;
+      }
+    }
+    return r;
   }
 
   // estado atual do time para jogos futuros
@@ -489,7 +623,7 @@
 
   const Motor = {
     LINHAS, MERCADOS, SUJEITOS, METRICAS_TIME, METRICAS_PROJ, METRICAS_CMP,
-    prepararCompeticao, metricas, bucketDeJogos, primeiroGol, primeiroDoJogo, gols2T, projetar, fotoAtual, encerrada,
+    prepararCompeticao, metricas, bucketDeJogos, primeiroGol, primeiroDoJogo, gols2T, projetar, projetarV1, compararModelos, fotoAtual, encerrada,
     backtest, proximosNoFiltro, passa, valorMetrica, tabela, ranking,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Motor;
