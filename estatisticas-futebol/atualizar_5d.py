@@ -239,6 +239,42 @@ def baixar_jogos(cache, code, liga_id, desde_ts, ate_ts):
         pagina += 1
 
 
+# ---------------------------------------------------------------- teste: o que vem nas odds (plano Pro)
+def resumir(obj, limite=1800):
+    t = json.dumps(obj, ensure_ascii=False)
+    return t if len(t) <= limite else t[:limite] + " …(cortado)"
+
+
+def testar_odds(cache):
+    """Só mostra no registro do GitHub o formato das odds (3 pedidos, no máximo 1 vez a cada 12 h). Não muda o site."""
+    if time.time() - (cache.get("teste_odds_em") or 0) < 12 * 3600 and not os.environ.get("D5_TESTE_ODDS"):
+        return
+    cache["teste_odds_em"] = time.time()
+    print("\n[odds] TESTE: o que a 5Dollar manda de odds")
+    liga = cache["ligas"].get("BSA") or cache["ligas"].get("PL") or next(iter(cache["ligas"].values()), None)
+    if not liga:
+        print("[odds] nenhuma liga no cache ainda")
+        return
+    agora = time.time()
+    r = pedir(f"leagues/{liga['id']}/fixtures", {"start_time": int(agora), "end_time": int(agora + 7 * 86400), "order": "asc",
+                                                 "include": "odds", "per_page": 3, "page": 1})
+    jogos = (r or {}).get("data") or []
+    print(f"[odds] {liga['nome']}: {len(jogos)} jogos nos próximos 7 dias (lista com include=odds)")
+    if jogos:
+        fx = jogos[0]
+        print(f"[odds] campos do jogo: {sorted(fx.keys())}")
+        print(f"[odds] jogo: {(fx.get('teams') or {})} · {fx.get('kickoff_utc')}")
+        print(f"[odds] odds na lista: {resumir(fx.get('odds'))}")
+        r2 = pedir(f"fixtures/{fx.get('id')}/odds")
+        if r2:
+            print(f"[odds] /fixtures/{fx.get('id')}/odds -> chaves: {sorted(r2.keys())}")
+            print(f"[odds] conteúdo: {resumir(r2.get('data'), 3000)}")
+        else:
+            print("[odds] /fixtures/{id}/odds não respondeu")
+    r3 = pedir("bookmakers")
+    print(f"[odds] casas: {resumir((r3 or {}).get('data'), 600)}")
+
+
 # ---------------------------------------------------------------- 3) somar por time (ids do site)
 def somar(comps_site, times_site, cache):
     saida = {}
@@ -317,6 +353,10 @@ def main():
                             ("Irlanda", ["ireland"])):
             achou = [f"{l['nome']} ({l['pais']}, id {l['id']})" for l in todas or [] if any(c in sem_acento(l["nome"] + " " + l["pais"]) for c in chaves)]
             print(f"   5Dollar tem {rot}? {'sim: ' + '; '.join(achou[:4]) if achou else 'não achei'}")
+        try:
+            testar_odds(cache)
+        except Exception as e:
+            print(f"[odds] teste falhou: {e}")
         for code in LIGAS:
             if code not in comps_site or _pedidos[0] >= MAX_PEDIDOS:
                 continue
