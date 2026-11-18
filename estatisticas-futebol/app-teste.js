@@ -1404,7 +1404,7 @@
   const limitarDia = (d) => (d < diaMin() ? diaMin() : d > diaMax() ? diaMax() : d);
 
   // ---------- odds das casas
-  // odds das casas: a média de várias casas (The Odds API, quando a liga tem) ou a bet365 (5Dollar, robô do site)
+  // odds das casas: a bet365 (5Dollar, robô do site) primeiro; a média de várias casas (The Odds API) fica de reserva
   const ODDS5 = (window.EXTRA5D && window.EXTRA5D.odds) || {};
   const memoOdds5 = new Map();
   function odds5Do(code, p) {
@@ -1414,7 +1414,7 @@
     if (!memoOdds5.has(k)) memoOdds5.set(k, { n: 1, fonte: "bet365", c: x.x[0], e: x.x[1], f: x.x[2], mc: x.x[0], me: x.x[1], mf: x.x[2], ab: x.ab || null, o25: x.o25 || null, btts: x.btts || null });
     return memoOdds5.get(k);
   }
-  const oddsDo = (code, p) => { const o = (DADOS.competicoes[code] || {}).odds; return (o && (o[p.i] || o[String(p.i)])) || odds5Do(code, p); };
+  const oddsDo = (code, p) => { const b = odds5Do(code, p); if (b) return b; const o = (DADOS.competicoes[code] || {}).odds; return (o && (o[p.i] || o[String(p.i)])) || null; };
   const nomeOdds = (o) => (o && o.fonte === "bet365" ? "bet365" : "Média das casas");
   const TEM_ODDS = comps.some((c) => (DADOS.competicoes[c].odds && Object.keys(DADOS.competicoes[c].odds).length) || (ODDS5[c] && Object.keys(ODDS5[c]).length));
   const temValor = (odd, prob) => odd && prob > 0 && odd * prob > 1.0;
@@ -1544,7 +1544,7 @@
         ${faixa("f-ov25", "Chance de mais de 2,5 gols", f.ov25Min)}
         ${faixa("f-btts", "Chance de ambas marcarem", f.bttsMin)}
         <div class="pf-campo"><label for="f-minj">Mínimo de jogos de cada time</label><input id="f-minj" type="number" min="0" value="${f.minJogos}" class="campo-num"></div>
-        ${TEM_ODDS ? `<label class="check"><input type="checkbox" id="f-valor" ${f.valor ? "checked" : ""}> Só jogos com valor: odd das casas (média ou bet365) acima da odd justa${f.quem !== "qualquer" ? " (no " + (f.quem === "casa" ? "mandante" : "visitante") + ")" : ""}</label>` : ""}
+        ${TEM_ODDS ? `<label class="check"><input type="checkbox" id="f-valor" ${f.valor ? "checked" : ""}> Só jogos com valor: odd da bet365 (ou média das casas) acima da odd justa${f.quem !== "qualquer" ? " (no " + (f.quem === "casa" ? "mandante" : "visitante") + ")" : ""}</label>` : ""}
       </div>
       <div class="pf-conds">
         <div class="pf-conds-cab"><b>Condições</b><span class="sub">estatísticas dos times (casa, fora, geral), da projeção ou a comparação entre eles · todas precisam valer</span></div>
@@ -1738,7 +1738,7 @@
 
   const CAB_COLUNAS = `<div class="jogo-v2 cab-colunas" aria-hidden="true"><span></span><span>Horário</span><span class="situacao">Situação</span><span>Jogo</span>
     <span class="chance">Chance de vitória</span><span class="odds">Odd justa*</span>${TEM_ODDS ? '<span class="odds">Odd casas**</span>' : ""}<span class="gols">Placar</span></div>`;
-  const NOTA_ODD = `<p class="nota-odd">*Odd justa = 1 ÷ chance calculada pela projeção do site (<a href="#modelo">como a chance é calculada</a>). Não é a odd das casas de apostas: serve para comparar com ela.${TEM_ODDS ? "<br>**Odd casas = média das casas de apostas (The Odds API) ou, nas ligas sem ela, a odd da bet365 (5Dollar). Em verde quando está acima da odd justa, ou seja, quando há valor segundo a projeção." : ""}</p>`;
+  const NOTA_ODD = `<p class="nota-odd">*Odd justa = 1 ÷ chance calculada pela projeção do site (<a href="#modelo">como a chance é calculada</a>). Não é a odd das casas de apostas: serve para comparar com ela.${TEM_ODDS ? "<br>**Odd casas = odd da bet365 (5Dollar) ou, nos jogos sem ela, a média das casas de apostas (The Odds API). Em verde quando está acima da odd justa, ou seja, quando há valor segundo a projeção." : ""}</p>`;
 
   function linhaJogo(code, p) {
     const fim = encerrada(p), vivo = aoVivo(p);
