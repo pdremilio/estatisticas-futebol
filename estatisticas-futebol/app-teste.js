@@ -1404,8 +1404,19 @@
   const limitarDia = (d) => (d < diaMin() ? diaMin() : d > diaMax() ? diaMax() : d);
 
   // ---------- odds das casas
-  const oddsDo = (code, p) => { const o = (DADOS.competicoes[code] || {}).odds; return o ? o[p.i] || o[String(p.i)] || null : null; };
-  const TEM_ODDS = comps.some((c) => DADOS.competicoes[c].odds && Object.keys(DADOS.competicoes[c].odds).length);
+  // odds das casas: a média de várias casas (The Odds API, quando a liga tem) ou a bet365 (5Dollar, robô do site)
+  const ODDS5 = (window.EXTRA5D && window.EXTRA5D.odds) || {};
+  const memoOdds5 = new Map();
+  function odds5Do(code, p) {
+    const x = (ODDS5[code] || {})[String(p.i)];
+    if (!x || !x.x) return null;
+    const k = code + ":" + p.i;
+    if (!memoOdds5.has(k)) memoOdds5.set(k, { n: 1, fonte: "bet365", c: x.x[0], e: x.x[1], f: x.x[2], mc: x.x[0], me: x.x[1], mf: x.x[2], ab: x.ab || null, o25: x.o25 || null, btts: x.btts || null });
+    return memoOdds5.get(k);
+  }
+  const oddsDo = (code, p) => { const o = (DADOS.competicoes[code] || {}).odds; return (o && (o[p.i] || o[String(p.i)])) || odds5Do(code, p); };
+  const nomeOdds = (o) => (o && o.fonte === "bet365" ? "bet365" : "Média das casas");
+  const TEM_ODDS = comps.some((c) => (DADOS.competicoes[c].odds && Object.keys(DADOS.competicoes[c].odds).length) || (ODDS5[c] && Object.keys(ODDS5[c]).length));
   const temValor = (odd, prob) => odd && prob > 0 && odd * prob > 1.0;
   const pctValor = (odd, prob) => (odd && prob > 0 ? (odd * prob - 1) * 100 : null);
 
@@ -1491,10 +1502,15 @@
     if (proj.ov[2] * 100 < f.ov25Min) return false;
     if (proj.btts * 100 < f.bttsMin) return false;
     if (f.valor) {
+      // valor no mercado que o filtro está olhando: resultado (pela chance), over 2,5 e/ou ambas marcam
       const o = oddsDo(code, p);
       if (!o) return false;
-      const ok = f.quem === "casa" ? temValor(o.c, proj.p1) : f.quem === "fora" ? temValor(o.f, proj.p2)
+      const olhaGols = f.ov25Min > 0 || f.bttsMin > 0;
+      const v1x2 = f.quem === "casa" ? temValor(o.c, proj.p1) : f.quem === "fora" ? temValor(o.f, proj.p2)
         : temValor(o.c, proj.p1) || temValor(o.e, proj.px) || temValor(o.f, proj.p2);
+      const ok = (!olhaGols || f.chanceMin > 0 ? v1x2 : false)
+        || (f.ov25Min > 0 && o.o25 && temValor(o.o25[0], proj.ov[2]))
+        || (f.bttsMin > 0 && o.btts && temValor(o.btts[0], proj.btts));
       if (!ok) return false;
     }
     return M.passa({ minJogos: f.minJogos, condicoes: f.condicoes }, foto, proj);
@@ -1528,7 +1544,7 @@
         ${faixa("f-ov25", "Chance de mais de 2,5 gols", f.ov25Min)}
         ${faixa("f-btts", "Chance de ambas marcarem", f.bttsMin)}
         <div class="pf-campo"><label for="f-minj">Mínimo de jogos de cada time</label><input id="f-minj" type="number" min="0" value="${f.minJogos}" class="campo-num"></div>
-        ${TEM_ODDS ? `<label class="check"><input type="checkbox" id="f-valor" ${f.valor ? "checked" : ""}> Só jogos com valor: odd média das casas acima da odd justa${f.quem !== "qualquer" ? " (no " + (f.quem === "casa" ? "mandante" : "visitante") + ")" : ""}</label>` : ""}
+        ${TEM_ODDS ? `<label class="check"><input type="checkbox" id="f-valor" ${f.valor ? "checked" : ""}> Só jogos com valor: odd das casas (média ou bet365) acima da odd justa${f.quem !== "qualquer" ? " (no " + (f.quem === "casa" ? "mandante" : "visitante") + ")" : ""}</label>` : ""}
       </div>
       <div class="pf-conds">
         <div class="pf-conds-cab"><b>Condições</b><span class="sub">estatísticas dos times (casa, fora, geral), da projeção ou a comparação entre eles · todas precisam valer</span></div>
@@ -1722,7 +1738,7 @@
 
   const CAB_COLUNAS = `<div class="jogo-v2 cab-colunas" aria-hidden="true"><span></span><span>Horário</span><span class="situacao">Situação</span><span>Jogo</span>
     <span class="chance">Chance de vitória</span><span class="odds">Odd justa*</span>${TEM_ODDS ? '<span class="odds">Odd casas**</span>' : ""}<span class="gols">Placar</span></div>`;
-  const NOTA_ODD = `<p class="nota-odd">*Odd justa = 1 ÷ chance calculada pela projeção do site (<a href="#modelo">como a chance é calculada</a>). Não é a odd das casas de apostas: serve para comparar com ela.${TEM_ODDS ? "<br>**Odd casas = média das casas de apostas (The Odds API). Em verde quando está acima da odd justa, ou seja, quando há valor segundo a projeção." : ""}</p>`;
+  const NOTA_ODD = `<p class="nota-odd">*Odd justa = 1 ÷ chance calculada pela projeção do site (<a href="#modelo">como a chance é calculada</a>). Não é a odd das casas de apostas: serve para comparar com ela.${TEM_ODDS ? "<br>**Odd casas = média das casas de apostas (The Odds API) ou, nas ligas sem ela, a odd da bet365 (5Dollar). Em verde quando está acima da odd justa, ou seja, quando há valor segundo a projeção." : ""}</p>`;
 
   function linhaJogo(code, p) {
     const fim = encerrada(p), vivo = aoVivo(p);
@@ -1736,7 +1752,7 @@
       if (TEM_ODDS) {
         const o = oddsDo(code, p);
         const cel = (odd, prob) => (odd ? `<span class="${temValor(odd, prob) ? "valor" : ""}">${fNum(odd, 2)}</span>` : "<span>–</span>");
-        casas = `<span class="odds casas" title="${o ? `Média de ${o.n} casas · melhor: ${fNum(o.mc, 2)} / ${fNum(o.mf, 2)}` : "Sem odds das casas para este jogo"}">${o ? cel(o.c, proj.p1) + cel(o.f, proj.p2) : ""}</span>`;
+        casas = `<span class="odds casas" title="${o ? (o.fonte === "bet365" ? `bet365 (5Dollar)${o.ab ? ` · abertura ${fNum(o.ab[0], 2)} / ${fNum(o.ab[2], 2)}` : ""}` : `Média de ${o.n} casas · melhor: ${fNum(o.mc, 2)} / ${fNum(o.mf, 2)}`) : "Sem odds das casas para este jogo"}">${o ? cel(o.c, proj.p1) + cel(o.f, proj.p2) : ""}</span>`;
       }
     } else if (TEM_ODDS) casas = '<span class="odds casas"></span>';
     const vH = fim && p.fh > p.fa, vA = fim && p.fa > p.fh;
@@ -2253,7 +2269,7 @@
     const ladoTime = (tid, pos, prob, cls, oddCasa) => `<div class="cab-time ${cls}">
         <div class="cab-time-nome"><a href="#time/${code}/${tid}"><h2>${h(nomeLongo(tid))}</h2></a>${estrelaTime(tid, 18)}</div>
         <div class="cab-time-linha">${pos ? `<span class="posicao">${pos.pos}º</span>` : ""}${escudo(tid, "esc esc-g")}</div>
-        ${oddCasa ? `<span class="sub odd-casa ${temValor(oddCasa, prob) ? "valor" : ""}" title="Média das casas de apostas">casas <b>${fNum(oddCasa, 2)}</b>${temValor(oddCasa, prob) ? " · valor" : ""}</span>` : ""}
+        ${oddCasa ? `<span class="sub odd-casa ${temValor(oddCasa, prob) ? "valor" : ""}" title="${nomeOdds(oddsJ)}">${oddsJ && oddsJ.fonte === "bet365" ? "bet365" : "casas"} <b>${fNum(oddCasa, 2)}</b>${temValor(oddCasa, prob) ? " · valor" : ""}</span>` : ""}
         ${prob != null ? `<span class="sub" title="1 ÷ chance calculada pela projeção. Não é a odd da casa de apostas."><span>chance ${fProb(prob)}</span><i class="ponto"> · </i><span>odd justa <b>${fOdd(prob)}</b></span></span>` : ""}</div>`;
     let centro;
     if (fim || vivo) {
@@ -2386,8 +2402,17 @@
       ${(() => {
         const o = oddsDo(code, p);
         if (!o) return TEM_ODDS ? `<p class="sub">Sem odds das casas para este jogo.</p>` : "";
-        const lin = (rot, odd, melhor, pr) => `<tr><td class="esq">${rot}</td><td>${fProb(pr)}</td><td>${fOdd(pr)}</td><td>${fNum(odd, 2)}</td><td>${fNum(melhor, 2)}</td>
+        const lin = (rot, odd, melhor, pr) => `<tr><td class="esq">${rot}</td><td>${fProb(pr)}</td><td>${fOdd(pr)}</td><td>${fNum(odd, 2)}</td><td>${melhor ? fNum(melhor, 2) : "–"}</td>
           <td class="${temValor(odd, pr) ? "ok" : "sub"}">${pctValor(odd, pr) == null ? "–" : (pctValor(odd, pr) > 0 ? "+" : "") + Math.round(pctValor(odd, pr)) + "%"}</td></tr>`;
+        if (o.fonte === "bet365") {
+          // bet365 (5Dollar): odd atual, a de abertura e, quando já saíram, over/under 2,5 e ambas marcam
+          const ab = o.ab || [];
+          const extra = (o.o25 ? lin("Mais de 2,5 gols", o.o25[0], null, proj.ov[2]) + lin("Menos de 2,5 gols", o.o25[1], null, 1 - proj.ov[2]) : "")
+            + (o.btts ? lin("Ambas marcam", o.btts[0], null, proj.btts) + lin("Ambas não marcam", o.btts[1], null, 1 - proj.btts) : "");
+          return `<div class="tabela-rolagem"><table class="dados odds-tabela"><thead><tr><th class="esq">Mercado</th><th>Chance</th><th>Odd justa</th><th>bet365</th><th>Abertura</th><th title="Odd × chance − 1">Valor</th></tr></thead>
+            <tbody>${lin(h(nomeTime(p.h)), o.c, ab[0], proj.p1)}${lin("Empate", o.e, ab[1], proj.px)}${lin(h(nomeTime(p.a)), o.f, ab[2], proj.p2)}${extra}</tbody></table></div>
+            <p class="sub" style="margin:6px 0 0">Odds da bet365 (5Dollar), atualizadas pelo robô do site a cada ~3 h. "Abertura" = a primeira odd publicada. Valor positivo = a odd paga mais do que a chance calculada pelo site sugere.${o.o25 || o.btts ? "" : " Over 2,5 e ambas marcam aparecem no dia do jogo."}</p>`;
+        }
         return `<div class="tabela-rolagem"><table class="dados odds-tabela"><thead><tr><th class="esq">Resultado</th><th>Chance</th><th>Odd justa</th><th>Média das casas</th><th>Melhor odd</th><th title="Odd média × chance − 1">Valor</th></tr></thead>
           <tbody>${lin(h(nomeTime(p.h)), o.c, o.mc, proj.p1)}${lin("Empate", o.e, o.me, proj.px)}${lin(h(nomeTime(p.a)), o.f, o.mf, proj.p2)}</tbody></table></div>
           <p class="sub" style="margin:6px 0 0">Odds de ${o.n} casas (The Odds API). Valor positivo = a odd média paga mais do que a chance calculada pelo site sugere.</p>`;
