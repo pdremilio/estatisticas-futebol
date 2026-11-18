@@ -74,6 +74,13 @@ jobs:
           if [ -f dados.js ]; then cp dados.js _site/; fi
           if [ -f agenda.json ]; then cp agenda.json _site/; fi
           for f in teste.html app-teste.js aovivo-teste.js estilo-teste.css motor-teste.js dados5.js cache5.json extra5d.js cache5d.json titulares5.json manifest.webmanifest sw.js icone-192.png icone-512.png icone-mascara-512.png icone-apple-180.png; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
+          # versões para o navegador guardar os arquivos: código (muda só quando o código muda) e dados (cada execução)
+          VC=$(cat _site/app.js _site/motor.js _site/aovivo.js _site/estilo.css _site/contas.js _site/config.js | sha1sum | cut -c1-10)
+          sed -i "s/__VC__/$VC/; s/__VD__/${GITHUB_RUN_ID}/" _site/index.html
+          if [ -f _site/teste.html ]; then
+            VCT=$(cat _site/app-teste.js _site/motor-teste.js _site/aovivo-teste.js _site/estilo-teste.css _site/contas.js _site/config.js 2>/dev/null | sha1sum | cut -c1-10)
+            sed -i "s/__VC__/$VCT/; s/__VD__/${GITHUB_RUN_ID}/" _site/teste.html
+          fi
 
       - name: Enviar o site
         uses: actions/upload-pages-artifact@v3
