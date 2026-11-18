@@ -151,7 +151,7 @@
     vv.soEsc = false;
     vv.tid = { h: casa.team && casa.team.id, a: fora.team && fora.team.id };
     vv.st = tp.state;
-    vv.clk = st.displayClock || ""; vv.per = st.period || 0;
+    vv.clk = st.displayClock || ""; vv.per = st.period || 0; vv.perEspn = st.period || vv.perEspn || 0;
     vv.fonte = "ESPN";
     vv.em = new Date().toISOString();
     p.semEspn = false;
@@ -196,6 +196,15 @@
     if (/(^|[^a-z])(ft|full|aet|pen|finish|ended|end)/.test(low)) return { fim: true };
     return null;
   }
+  // a 5Dollar conta o minuto corrido: nos acréscimos do 1º tempo manda "47", "48"... Só é 2º tempo se já houve
+  // intervalo, se a ESPN diz que é, se passou dos 60' ou se a 5Dollar já registrou o placar do 1º tempo
+  function tempoDo5d(vv, m, fx) {
+    if (!(m > 45)) return 1;
+    if (vv.ht5 || (vv.perEspn || 0) >= 2 || m > 60) return 2;
+    const evs = fx && Array.isArray(fx.events) ? fx.events : [];
+    if (evs.some((e) => e && (e.type === "period_score" || /second|^2/.test(String(e.period || ""))))) return 2;
+    return 1;
+  }
   function aplicarStatus5d(p) {
     const vv = p.vv, s = vv && vv.d5St;
     if (!s || vv.fimEspn || Date.now() - s.em > 45000) return false;
@@ -207,7 +216,8 @@
       return true;
     }
     p.s = "IN_PLAY"; vv.st = "in"; vv.min = s.txt; vv.clk = s.txt;
-    if (s.m > 45 && (vv.per || 1) < 2) vv.per = 2;
+    if (s.per === 2 && (vv.per || 1) < 2) vv.per = 2;
+    if (s.per === 1 && (vv.per || 0) !== 1 && !vv.ht5 && (vv.perEspn || 0) < 2) vv.per = 1;
     return true;
   }
 
@@ -499,7 +509,7 @@
     const vv = (p.vv = p.vv || {});
     vv.tid = tid;
     if (comp && comp.status) {
-      vv.clk = comp.status.displayClock || vv.clk; vv.per = comp.status.period || vv.per;
+      vv.clk = comp.status.displayClock || vv.clk; vv.per = comp.status.period || vv.per; vv.perEspn = comp.status.period || vv.perEspn || 0;
       if (comp.status.type && comp.status.type.state) vv.st = comp.status.type.state;
     }
 
@@ -1017,14 +1027,24 @@
   // todos os visitantes, com a chave escondida. Com ele ligado, a chave pessoal não é usada.
   const WORKER5D = String(((window.SB_CONFIG || {}).aoVivo5d) || "").replace(/\/+$/, "");
   const fonte5d = () => !!WORKER5D || !!chave5d();
-  let lista5W = null, lista5WEm = 0, lista5WBusca = null, lista5WCheia = false; // cheia: pode ter cortado jogos (3 páginas)
+  let lista5W = null, lista5WEm = 0, lista5WBusca = null, lista5WCheia = false, lista5WProx = 0; // cheia: pode ter cortado jogos (3 páginas)
+  // pede ao servidor logo depois da próxima busca dele (o servidor diz quando é: "prox"), em vez de um intervalo fixo:
+  // o dado novo chega ~1 s depois de sair da 5Dollar e nenhum pedido é feito à toa
   async function listaDoWorker() {
-    if (lista5W && Date.now() - lista5WEm < 7000) return lista5W;
+    const agora = Date.now();
+    if (lista5W && (lista5WProx ? agora < lista5WProx + 800 && agora - lista5WEm < 30000 : agora - lista5WEm < 7000)) return lista5W;
     if (!lista5WBusca) lista5WBusca = (async () => {
       try {
         const r = await fetch(WORKER5D + "/ao-vivo", { cache: "no-store" });
         const j = r.ok ? await r.json() : null;
-        if (j && j.ok) { lista5W = j.jogos || []; lista5WEm = Date.now(); lista5WCheia = (j.n || lista5W.length) >= 150; d5Status.msg = "ok"; d5Status.em = Date.now(); d5Status.servidor = true; }
+        if (j && j.ok) {
+          lista5W = j.jogos || []; lista5WEm = Date.now(); lista5WCheia = (j.n || lista5W.length) >= 150; d5Status.msg = "ok"; d5Status.em = Date.now(); d5Status.servidor = true;
+          // relógio do servidor x deste aparelho: usa a idade do dado ("em") para achar a hora local da próxima busca
+          const agoraSrv = Number(r.headers.get("X-Agora")) || 0;
+          lista5WProx = j.prox && agoraSrv ? Date.now() + Math.min(30000, Math.max(0, Number(j.prox) - agoraSrv)) : 0;
+          if (lista5WProx && lista5WProx < Date.now() + 1500) lista5WProx = Date.now() + 1500; // servidor atrasado: tenta de novo em 1,5 s
+          d5Status.intervalo = j.intervalo; d5Status.paginas = j.paginas; d5Status.n = j.n;
+        }
         else d5Status.msg = "servidor do ao vivo: " + ((j && j.erro) || "erro " + r.status);
       } catch (e) { d5Status.msg = "não consegui falar com o servidor do ao vivo"; }
       lista5WBusca = null;
@@ -1095,7 +1115,8 @@
     if (!fonte5d() || !p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
     const ch = chaveJogo(p), vv = p.vv;
     if (!vv.d5Tentou) vv.d5Tentou = Date.now();
-    if (Date.now() - (d5Ult.get(ch) || 0) < (WORKER5D ? 5000 : 7500)) return false;
+    // com o servidor, quem dita o ritmo é a lista (só busca de novo quando o servidor tem dado novo)
+    if (!WORKER5D && Date.now() - (d5Ult.get(ch) || 0) < 7500) return false;
     d5Ult.set(ch, Date.now());
     const id = await idDo5d(p);
     if (!id) { const antes = vv.d5 && vv.d5.semJogo; vv.d5 = vv.d5 && vv.d5.id ? vv.d5 : { semJogo: true }; return !antes; }
@@ -1183,6 +1204,10 @@
     const est = estado5d(fx.status_code);
     if (est) {
       const antes = [p.s, vv.min, vv.st].join("|");
+      if (est.m) {
+        est.per = tempoDo5d(vv, est.m, fx);
+        if (est.per === 1 && est.m > 45 && !/\+/.test(est.txt)) est.txt = "45+" + (est.m - 45) + "'"; // acréscimo do 1º tempo
+      }
       vv.d5St = Object.assign(est, { em: agora });
       aplicarStatus5d(p);
       if (antes !== [p.s, vv.min, vv.st].join("|")) mudou = true;
@@ -1197,7 +1222,7 @@
     // lances pelos contadores: gol, chute no gol, chute para fora, escanteio, cartões. O minuto é o da própria
     // 5Dollar (o relógio da ESPN às vezes atrasa em ligas menores); sem ele, usa o da ESPN
     const m5 = parseInt(String(fx.status_code || ""), 10);
-    const sl = m5 >= 1 && m5 <= 130 ? slotDe(m5 + "'", m5 > 45 || (vv.per || 1) >= 2 ? 2 : 1) || slotDe(vv.clk, vv.per) : slotDe(vv.clk, vv.per);
+    const sl = m5 >= 1 && m5 <= 130 ? slotDe(m5 + "'", tempoDo5d(vv, m5, fx)) || slotDe(vv.clk, vv.per) : slotDe(vv.clk, vv.per);
     const ca = fx.cards || {}, cartao = (k) => (ca.home && ca.away ? [Number(ca.home[k]) || 0, Number(ca.away[k]) || 0] : null);
     // buraco: este navegador ficou mais de 40 s sem ler este jogo (aba minimizada, PC suspenso, site fechado).
     // O que aconteceu nesse meio-tempo NÃO vai para o minuto atual: o histórico do servidor coloca cada coisa
@@ -1440,19 +1465,53 @@
     return true;
   }
 
+  // redesenho junto: várias fontes respondendo no mesmo instante viram um desenho só (no próximo quadro)
+  let redesenhoMarcado = false;
+  function pedirRedesenho() {
+    if (redesenhoMarcado) return;
+    redesenhoMarcado = true;
+    const vai = () => { redesenhoMarcado = false; redesenhar(); };
+    if (typeof requestAnimationFrame === "function" && !document.hidden) requestAnimationFrame(vai); else setTimeout(vai, 50);
+  }
+  // cada fonte desenha assim que chega (uma fonte lenta não segura as outras)
+  const assimQueChegar = (prom) => prom.then((m) => { if (m) pedirRedesenho(); return m; }).catch(() => false);
+
+  // 5Dollar pelo servidor: um ciclo só dela, no ritmo do servidor (pede logo depois de cada busca nova lá).
+  // Placar, minuto, gráfico e lances de TODOS os jogos rolando, sem esperar ESPN nem 365Scores.
+  let timer5d = null, rodando5d = false;
+  async function ciclo5d() {
+    if (rodando5d) return; // já tem um rodando (ele mesmo agenda o próximo)
+    rodando5d = true;
+    clearTimeout(timer5d);
+    let espera = 2500; // sem jogo rolando: só confere de novo (conta local, não pede nada)
+    try {
+      const rolando = jogosRolando();
+      if (WORKER5D && rolando.length) {
+        await listaDoWorker();
+        const m = await Promise.all(rolando.map((x) => atualizar5d(x).catch(() => false)).concat([historicoDosVivos().catch(() => false)]));
+        if (m.some(Boolean)) pedirRedesenho();
+        // próximo pedido: logo depois da próxima busca do servidor (entre 1 e 10 s)
+        espera = lista5WProx ? Math.min(10000, Math.max(1000, lista5WProx - Date.now() + 250)) : 4000;
+        if (document.hidden) espera = Math.max(espera, 8000);
+      }
+    } catch (e) {}
+    rodando5d = false;
+    clearTimeout(timer5d);
+    timer5d = setTimeout(ciclo5d, espera);
+  }
+
   let timer365 = null;
   function ciclo365() {
     clearTimeout(timer365);
-    const seguir = () => { timer365 = setTimeout(ciclo365, 3000); }; // cada busca respeita o próprio intervalo
+    const seguir = () => { timer365 = setTimeout(ciclo365, 1500); }; // cada busca respeita o próprio intervalo
     if (document.hidden) return seguir();
     const p = jogoAberto();
-    // com o servidor do ScanBall, a 5Dollar atualiza o placar de TODOS os jogos rolando (uma lista só, sem custo a mais)
-    const outros = WORKER5D ? jogosRolando().filter((x) => x !== p).map((x) => atualizar5d(x).catch(() => false)).concat([historicoDosVivos().catch(() => false)]) : [];
+    // jogo aberto: narração e escalação (ESPN), xG e reserva (365Scores); sem servidor, também a 5Dollar pela chave pessoal
     const doAberto = p && p.vv.st === "in"
-      ? [atualizarDetalhe(p, false).catch(() => false), atualizar365(p, false).catch(() => false), atualizarPbp(p, false).catch(() => false), atualizar5d(p).catch(() => false)]
+      ? [atualizarDetalhe(p, false), atualizar365(p, false), atualizarPbp(p, false)].concat(WORKER5D ? [] : [atualizar5d(p)]).map(assimQueChegar)
       : [];
-    if (!outros.length && !doAberto.length) return seguir();
-    Promise.all(doAberto.concat(outros)).then((m) => { if (m.some(Boolean)) redesenhar(); }).catch(() => {}).finally(seguir);
+    if (!doAberto.length) return seguir();
+    Promise.all(doAberto).finally(seguir);
   }
 
   function jogosRolando() {
@@ -1521,6 +1580,7 @@
     if (document.hidden) return;
     if (oculto) redesenhar();
     if (Date.now() - inicioCiclo > 3000) ciclo();
+    ciclo5d(); // a aba voltou: pega o dado novo do servidor na hora
   }
 
   let pendente = false;
@@ -1572,6 +1632,7 @@
     window.addEventListener("focus", acordar);
     setInterval(vigia, 15000);
     ciclo365();
+    ciclo5d();
     window.addEventListener("hashchange", aoNavegar);
     document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-ir^="jogo/"], [data-abajogo="escalacoes"]')) aoNavegar(); });
     ciclo();
