@@ -10,7 +10,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
-<script>window.VER = Math.floor(Date.now() / 120000); document.write('<link rel="stylesheet" href="estilo-teste.css?v=' + VER + '">');</script>
+<script>
+// versões: o robô do GitHub troca __VC__ (código: muda só quando um arquivo do site muda) e __VD__ (dados: a cada
+// atualização). Assim o navegador guarda o código e só baixa de novo o que mudou. Fora do GitHub, vale o relógio.
+window.VER_C = "__VC__"; window.VER_D = "__VD__";
+if (window.VER_C.indexOf("__") === 0) window.VER_C = window.VER_D = String(Math.floor(Date.now() / 120000));
+window.VER = window.VER_D;
+document.write('<link rel="stylesheet" href="estilo-teste.css?v=' + VER_C + '">');</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230F6E5A'/%3E%3Cpath d='M16 16 L16.00 6.40 A9.6 9.6 0 0 1 24.31 11.20 Z' fill='%23F2C230'/%3E%3Ccircle cx='16' cy='16' r='9.6' fill='none' stroke='%23fff' stroke-width='2.1'/%3E%3Cpolygon points='16.00,12.40 19.42,14.89 18.12,18.91 13.88,18.91 12.58,14.89' fill='%23fff'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -45,12 +51,17 @@
 
 <!-- beta 5: base nova (ESPN + FotMob). Se não carregar ou estiver parada há mais de 12 h, usa a football-data (reserva). -->
 <script>window.SB_TESTE = true;</script>
-<script>window.DADOS5_TENTOU = true; document.write('<script src="dados5.js?v=' + VER + '"><\/script>');</script>
+<script>window.DADOS5_TENTOU = true; document.write('<script src="dados5.js?v=' + VER_D + '"><\/script>');</script>
 <script>(function () {
   var d = window.DADOS5, ok = !!(d && d.competicoes && Object.keys(d.competicoes).length && d.ok_em && (Date.now() - Date.parse(d.ok_em) < 12 * 3600e3));
   window.DADOS5_OK = ok;
-  if (!ok) document.write('<script src="dados.js?v=' + VER + '"><\/script>');
+  if (!ok) document.write('<script src="dados.js?v=' + VER_D + '"><\/script>');
 })();</script>
-<script>["config.js", "contas.js", "aovivo-teste.js", "dados-demo.js", "extra5d.js", "motor-teste.js", "app-teste.js"].forEach(function (f) { document.write('<script src="' + f + '?v=' + VER + '"><\/script>'); });</script>
+<script>(function () {
+  // dados de demonstração só quando não há dados de verdade (economiza ~150 KB em cada visita)
+  var semDados = !window.DADOS5_OK && !(window.DADOS && window.DADOS.competicoes);
+  var cod = ["config.js", "contas.js", "aovivo-teste.js"].concat(semDados ? ["dados-demo.js"] : [], ["extra5d.js", "motor-teste.js", "app-teste.js"]);
+  cod.forEach(function (f) { document.write('<script src="' + f + '?v=' + (f === "extra5d.js" ? VER_D : VER_C) + '"><\/script>'); });
+})();</script>
 </body>
 </html>
