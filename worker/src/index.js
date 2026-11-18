@@ -10,13 +10,15 @@
  * - Ninguém olhando = nenhum pedido à 5Dollar.
  */
 const API = "https://api.5dollarfootballapi.com/v1/";
-const INTERVALO = 8000;          // ms entre uma busca e outra (com 1 página = 7,5 pedidos/min)
+const INTERVALO = 8000;          // ms entre uma busca e outra, por página (1 página = 7,5 pedidos/min; limite da conta: 10,
+                                 // e o robô do GitHub ainda usa ~1,7/min com jogo ao vivo para as odds)
+const ATIVO_MS = 90000;          // alguém pediu nos últimos 90 s: o servidor se adianta e busca sozinho no intervalo certo
 const MAX_PAGINAS = 3;
 const ORIGENS = ["https://pdremilio.github.io", "http://localhost:8765", "http://127.0.0.1:8765"];
 
 function cors(req) {
   const o = req.headers.get("Origin") || "";
-  const h = { "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Max-Age": "86400", "Vary": "Origin" };
+  const h = { "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Max-Age": "86400", "Vary": "Origin", "Access-Control-Expose-Headers": "X-Agora" };
   if (ORIGENS.includes(o)) h["Access-Control-Allow-Origin"] = o;
   return h;
 }
@@ -63,17 +65,40 @@ export class AoVivo {
     this.erro = "";
   }
 
+  disparar() {
+    if (Date.now() - this.em > this.intervalo - 300 && Date.now() >= this.pausa && !this.buscando) {
+      this.buscando = this.buscar().catch((e) => { this.erro = String(e && e.message || e); }).finally(() => { this.buscando = null; });
+    }
+    return this.buscando;
+  }
+
   async fetch(req) {
     const url = new URL(typeof req === "string" ? req : (req && req.url) || "https://interno/ao-vivo");
     if (url.pathname === "/historico") return this.historico(url);
-    const agora = Date.now();
-    if (agora - this.em > this.intervalo && agora >= this.pausa && !this.buscando) {
-      this.buscando = this.buscar().catch((e) => { this.erro = String(e && e.message || e); }).finally(() => { this.buscando = null; });
+    const agora = Date.now(), despertador = url.searchParams.has("despertador");
+    if (!despertador) {
+      this.pedidoEm = agora;
+      // alguém olhando: o servidor passa a buscar sozinho no ritmo certo (alarme), sem esperar o próximo pedido
+      if (!this.alarmeLigado) {
+        this.alarmeLigado = true;
+        try { Promise.resolve(this.state.storage.setAlarm(agora + 50)).catch(() => { this.alarmeLigado = false; }); } catch (e) { this.alarmeLigado = false; }
+      }
     }
-    // primeira vez (ou resposta muito velha): espera a busca terminar; senão devolve a última na hora
-    if (this.buscando && (!this.txt || agora - this.em > this.intervalo * 4 || url.searchParams.has("despertador"))) await this.buscando;
+    const busca = this.disparar();
+    // resposta velha e uma busca andando: espera ela (até 3 s) para já mandar o dado novo
+    if (busca && (!this.txt || despertador || agora - this.em > this.intervalo)) {
+      await Promise.race([busca, new Promise((r) => setTimeout(r, despertador || !this.txt ? 25000 : 3000))]);
+    }
     const corpo = this.txt || JSON.stringify({ ok: 0, erro: this.erro || "sem dados ainda" });
     return new Response(corpo, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
+  }
+
+  // alarme: enquanto alguém pediu nos últimos 90 s, busca a cada intervalo (o dado está sempre fresco quando o site pede)
+  async alarm() {
+    if (Date.now() - (this.pedidoEm || 0) > ATIVO_MS) { this.alarmeLigado = false; return; }
+    try { await this.disparar(); } catch (e) {}
+    const prox = Math.max(this.em + this.intervalo, this.pausa, Date.now() + 1000);
+    try { await this.state.storage.setAlarm(prox); } catch (e) { this.alarmeLigado = false; }
   }
 
   async buscar() {
@@ -105,7 +130,8 @@ export class AoVivo {
     this.intervalo = INTERVALO * Math.max(1, paginas);
     this.em = Date.now();
     this.erro = "";
-    this.txt = JSON.stringify({ ok: 1, em: new Date(this.em).toISOString(), intervalo: this.intervalo, eventos: !this.semEventos, n: jogos.length, jogos });
+    // prox = quando sai a próxima busca: o site pede logo depois dela (menos atraso, nenhum pedido à toa)
+    this.txt = JSON.stringify({ ok: 1, em: new Date(this.em).toISOString(), prox: this.em + this.intervalo, intervalo: this.intervalo, eventos: !this.semEventos, paginas, n: jogos.length, jogos });
     await this.registrar(jogos).catch(() => {});
   }
 
@@ -118,11 +144,9 @@ export class AoVivo {
       const st = j.statistics || {}, at = st.attacks, da = st.dangerous_attacks;
       if (!at && !da && !j.goals) continue;
       const cod = String(j.status_code || "").toLowerCase();
-      if (/half|ht|break/.test(cod)) { this.ht.add(j.id); continue; }
+      if (/half|ht|break/.test(cod)) { this.ht.add(j.id); const hh = this.hist.get(j.id); if (hh && !hh.ht) { hh.ht = 1; await this.state.storage.put("j:" + j.id, hh); } continue; }
       const m = parseInt(cod, 10);
       if (!(m >= 1 && m <= 130)) continue;
-      const per = m > 45 || this.ht.has(j.id) ? 2 : 1;
-      if (per === 2) this.ht.add(j.id);
       let h = this.hist.get(j.id);
       if (!h) {
         h = (await this.state.storage.get("j:" + j.id)) || { id: j.id, h: j.teams.home.name, a: j.teams.away.name, ko: j.kickoff_utc, m: {} };
@@ -131,6 +155,12 @@ export class AoVivo {
         const ind = (await this.state.storage.get(dia)) || [];
         if (!ind.some((x) => x.id === j.id)) { ind.push({ id: j.id, h: h.h, a: h.a, ko: h.ko }); await this.state.storage.put(dia, ind); }
       }
+      // a 5Dollar manda o minuto corrido: "47" pode ser acréscimo do 1º tempo. Só é 2º tempo depois do intervalo
+      // (visto aqui ou já guardado), passados os 60' ou se a 5Dollar já fechou o placar do 1º tempo
+      const evs = Array.isArray(j.events) ? j.events : [];
+      const per = m <= 45 ? 1
+        : this.ht.has(j.id) || h.ht || m > 60 || evs.some((e) => e && (e.type === "period_score" || /second|^2/.test(String(e.period || "")))) ? 2 : 1;
+      if (per === 2 && !h.ht) { this.ht.add(j.id); h.ht = 1; }
       const chave = per + ":" + m, novo = !h.m[chave];
       // foto acumulada do minuto: ataques, ataques perigosos e os contadores (gols, chutes no gol e para fora,
       // escanteios, cartões) — com ela o site refaz o gráfico e os lances em qualquer computador
@@ -172,7 +202,8 @@ export default {
     if (url.pathname === "/ao-vivo" || url.pathname === "/historico") {
       const obj = env.AOVIVO.get(env.AOVIVO.idFromName("unico"));
       const r = await obj.fetch("https://interno" + url.pathname + url.search);
-      return new Response(r.body, { status: r.status, headers: { ...Object.fromEntries(r.headers), ...h } });
+      // X-Agora: a hora do servidor, para o site calcular quando sai o próximo dado (sem depender do relógio do aparelho)
+      return new Response(r.body, { status: r.status, headers: { ...Object.fromEntries(r.headers), ...h, "X-Agora": String(Date.now()) } });
     }
     return new Response("ScanBall · servidor do ao vivo. Use /ao-vivo.", { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", ...h } });
   },
