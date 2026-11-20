@@ -13,8 +13,9 @@ Saída: extra5d.js  ->  window.EXTRA5D = { gerado_em, campos, comps: { code: { i
 cada g/c/f é uma lista com as somas na ordem de CAMPOS (g = geral, c = em casa, f = fora).
 
 Odds (plano Pro: bet365): 1X2 de todos os jogos dos próximos 7 dias numa lista por liga (a cada 3 h), e para os jogos
-das próximas ~26 h também over/under 2,5 e ambas marcam (um pedido por jogo, poucos por execução). Com jogo ao vivo,
-só o mínimo e devagar, para não disputar o limite com o ao vivo do site.
+das próximas ~26 h também over/under 2,5 e ambas marcam (um pedido por jogo, poucos por execução).
+São odds de PRÉ-JOGO: com qualquer jogo rolando o robô não faz nenhum pedido à 5Dollar (o limite fica todo para o
+ao vivo do site), e perto do próximo início ele para de pedir antes de a bola rolar.
 """
 import json
 import os
@@ -76,6 +77,7 @@ CAMPOS = ["n", "at", "atc", "da", "dac", "ch", "chc", "cf", "cfc", "pos", "at1",
 
 _pedidos = [0]
 _ultimo = [0.0]
+_prazo = [None]   # hora (unix) em que o próximo jogo começa (menos uma folga): depois dela, nenhum pedido
 
 
 def agora_utc():
@@ -85,6 +87,11 @@ def agora_utc():
 def pedir(caminho, params=None):
     """GET na API respeitando o limite. Devolve o JSON (dict) ou None."""
     if _pedidos[0] >= MAX_PEDIDOS:
+        return None
+    if _prazo[0] and time.time() + ESPERA > _prazo[0]:
+        if _pedidos[0] < MAX_PEDIDOS:
+            print("   o próximo jogo vai começar: paro de pedir (o limite fica para o ao vivo do site)")
+        _pedidos[0] = MAX_PEDIDOS
         return None
     url = BASE + caminho + ("?" + urllib.parse.urlencode(params) if params else "")
     for tentativa in range(3):
@@ -497,10 +504,29 @@ def main():
         return
     comps_site, times_site = d5.get("competicoes") or {}, d5.get("times") or {}
     agora = agora_utc()
-    vivos = sum(1 for c in comps_site.values() for p in c.get("partidas") or [] if p.get("s") in ("IN_PLAY", "PAUSED"))
+    # jogo rolando: pelo status da ESPN ou, se ele estiver atrasado, por ter começado há menos de 2h30 e não ter terminado
+    vivos, prox_inicio = 0, None
+    for c in comps_site.values():
+        for p in c.get("partidas") or []:
+            s = p.get("s")
+            if s in ("FINISHED", "POSTPONED", "CANCELLED", "SUSPENDED") or not p.get("d"):
+                continue
+            try:
+                ts = datetime.fromisoformat(p["d"].replace("Z", "+00:00")).timestamp()
+            except Exception:
+                continue
+            if s in ("IN_PLAY", "PAUSED") or ts <= agora.timestamp() < ts + 150 * 60:
+                vivos += 1
+            elif ts > agora.timestamp() and (prox_inicio is None or ts < prox_inicio):
+                prox_inicio = ts
+    if not vivos and prox_inicio and not os.environ.get("D5_FORCAR"):
+        _prazo[0] = prox_inicio - 90  # termina antes de a bola rolar
+        falta = (prox_inicio - agora.timestamp()) / 60
+        print(f"Próximo jogo em {falta:.0f} min: os pedidos param 1,5 min antes do início.")
     cache = ler_cache()
     if vivos and not os.environ.get("D5_FORCAR"):
-        print(f"{vivos} jogo(s) ao vivo agora: não busco nada (o limite fica para o ao vivo do site). Só remonto o arquivo.")
+        print(f"{vivos} jogo(s) ao vivo agora: nenhum pedido à 5Dollar, nem de odds (o limite fica todo para o ao vivo do site). "
+              "Só remonto o arquivo com o que já está guardado.")
     else:
         todas = baixar_ligas(cache)
         # para decidir as próximas competições: estas existem na 5Dollar?
@@ -544,14 +570,13 @@ def main():
                 if novos:
                     print(f"[{code}] +{novos} jogos ({datetime.fromtimestamp(desde, timezone.utc):%d/%m} a {datetime.fromtimestamp(fim, timezone.utc):%d/%m})")
                 desde = fim
-    # odds: com jogo ao vivo, só o mínimo e devagar (o limite é da conta toda e o ao vivo do site vem antes)
-    global ESPERA
+    # odds de pré-jogo: só sem jogo rolando (o limite é da conta toda e o ao vivo do site vem antes)
     try:
         fut = cache.setdefault("odds_fut", {})
         for fid in [k for k, e in fut.items() if (e.get("ts") or 0) < agora.timestamp() - 3 * 86400]:
             del fut[fid]
         if vivos and not os.environ.get("D5_FORCAR"):
-            ESPERA, limite_listas, limite_jogos = 35.0, 4, 0
+            limite_listas, limite_jogos = 0, 0
         else:
             limite_listas, limite_jogos = 40, MAX_ODDS_JOGO
         odds_em = cache.setdefault("odds_em", {})

@@ -1038,7 +1038,7 @@
         const r = await fetch(WORKER5D + "/ao-vivo", { cache: "no-store" });
         const j = r.ok ? await r.json() : null;
         if (j && j.ok) {
-          lista5W = j.jogos || []; lista5WEm = Date.now(); lista5WCheia = (j.n || lista5W.length) >= 150; d5Status.msg = "ok"; d5Status.em = Date.now(); d5Status.servidor = true;
+          lista5W = j.jogos || []; lista5WEm = Date.now(); lista5WCheia = (j.n || lista5W.length) >= 150; d5Status.msg = j.erro ? "ok (servidor: " + j.erro + ")" : "ok"; d5Status.em = Date.now(); d5Status.servidor = true;
           // relógio do servidor x deste aparelho: usa a idade do dado ("em") para achar a hora local da próxima busca
           const agoraSrv = Number(r.headers.get("X-Agora")) || 0;
           lista5WProx = j.prox && agoraSrv ? Date.now() + Math.min(30000, Math.max(0, Number(j.prox) - agoraSrv)) : 0;
