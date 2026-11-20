@@ -12,7 +12,10 @@
 const API = "https://api.5dollarfootballapi.com/v1/";
 const INTERVALO = 8000;          // ms entre uma busca e outra, por página (1 página = 7,5 pedidos/min; limite da conta: 10,
                                  // e o robô do GitHub ainda usa ~1,7/min com jogo ao vivo para as odds)
-const ATIVO_MS = 90000;          // alguém pediu nos últimos 90 s: o servidor se adianta e busca sozinho no intervalo certo
+const ATIVO_MS = 90000;
+const TEMPO_LIMITE = 5000;       // a 5Dollar não respondeu em 5 s: desiste daquele pedido e tenta de novo nela mesma
+const NOVA_TENTATIVA = 1000;     // espera antes de tentar de novo depois de uma falha
+const MAX_POR_MIN = 9;           // trava: nunca mais de 9 pedidos em 60 s (o limite da conta é 10)          // alguém pediu nos últimos 90 s: o servidor se adianta e busca sozinho no intervalo certo
 const MAX_PAGINAS = 3;
 const ORIGENS = ["https://pdremilio.github.io", "http://localhost:8765", "http://127.0.0.1:8765"];
 
@@ -57,19 +60,40 @@ export class AoVivo {
     this.env = env;
     this.hist = new Map();   // id -> minuto a minuto do jogo (também salvo no armazenamento do servidor)
     this.ht = new Set();     // jogos que já passaram do intervalo
-    this.txt = null;       // última resposta pronta (JSON em texto)
-    this.em = 0;           // quando foi buscada
+    this.dadosTxt = null;  // última lista de jogos pronta (JSON em texto)
+    this.em = 0;           // quando chegou a última lista boa
+    this.proxTentativa = 0; // a partir de quando pode buscar de novo
     this.pausa = 0;        // 5Dollar pediu para esperar (limite)
     this.intervalo = INTERVALO;
     this.buscando = null;
     this.erro = "";
+    this.feitos = [];      // hora de cada pedido à 5Dollar no último minuto (trava dos 9 por minuto)
+    this.diag = [];        // últimos pedidos: hora, duração e resultado (GET /ao-vivo?diag=1)
+  }
+
+  // pode pedir agora sem passar de MAX_POR_MIN em 60 s? Se não, devolve a partir de quando pode
+  livreEm() {
+    const agora = Date.now();
+    this.feitos = this.feitos.filter((t) => agora - t < 60000);
+    return this.feitos.length < MAX_POR_MIN ? agora : this.feitos[0] + 60000 + 200;
   }
 
   disparar() {
-    if (Date.now() - this.em > this.intervalo - 300 && Date.now() >= this.pausa && !this.buscando) {
-      this.buscando = this.buscar().catch((e) => { this.erro = String(e && e.message || e); }).finally(() => { this.buscando = null; });
+    const agora = Date.now();
+    if (!this.buscando && agora >= this.proxTentativa && agora >= this.pausa && this.livreEm() <= agora) {
+      this.buscando = this.buscar().catch((e) => { this.erro = String(e && e.message || e); this.proxTentativa = Date.now() + NOVA_TENTATIVA; })
+        .finally(() => { this.buscando = null; });
     }
     return this.buscando;
+  }
+
+  // quando sai a próxima busca (o site pede logo depois dela)
+  proxima() { return Math.max(this.proxTentativa, this.pausa, this.livreEm(), Date.now() + 500); }
+
+  corpo() {
+    if (!this.dadosTxt) return JSON.stringify({ ok: 0, erro: this.erro || "sem dados ainda", prox: this.proxima() });
+    const cab = { ok: 1, em: new Date(this.em).toISOString(), prox: this.proxima(), intervalo: this.intervalo, erro: this.erro || undefined };
+    return JSON.stringify(cab).slice(0, -1) + "," + this.dadosTxt.slice(1);
   }
 
   async fetch(req) {
@@ -86,10 +110,12 @@ export class AoVivo {
     }
     const busca = this.disparar();
     // resposta velha e uma busca andando: espera ela (até 3 s) para já mandar o dado novo
-    if (busca && (!this.txt || despertador || agora - this.em > this.intervalo)) {
-      await Promise.race([busca, new Promise((r) => setTimeout(r, despertador || !this.txt ? 25000 : 3000))]);
+    if (busca && (!this.dadosTxt || despertador || agora - this.em > this.intervalo)) {
+      await Promise.race([busca, new Promise((r) => setTimeout(r, despertador || !this.dadosTxt ? 25000 : 3000))]);
     }
-    const corpo = this.txt || JSON.stringify({ ok: 0, erro: this.erro || "sem dados ainda" });
+    const corpo = url.searchParams.has("diag")
+      ? JSON.stringify({ agora: new Date().toISOString(), erro: this.erro, pedidosNoUltimoMinuto: this.feitos.length, em: new Date(this.em).toISOString(), prox: new Date(this.proxima()).toISOString(), diag: this.diag })
+      : this.corpo();
     return new Response(corpo, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
   }
 
@@ -97,7 +123,7 @@ export class AoVivo {
   async alarm() {
     if (Date.now() - (this.pedidoEm || 0) > ATIVO_MS) { this.alarmeLigado = false; return; }
     try { await this.disparar(); } catch (e) {}
-    const prox = Math.max(this.em + this.intervalo, this.pausa, Date.now() + 1000);
+    const prox = Math.max(this.proxima(), Date.now() + 500);
     try { await this.state.storage.setAlarm(prox); } catch (e) { this.alarmeLigado = false; }
   }
 
@@ -106,22 +132,37 @@ export class AoVivo {
     if (!chave) { this.erro = "o Worker está sem a chave FIVE_DOLLAR_KEY"; return; }
     const jogos = [];
     let pagina = 1, paginas = 0;
+    const falhou = (msg, espera) => { this.erro = msg; this.proxTentativa = Date.now() + espera; };
     while (pagina <= MAX_PAGINAS) {
-      const r = await fetch(`${this.env.API_BASE || API}fixtures?status=live&include=${this.semEventos ? "stats" : "events,stats"}&per_page=50&page=${pagina}`, {
-        headers: { Authorization: "Bearer " + chave, Accept: "application/json" },
-      });
+      if (this.livreEm() > Date.now()) { falhou("trava dos 9 pedidos por minuto: esperando", 0); return; }
+      this.feitos.push(Date.now());
+      const t0 = Date.now(), ctl = new AbortController(), limite = setTimeout(() => ctl.abort(), TEMPO_LIMITE);
+      let r, j;
+      try {
+        r = await fetch(`${this.env.API_BASE || API}fixtures?status=live&include=${this.semEventos ? "stats" : "events,stats"}&per_page=50&page=${pagina}`, {
+          headers: { Authorization: "Bearer " + chave, Accept: "application/json" }, signal: ctl.signal,
+        });
+        if (r.ok) j = await r.json(); // a leitura também entra no tempo limite
+      } catch (e) {
+        clearTimeout(limite);
+        const tempo = ctl.signal.aborted;
+        this.anotar(t0, tempo ? "tempo" : "falha");
+        // não respondeu a tempo (ou a conexão caiu): tenta de novo na 5Dollar daqui a pouco
+        falhou(tempo ? `a 5Dollar não respondeu em ${TEMPO_LIMITE / 1000} s: tentando de novo` : `falha ao falar com a 5Dollar: ${e && e.message || e}`, NOVA_TENTATIVA);
+        return;
+      }
+      clearTimeout(limite);
+      this.anotar(t0, r.status);
       paginas++;
       if (r.status === 429) {
         const seg = Number(r.headers.get("Retry-After")) || 30;
         this.pausa = Date.now() + seg * 1000;
-        this.erro = `limite da 5Dollar: esperando ${seg} s`;
-        this.em = Date.now();
+        falhou(`limite da 5Dollar: esperando ${seg} s`, 0);
         return;
       }
       // a lista não aceitou os eventos junto: segue só com as estatísticas (e não tenta mais)
       if (r.status === 400 && !this.semEventos) { this.semEventos = true; continue; }
-      if (!r.ok) { this.erro = `5Dollar respondeu ${r.status}`; this.em = Date.now(); return; }
-      const j = await r.json();
+      if (!r.ok || !j) { falhou(`5Dollar respondeu ${r.status}`, 3000); return; }
       for (const fx of j.data || []) jogos.push(enxugar(fx));
       if (!(j.pagination && j.pagination.has_more)) break;
       pagina++;
@@ -129,10 +170,15 @@ export class AoVivo {
     // mais de uma página por busca: espaça as buscas para continuar abaixo de 10 pedidos/min
     this.intervalo = INTERVALO * Math.max(1, paginas);
     this.em = Date.now();
+    this.proxTentativa = this.em + this.intervalo - 300;
     this.erro = "";
-    // prox = quando sai a próxima busca: o site pede logo depois dela (menos atraso, nenhum pedido à toa)
-    this.txt = JSON.stringify({ ok: 1, em: new Date(this.em).toISOString(), prox: this.em + this.intervalo, intervalo: this.intervalo, eventos: !this.semEventos, paginas, n: jogos.length, jogos });
+    this.dadosTxt = JSON.stringify({ eventos: !this.semEventos, paginas, n: jogos.length, jogos });
     await this.registrar(jogos).catch(() => {});
+  }
+
+  anotar(t0, res) {
+    this.diag.push({ h: new Date(t0).toISOString().slice(11, 19), ms: Date.now() - t0, r: res });
+    if (this.diag.length > 40) this.diag.shift();
   }
 
   // guarda uma "foto" por minuto (ataques e ataques perigosos acumulados) de cada jogo ao vivo, para o site
