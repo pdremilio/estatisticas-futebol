@@ -17,6 +17,9 @@ const TEMPO_LIMITE = 5000;       // a 5Dollar não respondeu em 5 s: desiste daq
 const NOVA_TENTATIVA = 1000;     // espera antes de tentar de novo depois de uma falha
 const MAX_POR_MIN = 9;           // trava: nunca mais de 9 pedidos em 60 s (o limite da conta é 10)          // alguém pediu nos últimos 90 s: o servidor se adianta e busca sozinho no intervalo certo
 const MAX_PAGINAS = 3;
+// página grande: no ao vivo a 5Dollar aceita até 500 jogos por página (1 pedido só, mesmo com 80 jogos rolando).
+// Se ela recusar ou cortar em 50, o servidor volta sozinho para 50 por página (mais páginas, buscas mais espaçadas).
+const POR_PAGINA = 500;
 const ORIGENS = ["https://pdremilio.github.io", "http://localhost:8765", "http://127.0.0.1:8765"];
 
 function cors(req) {
@@ -67,6 +70,7 @@ export class AoVivo {
     this.intervalo = INTERVALO;
     this.buscando = null;
     this.erro = "";
+    this.porPagina = POR_PAGINA;
     this.feitos = [];      // hora de cada pedido à 5Dollar no último minuto (trava dos 9 por minuto)
     this.diag = [];        // últimos pedidos: hora, duração e resultado (GET /ao-vivo?diag=1)
   }
@@ -139,7 +143,7 @@ export class AoVivo {
       const t0 = Date.now(), ctl = new AbortController(), limite = setTimeout(() => ctl.abort(), TEMPO_LIMITE);
       let r, j;
       try {
-        r = await fetch(`${this.env.API_BASE || API}fixtures?status=live&include=${this.semEventos ? "stats" : "events,stats"}&per_page=50&page=${pagina}`, {
+        r = await fetch(`${this.env.API_BASE || API}fixtures?status=live&include=${this.semEventos ? "stats" : "events,stats"}&per_page=${this.porPagina}&page=${pagina}`, {
           headers: { Authorization: "Bearer " + chave, Accept: "application/json" }, signal: ctl.signal,
         });
         if (r.ok) j = await r.json(); // a leitura também entra no tempo limite
@@ -147,6 +151,7 @@ export class AoVivo {
         clearTimeout(limite);
         const tempo = ctl.signal.aborted;
         this.anotar(t0, tempo ? "tempo" : "falha");
+        if (tempo && this.porPagina > 50) this.porPagina = 50; // página grande demorando demais: volta para 50
         // não respondeu a tempo (ou a conexão caiu): tenta de novo na 5Dollar daqui a pouco
         falhou(tempo ? `a 5Dollar não respondeu em ${TEMPO_LIMITE / 1000} s: tentando de novo` : `falha ao falar com a 5Dollar: ${e && e.message || e}`, NOVA_TENTATIVA);
         return;
@@ -161,9 +166,14 @@ export class AoVivo {
         return;
       }
       // a lista não aceitou os eventos junto: segue só com as estatísticas (e não tenta mais)
-      if (r.status === 400 && !this.semEventos) { this.semEventos = true; continue; }
+      // recusou a página grande: volta para 50 por página (e só depois, se ainda recusar, tira os eventos)
+      if ((r.status === 400 || r.status === 422) && this.porPagina > 50) { this.porPagina = 50; paginas--; continue; }
+      if (r.status === 400 && !this.semEventos) { this.semEventos = true; paginas--; continue; }
       if (!r.ok || !j) { falhou(`5Dollar respondeu ${r.status}`, 3000); return; }
       for (const fx of j.data || []) jogos.push(enxugar(fx));
+      // a 5Dollar cortou a página (ex.: em 50): segue no tamanho que ela usou, para as páginas seguintes baterem
+      const pp = Number(j.pagination && j.pagination.per_page);
+      if (pp && pp < this.porPagina) this.porPagina = pp;
       if (!(j.pagination && j.pagination.has_more)) break;
       pagina++;
     }
@@ -172,7 +182,7 @@ export class AoVivo {
     this.em = Date.now();
     this.proxTentativa = this.em + this.intervalo - 300;
     this.erro = "";
-    this.dadosTxt = JSON.stringify({ eventos: !this.semEventos, paginas, n: jogos.length, jogos });
+    this.dadosTxt = JSON.stringify({ eventos: !this.semEventos, paginas, porPagina: this.porPagina, n: jogos.length, jogos });
     await this.registrar(jogos).catch(() => {});
   }
 
