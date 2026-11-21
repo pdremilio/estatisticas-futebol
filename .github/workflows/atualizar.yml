@@ -1,8 +1,8 @@
 name: Atualizar dados e publicar
 
 # O agendamento do GitHub atrasa horas no plano grátis. Por isso cada execução, ao terminar,
-# chama a próxima (job "proxima"): a cada ~60 min quando há jogo rolando (o placar ao vivo vem da ESPN,
-# no navegador; aqui é só para tabela, estatísticas e projeções) e, sem jogos, só perto do próximo jogo. O cron (a cada 6 h) fica de reserva caso a corrente pare.
+# chama a próxima (job "proxima"): a cada ~60 min quando há jogo rolando (o ao vivo vem do servidor da Cloudflare
+# e da ESPN, no navegador; aqui é só para tabela, estatísticas, projeções e odds) e, sem jogos, só perto do próximo jogo. O cron (a cada 6 h) fica de reserva caso a corrente pare.
 on:
   schedule:
     - cron: "17 */6 * * *"
@@ -39,24 +39,40 @@ jobs:
 
       - name: Baixar os dados já publicados
         run: |
-          curl -sfL "${{ steps.pages.outputs.base_url }}/dados.js" -o dados.js || rm -f dados.js
           curl -sfL "${{ steps.pages.outputs.base_url }}/dados5.js" -o dados5.js || rm -f dados5.js
           curl -sfL "${{ steps.pages.outputs.base_url }}/cache5.json" -o cache5.json || rm -f cache5.json
           curl -sfL "${{ steps.pages.outputs.base_url }}/cache5d.json" -o cache5d.json || rm -f cache5d.json
           curl -sfL "${{ steps.pages.outputs.base_url }}/extra5d.js" -o extra5d.js || rm -f extra5d.js
+          curl -sfL "${{ steps.pages.outputs.base_url }}/odds_casas.json" -o odds_casas.json || rm -f odds_casas.json
 
-      - name: Atualizar dados
+      # Odds da média das casas (The Odds API), a 2ª fonte de odds (a 1ª é a bet365 da 5Dollar). Rápido: no
+      # máximo 1 pedido por liga a cada 12 h. Se falhar, ficam as odds guardadas da vez anterior.
+      - name: Odds da média das casas
+        continue-on-error: true
+        timeout-minutes: 5
         env:
-          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-        run: python3 atualizar_dados.py
+        run: python3 atualizar_odds.py
 
-      # Beta 5 (página de teste): ESPN + FotMob. Se falhar, não atrapalha o site principal,
-      # e a página de teste usa os dados da football-data com um aviso.
-      - name: Atualizar dados da beta 5 (ESPN + FotMob)
+      # Base do site: ESPN + FotMob (dados5.js). Se falhar, o site segue com a versão publicada da vez anterior.
+      - name: Atualizar dados (ESPN + FotMob)
         continue-on-error: true
         timeout-minutes: 15
         run: python3 atualizar_b5.py
+
+      # Escudos dos times e ligas no próprio site (bloqueadores de anúncios escondem os da ESPN). A pasta fica
+      # guardada entre as execuções: cada vez só baixa os escudos novos.
+      - name: Guardar os escudos entre as execuções
+        uses: actions/cache@v4
+        with:
+          path: estatisticas-futebol/escudos
+          key: escudos-v1-${{ github.run_id }}
+          restore-keys: escudos-v1-
+
+      - name: Escudos no próprio site
+        continue-on-error: true
+        timeout-minutes: 5
+        run: python3 baixar_escudos.py
 
       # Números extras de pré-jogo (ataques, ataques perigosos, 1º tempo) pela 5DollarFootballAPI.
       # A chave fica no segredo FIVE_DOLLAR_KEY; sem ela, o passo não faz nada. Se falhar, o site segue normal.
@@ -70,10 +86,9 @@ jobs:
       - name: Montar a pasta do site
         run: |
           mkdir -p _site
-          cp index.html estilo.css app.js motor.js dados-demo.js config.js contas.js aovivo.js _site/
-          if [ -f dados.js ]; then cp dados.js _site/; fi
-          if [ -f agenda.json ]; then cp agenda.json _site/; fi
-          for f in teste.html app-teste.js aovivo-teste.js estilo-teste.css motor-teste.js dados5.js cache5.json extra5d.js cache5d.json titulares5.json manifest.webmanifest sw.js icone-192.png icone-512.png icone-mascara-512.png icone-apple-180.png; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
+          cp index.html estilo.css app.js motor.js config.js contas.js aovivo.js _site/
+          if [ -d escudos ]; then cp -r escudos _site/; fi
+          for f in teste.html app-teste.js aovivo-teste.js estilo-teste.css motor-teste.js dados5.js cache5.json extra5d.js cache5d.json odds_casas.json titulares5.json manifest.webmanifest sw.js icone-192.png icone-512.png icone-mascara-512.png icone-apple-180.png; do if [ -f "$f" ]; then cp "$f" _site/; fi; done
           # versões para o navegador guardar os arquivos: código (muda só quando o código muda) e dados (cada execução)
           VC=$(cat _site/app.js _site/motor.js _site/aovivo.js _site/estilo.css _site/contas.js _site/config.js | sha1sum | cut -c1-10)
           sed -i "s/__VC__/$VC/; s/__VD__/${GITHUB_RUN_ID}/" _site/index.html
@@ -87,8 +102,18 @@ jobs:
         with:
           path: estatisticas-futebol/_site
 
+      # a publicação às vezes falha do lado do GitHub ("artifact não encontrado"): espera um pouco e tenta de novo
       - name: Publicar
         id: publicar
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      - name: Esperar antes da 2ª tentativa
+        if: steps.publicar.outcome == 'failure'
+        run: sleep 45
+
+      - name: Publicar (2ª tentativa)
+        if: steps.publicar.outcome == 'failure'
         uses: actions/deploy-pages@v4
 
   proxima:
@@ -113,7 +138,7 @@ jobs:
               agora = datetime.fromisoformat(sys.argv[2])
           BRT = timezone(timedelta(hours=-3))
           NORMAL, MAXIMO = 60 * 60, int(5.5 * 3600)
-          # lê os dados da football-data e os da beta 5 (que tem mais ligas)
+          # lê os dados publicados do site (dados5.js)
           comps = []
           for url in sys.argv[1].split(","):
               try:
@@ -147,7 +172,7 @@ jobs:
           print(espera)
           PY
           base="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          segundos=$(python3 quando.py "$base/dados.js,$base/dados5.js")
+          segundos=$(python3 quando.py "$base/dados5.js")
           echo "segundos=$segundos" >> "$GITHUB_OUTPUT"
 
       - name: Esperar
