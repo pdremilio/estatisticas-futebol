@@ -2934,7 +2934,7 @@
       const jogo = `${nomeTime(p.h)} ${p.fh ?? 0}×${p.fa ?? 0} ${nomeTime(p.a)}`, url = `#jogo/${x.code}/${p.i}`, min = p.vv && p.vv.min ? ` · ${p.vv.min}` : "";
       const pr = p.vv && p.vv.pr;
       const verm = { h: 0, a: 0 };
-      if (pr) for (const e of pr.ev) if (e.k === "vermelho" || e.k === "2amarelo") verm[e.l] = (verm[e.l] || 0) + 1;
+      if (pr) for (const e of pr.ev0 || pr.ev) if (e.k === "vermelho" || e.k === "2amarelo") verm[e.l] = (verm[e.l] || 0) + 1;
       const atual = { s: p.s, fh: p.fh ?? 0, fa: p.fa ?? 0, vh: verm.h, va: verm.a };
       const base = notifBase.get(p.i);
       notifBase.set(p.i, atual);
