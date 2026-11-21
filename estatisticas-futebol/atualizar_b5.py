@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-ScanBall · Beta 5 · atualizador com ESPN (base) + FotMob (xG e rodada)
+ScanBall · atualizador principal com ESPN (base) + FotMob (xG e rodada)
 
-Grava "dados5.js" (lido pela página de teste) e "cache5.json" (estatísticas de cada jogo já baixadas,
-para nunca baixar o mesmo jogo duas vezes). A football-data.org continua como reserva: o atualizador
-antigo (atualizar_dados.py) segue gravando "dados.js", e a página usa ele se este aqui falhar.
+Grava "dados5.js" (a base do site) e "cache5.json" (estatísticas de cada jogo já baixadas, para nunca baixar o
+mesmo jogo duas vezes). As odds da média das casas vêm do odds_casas.json (atualizar_odds.py).
 
 Uso:  python atualizar_b5.py              (todas as competições)
       python atualizar_b5.py BSA PL       (só as que você passar)
@@ -71,7 +70,7 @@ PASTA = os.path.dirname(os.path.abspath(__file__))
 ARQ_SAIDA = os.path.join(PASTA, "dados5.js")
 ARQ_CACHE = os.path.join(PASTA, "cache5.json")
 ARQ_TIT = os.path.join(PASTA, "titulares5.json")   # titulares das últimas 5 partidas de cada time (aba Escalações)
-ARQ_FD = os.path.join(PASTA, "dados.js")   # dados da football-data (só para reaproveitar as odds)
+ARQ_ODDS = os.path.join(PASTA, "odds_casas.json")   # odds da média das casas (atualizar_odds.py)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -618,47 +617,42 @@ def baixar_fotmob(fm_id, pais, partidas, times):
     return {"xg": xg, "casados": len(mapa), "rodadas": rodadas}
 
 
-# ---------------------------------------------------------------- odds: reaproveita as da football-data (sem gastar créditos)
-def odds_da_reserva(competicoes, times):
-    if not os.path.exists(ARQ_FD):
-        return
-    try:
-        txt = open(ARQ_FD, encoding="utf-8").read()
-        fd = json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
-    except Exception:
-        return
-    tfd = fd.get("times") or {}
+# ---------------------------------------------------------------- odds da média das casas (atualizar_odds.py)
+def odds_das_casas(competicoes, times):
+    """Liga cada evento do odds_casas.json (The Odds API) ao jogo do site: nomes dos times + horário (até 3 h)."""
+    oc = ler_js(ARQ_ODDS) if os.path.exists(ARQ_ODDS) else None
+    ligas = (oc or {}).get("ligas") or {}
+    nome = lambda tid: tokens(times.get(tid, {}).get("n")) | tokens(times.get(tid, {}).get("c")) | tokens(times.get(tid, {}).get("t"))
     for code, comp in competicoes.items():
-        cfd = (fd.get("competicoes") or {}).get(code) or {}
-        odds = cfd.get("odds") or {}
-        if not odds:
-            continue
-        por_id = {str(p.get("i")): p for p in cfd.get("partidas") or []}
+        lg = ligas.get(code) or {}
         novas = {}
-        for pid, o in odds.items():
-            pf = por_id.get(str(pid))
-            if not pf or not pf.get("d"):
+        for ev in lg.get("ev") or []:
+            try:
+                quando = iso_para_dt(ev["d"])
+            except Exception:
                 continue
-            th = tokens((tfd.get(str(pf.get("h"))) or {}).get("n")) | tokens((tfd.get(str(pf.get("h"))) or {}).get("c"))
-            ta = tokens((tfd.get(str(pf.get("a"))) or {}).get("n")) | tokens((tfd.get(str(pf.get("a"))) or {}).get("c"))
-            quando = iso_para_dt(pf["d"])
+            th, ta = tokens(ev.get("h")), tokens(ev.get("a"))
             melhor, nota_m = None, 0
             for p in comp["partidas"]:
+                if not p.get("d") or p.get("s") not in ("SCHEDULED", "TIMED", "IN_PLAY", "PAUSED"):
+                    continue
                 dif = abs((iso_para_dt(p["d"]) - quando).total_seconds())
                 if dif > 3 * 3600:
                     continue
-                sh = parecido(th, tokens(times.get(p["h"], {}).get("n")) | tokens(times.get(p["h"], {}).get("c")) | tokens(times.get(p["h"], {}).get("t")))
-                sa = parecido(ta, tokens(times.get(p["a"], {}).get("n")) | tokens(times.get(p["a"], {}).get("c")) | tokens(times.get(p["a"], {}).get("t")))
+                sh, sa = parecido(th, nome(p["h"])), parecido(ta, nome(p["a"]))
                 if sh == 0 or sa == 0:
                     continue
                 nota = sh + sa - dif / 86400
                 if nota > nota_m:
                     melhor, nota_m = p, nota
             if melhor:
-                novas[melhor["i"]] = o
+                novas[melhor["i"]] = ev["r"]
         if novas:
             comp["odds"] = novas
-            comp["odds_em"] = cfd.get("odds_em")
+            comp["odds_em"] = lg.get("em")
+        else:
+            comp.pop("odds", None)
+            comp.pop("odds_em", None)
 
 
 # ---------------------------------------------------------------- arquivos
@@ -761,7 +755,7 @@ def main():
             print(f"   [{code}] pré-jogo incompleto: falta {', '.join(falta)}")
         else:
             comp.pop("incompleto", None)
-    odds_da_reserva(competicoes, times)
+    odds_das_casas(competicoes, times)
     gravar_titulares(todas, cache, agora)
 
     # forma recente vem do placar da ESPN (não precisa ir para o site)

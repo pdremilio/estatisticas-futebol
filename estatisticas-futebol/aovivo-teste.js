@@ -361,137 +361,16 @@
     pr.atual = i != null ? i : Math.min(Math.max(pr.ultimo, 0), ultimo);
   }
 
-  // ---------- narração do 365Scores no gráfico e na lista
-  // O 365Scores publica a MESMA narração da ESPN (mesmo texto, em inglês com lang=1), uns 30–60 s antes.
-  // Medido em 05/11/2026 (Cruzeiro x Bahia): escanteio registrado 00:51:30 → 365 +68 s, ESPN +107 s.
-  // O site junta as duas: o que a ESPN já tem fica da ESPN (minuto exato dos acréscimos); o que só o 365
-  // tem entra na hora. Quando a ESPN publica o mesmo lance, ele é trocado sem duplicar. Se o 365 falhar, fica só a ESPN.
+  // ---------- narração da ESPN no gráfico e na lista (o 365Scores fica só com o xG e a reserva dos números)
   const resumos = new Map(); // "code:idESPN" -> { com: narração da ESPN, ladoDe }
-  const pbp365 = new Map();  // "code:idESPN" -> { msgs, assin }
   const chaveJogo = (p) => p.vv.espn.code + ":" + p.vv.espn.id;
-  const textoChave = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-  const outro = (l) => (l === "h" ? "a" : l === "a" ? "h" : null);
-  // tipo do lance (nomes do 365Scores) -> tipo da ESPN, para usar as mesmas regras
-  function tipo365(nome) {
-    const n = String(nome || "").toLowerCase().trim();
-    if (n === "goal") return "goal";
-    if (n === "own goal") return "own-goal";
-    if (/penalty/.test(n)) return /goal|scored/.test(n) ? "penalty---scored" : /saved/.test(n) ? "penalty---saved" : /miss/.test(n) ? "penalty---missed" : null;
-    if (n === "attempt saved") return "shot-on-target";
-    if (n === "attempt blocked") return "shot-blocked";
-    if (n === "miss") return "shot-off-target";
-    if (/post|woodwork|crossbar/.test(n)) return "shot-hit-woodwork";
-    if (n === "corner") return "corner-awarded";
-    if (n === "offside") return "offside";
-    if (/second ?yellow/.test(n)) return "yellow-red-card";
-    if (n === "yellow card") return "yellow-card";
-    if (n === "red card") return "red-card";
-    if (n === "substitution") return "substitution";
-    if (n === "free kick won" || n === "free kick lost") return "foul";
-    return null;
-  }
-  // de que time é o lance, pelo texto ("Corner, Bahia. Conceded by..." / "Fulano (Bahia) ...")
-  function ladoDoTexto(txt, p) {
-    let m = txt.match(/^(?:Corner|Offside),\s*(.+?)\.\s+(?:Conceded by|.+ is caught offside)/i) || txt.match(/^Substitution,\s*(.+?)\.\s+.+ replaces /i);
-    let nome = m && m[1], contra = false;
-    if (!nome && (m = txt.match(/^Own Goal by .+?,\s*(.+?)\.\s/i))) { nome = m[1]; contra = true; }
-    if (!nome && (m = txt.match(/\(([^()]+)\)/))) nome = m[1];
-    if (!nome) return null;
-    const T = dados.times || {}, n365 = p.vv.n365 || [];
-    const tk = tokens(nome);
-    const sh = parecido(tk, tokens([(T[p.h] || {}).n, (T[p.h] || {}).c, (T[p.h] || {}).t, n365[0]].join(" ")));
-    const sa = parecido(tk, tokens([(T[p.a] || {}).n, (T[p.a] || {}).c, (T[p.a] || {}).t, n365[1]].join(" ")));
-    const l = sh > sa ? "h" : sa > sh ? "a" : null;
-    return l ? { l, contra } : null;
-  }
-  // mensagem do 365Scores -> item no formato da narração da ESPN
-  function converter365(m, p) {
-    const txt = String(m.Comment || "");
-    const t = tipo365(m.TypeName);
-    if (!t || !txt || m.Timeline == null || m.Timeline === "") return null;
-    const per = Number(m.Period) || null;
-    const ad = String(m.TimeLineSecondaryText || "").match(/\d+/);
-    const tempo = String(m.Timeline).replace(/'/g, "") + "'" + (ad ? "+" + ad[0] + "'" : "");
-    const dt = ladoDoTexto(txt, p);
-    let l = dt ? dt.l : m.CompetitorNum === 1 ? "h" : m.CompetitorNum === 2 ? "a" : null;
-    if (!l) return null;
-    // mesmas convenções da ESPN: gol contra é do time beneficiado; "Fulano (Time) wins a free kick" é do time que fez a falta
-    if (t === "own-goal" && (!dt || dt.contra)) l = outro(l);
-    if (t === "foul" && /wins a free kick/i.test(txt)) l = outro(l);
-    let participants;
-    if (t === "substitution") {
-      const s = txt.match(/\.\s+(.+?) replaces (.+?)\.?\s*$/);
-      const pl = m.Players || [];
-      const ent = s ? s[1] : (pl[0] || {}).PlayerName, sai = s ? s[2] : (pl[1] || {}).PlayerName;
-      participants = [ent, sai].filter(Boolean).map((n) => ({ athlete: { displayName: n } }));
-    }
-    return {
-      _id: Number(m.Id) || 0, _365: true, text: txt, sequence: Number(m.Id) || 0, time: { displayValue: tempo },
-      play: { type: { type: t }, team: { lado: l }, period: { number: per }, clock: { displayValue: tempo }, participants },
-    };
-  }
-  // identidade do lance para achar o mesmo nas duas fontes: texto, e (se o texto mudou um pouco) tipo + lado + jogador.
-  // O minuto pode diferir em 1 (ex.: 365 "26", ESPN "27'"), então ele é comparado com folga.
-  function identidade(c, ladoDe) {
-    const pl = c.play || {};
-    let t = (pl.type && pl.type.type) || "";
-    if (/^goal(---|$)|^own-goal$|^penalty---scored$/.test(t)) t = "gol";
-    const m = String((c.time && c.time.displayValue) || "").match(/\d+/);
-    return {
-      tx: textoChave(c.text), min: m ? Number(m[0]) : null, per: (pl.period && pl.period.number) || null,
-      k: t ? [t, ladoDe(pl.team) || "", textoChave(jogadorDe(c.text))].join("|") : "",
-    };
-  }
-  const mesmoTempo = (a, b) => (a.per == null || b.per == null || a.per === b.per) && (a.min == null || b.min == null || Math.abs(a.min - b.min) <= 1);
-  // lances do 365Scores que a ESPN ainda não publicou
-  function soNo365(p, msgs, res) {
-    const ladoE = res ? res.ladoDe : (t) => (t && t.lado) || null;
-    const ladoC = (t) => (t && t.lado) || null;
-    let maxSeq = 0;
-    const espn = ((res && res.com) || []).map((c) => {
-      const s = Number(c.sequence) || 0;
-      maxSeq = Math.max(maxSeq, s);
-      return Object.assign(identidade(c, ladoE), { s, usado: false });
-    });
-    const conv = msgs.map((m) => converter365(m, p)).filter(Boolean).sort((a, b) => a._id - b._id)
-      .map((c) => ({ c, id: identidade(c, ladoC) }));
-    const achar = (x, campo) => espn.find((e) => !e.usado && e[campo] && e[campo] === x[campo] && mesmoTempo(e, x));
-    // 1º: mesmo texto (o caso normal); 2º: mesmo tipo + lado + jogador
-    let desloc = null;
-    const sobra = [];
-    for (const o of conv) {
-      const e = achar(o.id, "tx");
-      if (e) { e.usado = true; desloc = e.s - o.c._id; } else sobra.push(o);
-    }
-    const novos = [];
-    for (const o of sobra) {
-      const e = achar(o.id, "k");
-      if (e) { e.usado = true; continue; }
-      o.c.sequence = desloc != null ? o.c._id + desloc : maxSeq + o.c._id;
-      novos.push(o.c);
-    }
-    return novos;
-  }
   function montarMisturado(p) {
-    const ch = chaveJogo(p), res = resumos.get(ch), pb = modoDe(p) === "365" ? pbp365.get(ch) : null;
-    const extra = pb ? soNo365(p, pb.msgs, res) : [];
-    const r = { commentary: ((res && res.com) || []).concat(extra) };
+    const res = resumos.get(chaveJogo(p));
+    const r = { commentary: (res && res.com) || [] };
     const ladoDe = res ? res.ladoDe : (t) => (t && t.lado) || null;
-    p.vv.lances365 = extra.length;
     return { pr: montarPressao(r, ladoDe, p.vv), lances: montarLances(r, ladoDe) };
   }
-  // chegou narração nova do 365Scores: refaz gráfico e lista sem esperar a ESPN
-  function aplicarMistura(p) {
-    const vv = p.vv;
-    const sig = () => JSON.stringify([vv.pr && [vv.pr.h, vv.pr.a, vv.pr.ev.length], vv.lances && vv.lances.length && vv.lances[vv.lances.length - 1].seq]);
-    const antes = sig();
-    const { pr, lances } = montarMisturado(p);
-    if (!pr && !vv.pr) return false;
-    vv.pr = pr; vv.lances = lances;
-    if (pr) recalcularAtual(p);
-    conferirRapidos(p);
-    return antes !== sig();
-  }
+
 
   // ---------- detalhe do jogo
   const MAPA_EST = { possessionPct: "posse", totalShots: "chutes", shotsOnTarget: "alvo", wonCorners: "esc", foulsCommitted: "faltas",
@@ -821,8 +700,10 @@
   const CONTAVEIS = { gol: 1, alvo: 1, trave: 1, fora: 1, bloq: 1, esc: 1, amarelo: 1, vermelho: 1, "2amarelo": 1, sub: 1 };
   const minutoDe = (sl) => (sl ? { per: sl.per, m: sl.b + sl.ad } : null);
   const perto = (a, b) => a && b && Math.abs(a.m - b.m) <= 3 && (a.per === b.per || Math.abs(a.m - b.m) <= 1);
-  function lerRap(ch) { try { return JSON.parse(sessionStorage.getItem("sbrap_" + ch) || "null"); } catch (e) { return null; } }
-  function gravarRap(ch, rap) { try { sessionStorage.setItem("sbrap_" + ch, JSON.stringify(rap)); } catch (e) {} }
+  // os lances contados ficam só na memória desta página: abriu ou recarregou o jogo, tudo é remontado do
+  // histórico do servidor (minuto a minuto) e daí em diante contado ao vivo. Nada guardado = nada velho somando.
+  const novoRap = () => ({ ult: {}, pend: [], med: [], corrida: [], id: 0, ini: Date.now() });
+  try { for (let i = sessionStorage.length - 1; i >= 0; i--) { const k = sessionStorage.key(i); if (k && /^sbrap/.test(k)) sessionStorage.removeItem(k); } } catch (e) {}
   function registrarMedida(rap, k, seg) {
     rap.med.push({ k, seg: Math.round(seg) });
     if (rap.med.length > 80) rap.med.shift();
@@ -840,7 +721,7 @@
   }
   function contarFonte(p, fonte, cur, sl, soBase) {
     const vv = p.vv, ch = chaveJogo(p);
-    const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
+    const rap = (vv.rap = vv.rap || novoRap());
     if (!rap.ult || Array.isArray(rap.ult) || rap.ult.gol !== undefined) rap.ult = {}; // formato antigo
     rap.corrida = rap.corrida || [];
     const ult = rap.ult[fonte];
@@ -856,11 +737,9 @@
       // a partir deste minuto os lances da 5Dollar são contados aqui; os de antes vêm do histórico do servidor
       if (!ult && fonte === "5d" && sl && !rap.base5d) rap.base5d = minutoDe(sl);
       if (!ult) conferirRapidos(p);
-      gravarRap(ch, rap);
       return false;
     } // 1ª leitura (ou fonte de reserva parada): só o ponto de partida
     const agora = Date.now(), mm = minutoDe(sl);
-    rap.semPar = rap.semPar.filter((x) => agora - x.t < 5 * 60e3);
     // esta fonte está contando os lances (a narração desses tipos só entra para dar o nome)
     rap.contaEm = rap.contaEm || {}; rap.contaEm[fonte] = agora;
     rap.contaDe = rap.contaDe || {}; if (mm && !rap.contaDe[fonte]) rap.contaDe[fonte] = mm;
@@ -912,7 +791,6 @@
       if (!rap.pend[j].hist) { rap.pend.splice(j, 1); sobra--; } else j++;
     }
     if (mudou) conferirRapidos(p);
-    gravarRap(ch, rap);
     return mudou;
   }
   // Regra: o CONTADOR (5Dollar; 365Scores quando ele é a reserva) é quem conta chutes, escanteios e cartões.
@@ -928,7 +806,9 @@
     const agora = Date.now();
     // fontes contando agora (pararam há mais de 3 min? a narração volta a valer sozinha)
     const ativas = Object.keys(rap.contaEm || {}).filter((f) => agora - rap.contaEm[f] < 3 * 60e3 && rap.ult && rap.ult[f]);
-    const contaTipo = (k) => CAMPO_CONTADOR[k] && ativas.some((f) => { const u = rap.ult[f], c = CAMPO_CONTADOR[k]; return c === "alvo" ? u.alvo || u.chutes || u.fora : u[c]; });
+    // (jogo já encerrado: quem contou foi o histórico do servidor, minuto a minuto)
+    const contaTipo = (k) => CAMPO_CONTADOR[k] && ((rap.histOk && rap.histCampos && rap.histCampos[CAMPO_CONTADOR[k]]) ||
+      ativas.some((f) => { const u = rap.ult[f], c = CAMPO_CONTADOR[k]; return c === "alvo" ? u.alvo || u.chutes || u.fora : u[c]; }));
     // trecho do jogo coberto pelo contador (o histórico do servidor cobre desde o início)
     const inicios = ativas.map((f) => rap.contaDe && rap.contaDe[f]).filter(Boolean);
     const cobre = (me) => !!me && (rap.histOk || inicios.some((x) => valMin(me) >= valMin(x) - 1));
@@ -975,7 +855,8 @@
     vv.prov = pr ? rap.pend.map((x) => {
       const n = par.get(x);
       // casado: posição e minuto exatos da narração, tipo do contador, nome do jogador
-      if (n) return { i: n.e.i, l: x.l, k: x.k, j: n.e.j || "", x: n.e.x || "", min: n.e.min || x.r + "'", prov: false, t: x.t };
+      // "para fora" da 5Dollar inclui os bloqueados: se a narração diz qual dos dois foi, fica o tipo dela
+      if (n) return { i: n.e.i, l: x.l, k: x.k === "fora" && (n.e.k === "bloq" || n.e.k === "fora") ? n.e.k : x.k, j: n.e.j || "", x: n.e.x || "", min: n.e.min || x.r + "'", prov: false, t: x.t };
       let i = pr.idx[x.per + ":" + (x.m > LIM[x.per] ? LIM[x.per] : x.m) + ":" + (x.m > LIM[x.per] ? x.m - LIM[x.per] : 0)];
       // o gráfico ainda não tem aquele minuto (ex.: 45+3, quando a narração não abriu os acréscimos): vai para o
       // minuto mais perto do mesmo tempo — nunca para o minuto atual, senão o lance "anda" junto com o relógio
@@ -984,7 +865,7 @@
         pr.slots.forEach((s, j) => { if (s.per !== x.per) return; const d = Math.abs(s.b + s.ad - x.m); if (d < dif) { dif = d; melhor = j; } });
         i = melhor >= 0 ? melhor : Math.max(atual, 0);
       }
-      return { i, l: x.l, k: x.k, j: x.j || "", x: x.x || "", min: x.r + "'", prov: true, t: x.t };
+      return { i, l: x.l, k: x.k, j: x.j || "", x: x.x || "", min: x.r + "'", prov: true, t: x.t, fb: x.k === "fora" || undefined };
     }) : null;
     // medidor: quanto o contador chegou antes da narração (positivo = contador primeiro)
     const cor = rap.corrida || [];
@@ -993,48 +874,11 @@
     vv.medRap = seg.length ? { n: seg.length, media: Math.round(seg.reduce((a, b) => a + b, 0) / seg.length), min: Math.min(...seg), max: Math.max(...seg),
       antes: seg.filter((x) => x > 0).length } : null;
   }
-  // narração do 365Scores (lances), a cada 10 s com o jogo aberto
-  const CICLO_PBP = 10000;
-  const feed365 = new Map(); // id 365 -> { url, em } (url null = jogo sem narração; tenta de novo em 5 min)
-  const ultimoPbp = new Map();
-  async function atualizarPbp(p, forcar) {
-    if (!p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
-    if (modoDe(p) !== "365") return false; // com a 5Dollar em dia, os nomes vêm da ESPN
-    const ch = chaveJogo(p);
-    if (!forcar && Date.now() - (ultimoPbp.get(ch) || 0) < CICLO_PBP - 1500) return false;
-    ultimoPbp.set(ch, Date.now());
-    const gid = await idDo365(p);
-    if (!gid) return false;
-    let f = feed365.get(gid);
-    if (!f || (!f.url && Date.now() - f.em > 5 * 60e3)) {
-      const g = await buscarJSON(`${S365}game/?${Q365}&gameId=${gid}`);
-      if (!g) return false;
-      const u = g.game && g.game.playByPlay && g.game.playByPlay.feedURL;
-      // lang=1: a narração em inglês tem o mesmo texto da ESPN (é assim que o site acha o mesmo lance nas duas)
-      f = { url: u ? String(u).replace(/^http:/, "https:").replace(/([?&]lang=)\d+/, (x, a) => a + "1") : null, em: Date.now() };
-      feed365.set(gid, f);
-    }
-    if (!f.url) return false;
-    const r = await buscarJSON(f.url + "&_=" + Math.floor(Date.now() / 5000));
-    if (!r || !Array.isArray(r.Messages)) return false;
-    const assin = r.Messages.map((m) => m.Id + "@" + m.LastModified).join(",");
-    const ant = pbp365.get(ch);
-    p.vv.emPbp = new Date().toISOString();
-    if (ant && ant.assin === assin) return false;
-    pbp365.set(ch, { msgs: r.Messages, assin });
-    p.vv.pbp365 = true;
-    return aplicarMistura(p);
-  }
-
-  // ---------- 5DollarFootballAPI (teste pessoal): ataques e ataques perigosos do jogo aberto.
-  // Só funciona com a chave salva NESTE navegador (nunca vai para o código do site). Plano Pro: 10 pedidos/min
-  // por conta -> estatísticas a cada ~8 s (7,5/min) + lista de jogos ao vivo a cada 2 min para achar o jogo.
-  const D5 = "https://api.5dollarfootballapi.com/v1/";
-  const chave5d = () => { try { return localStorage.getItem("sb_5d_chave") || ""; } catch (e) { return ""; } };
-  // servidor do ScanBall na Cloudflare (config.js -> aoVivo5d): busca TODOS os jogos ao vivo de uma vez para
-  // todos os visitantes, com a chave escondida. Com ele ligado, a chave pessoal não é usada.
+  // ---------- 5DollarFootballAPI pelo servidor do ScanBall na Cloudflare (config.js -> aoVivo5d): ele busca TODOS
+  // os jogos ao vivo de uma vez para todos os visitantes, com a chave escondida (o navegador nunca fala direto com a API)
   const WORKER5D = String(((window.SB_CONFIG || {}).aoVivo5d) || "").replace(/\/+$/, "");
-  const fonte5d = () => !!WORKER5D || !!chave5d();
+  const fonte5d = () => !!WORKER5D;
+  try { localStorage.removeItem("sb_5d_chave"); } catch (e) {} // chave pessoal da época antes do servidor
   let lista5W = null, lista5WEm = 0, lista5WBusca = null, lista5WCheia = false, lista5WProx = 0; // cheia: pode ter cortado jogos (3 páginas)
   // pede ao servidor logo depois da próxima busca dele (o servidor diz quando é: "prox"), em vez de um intervalo fixo:
   // o dado novo chega ~1 s depois de sair da 5Dollar e nenhum pedido é feito à toa
@@ -1061,25 +905,8 @@
     return lista5WBusca;
   }
   const d5Status = { msg: "", em: 0 };
-  let d5Lista = null, d5ListaEm = 0, d5Pausa = 0;
-  const d5Par = new Map(), d5Ult = new Map();
-  async function buscar5d(caminho) {
-    const k = chave5d();
-    if (!k || Date.now() < d5Pausa) return null;
-    try {
-      const r = await fetch(D5 + caminho, { headers: { Authorization: "Bearer " + k }, cache: "no-store" });
-      if (r.status === 429) { const seg = Number(r.headers.get("Retry-After")) || 30; d5Pausa = Date.now() + seg * 1000; d5Status.msg = `limite de pedidos atingido: esperando ${seg} s (tem outra aba do site aberta?)`; return null; }
-      if (r.status === 401 || r.status === 403) { d5Pausa = Date.now() + 5 * 60e3; d5Status.msg = `chave recusada (erro ${r.status}); confira a chave`; return null; }
-      if (!r.ok) { d5Status.msg = `erro ${r.status} na API`; return null; }
-      const j = await r.json();
-      d5Status.msg = "ok"; d5Status.em = Date.now();
-      return j && j.success ? j : null;
-    } catch (e) {
-      d5Pausa = Date.now() + 60e3;
-      d5Status.msg = "o navegador bloqueou o pedido (a API não aceita chamadas direto do site) ou sem conexão";
-      return null;
-    }
-  }
+  let d5Lista = null;
+  const d5Par = new Map();
   // quem manda no ao vivo deste jogo: "5d" (5Dollar em dia), "365" (reserva: 5Dollar sem dados há 2 min,
   // ou sem 5Dollar ligada) ou "espera" (acabou de abrir, esperando a 1ª resposta da 5Dollar)
   const RESERVA_MS = 120000;
@@ -1098,13 +925,9 @@
   async function idDo5d(p) {
     const ch = chaveJogo(p);
     if (d5Par.get(ch)) return d5Par.get(ch);
-    if (WORKER5D) { d5Lista = await listaDoWorker(); if (!d5Lista) return 0; }
-    else if (!d5Lista || Date.now() - d5ListaEm > 120000) {
-      d5ListaEm = Date.now();
-      const r = await buscar5d("fixtures?status=live&per_page=500");
-      if (!r) return 0;
-      d5Lista = r.data || [];
-    }
+    if (!WORKER5D) return 0;
+    d5Lista = await listaDoWorker();
+    if (!d5Lista) return 0;
     const T = dados.times || {}, nome = (id) => [(T[id] || {}).n, (T[id] || {}).c, (T[id] || {}).t].join(" ");
     const th = tokens(nome(p.h)), ta = tokens(nome(p.a)), quando = Date.parse(p.d);
     let melhor = 0, nota = 0;
@@ -1123,13 +946,11 @@
     if (!fonte5d() || !p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
     const ch = chaveJogo(p), vv = p.vv;
     if (!vv.d5Tentou) vv.d5Tentou = Date.now();
-    // com o servidor, quem dita o ritmo é a lista (só busca de novo quando o servidor tem dado novo)
-    if (!WORKER5D && Date.now() - (d5Ult.get(ch) || 0) < 7500) return false;
-    d5Ult.set(ch, Date.now());
+    // quem dita o ritmo é a lista do servidor (só tem dado novo quando o servidor buscou de novo)
     const id = await idDo5d(p);
     if (!id) { const antes = vv.d5 && vv.d5.semJogo; vv.d5 = vv.d5 && vv.d5.id ? vv.d5 : { semJogo: true }; return !antes; }
     let fx;
-    if (WORKER5D) {
+    {
       const lista = await listaDoWorker();
       fx = (lista || []).find((x) => x.id === id) || null;
       if (!fx && lista) {
@@ -1142,7 +963,6 @@
         } else d5Par.delete(ch);
       } else vv.d5SumiuEm = 0;
     }
-    else { const r = await buscar5d(`fixtures/${id}?include=events,stats`); fx = r && r.data; }
     if (!fx) return false;
     const mudou = lerFx5d(p, id, fx);
     const doHist = p === jogoAberto() ? await completarComHistorico(p, p.vv.d5).catch(() => false) : false;
@@ -1265,7 +1085,7 @@
   function subs5d(p, d5, eventos) {
     if (!Array.isArray(eventos)) return false;
     const vv = p.vv, ch = chaveJogo(p);
-    const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
+    const rap = (vv.rap = vv.rap || novoRap());
     const primeira = !d5.subsOk, atual = minutoDe(slotDe(vv.clk, vv.per));
     let mudou = false;
     for (const e of eventos) {
@@ -1283,7 +1103,7 @@
       mudou = true;
     }
     d5.subsOk = true;
-    if (mudou) { conferirRapidos(p); gravarRap(ch, rap); }
+    if (mudou) conferirRapidos(p);
     return mudou;
   }
   const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
@@ -1351,7 +1171,7 @@
     if (!d5.ult && m.ult) d5.ult = { at: m.ult.at, da: m.ult.da };
     if (vv.pr) {
       const ch = chaveJogo(p);
-      const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
+      const rap = (vv.rap = vv.rap || novoRap());
       const val = (x) => x.per * 1000 + x.m;
       const maxFoto = Math.max(0, ...Object.keys(j.m).map((k) => { const [pe, mi] = k.split(":").map(Number); return pe * 1000 + mi; }));
       const faixas = [];
@@ -1361,14 +1181,13 @@
       for (const b of rap.buracos || []) if (!b.feito && maxFoto >= val(b.ate) - 1) { b.feito = true; faixas.push({ de: val(b.de), ate: val(b.ate) }); }
       if (rap.buracos) rap.buracos = rap.buracos.filter((b) => !b.feito);
       if (faixas.length && lancesDoHistorico(p, j.m, faixas)) mudou = true;
-      else if (faixas.length) gravarRap(ch, rap);
     }
     return mudou;
   }
   // faixas: minutos (per*1000+m) que este navegador não contou: de < minuto < ate
   function lancesDoHistorico(p, mapa, faixas) {
     const vv = p.vv, pr = vv.pr, ch = chaveJogo(p);
-    const rap = (vv.rap = vv.rap || lerRap(ch) || { ult: {}, pend: [], med: [], vistos: {}, semPar: [], corrida: [], ok: false, id: 0, ini: Date.now() });
+    const rap = (vv.rap = vv.rap || novoRap());
     // gols da narração que já existem (o gol do contador só entra se a narração ainda não tem)
     const narr = (pr.ev0 || pr.ev).filter((e) => e.k === "gol").map((e) => ({ e, me: minutoDe(pr.slots[e.i]), usado: false }));
     // refaz os lances do histórico desses trechos (abrir o jogo de novo não pode duplicar)
@@ -1402,8 +1221,12 @@
       ant = f.v;
     }
     // o histórico cobre o jogo desde o começo: a narração desses tipos passa a só dar nome
-    if (fotos.length > 1 && faixas.some((fx) => fx.de < 0)) { rap.histOk = true; criou = true; }
-    if (criou) { conferirRapidos(p); gravarRap(ch, rap); }
+    if (fotos.length > 1 && faixas.some((fx) => fx.de < 0)) {
+      rap.histOk = true; criou = true;
+      const tem = (c) => fotos.some((f) => f.v[c]);
+      rap.histCampos = { alvo: tem("ch") || tem("cf"), esc: tem("esc"), amarelo: tem("am"), vermelho: tem("vm") };
+    }
+    if (criou) conferirRapidos(p);
     return criou;
   }
   // histórico bruto de um jogo pelo dia e pelos nomes dos times (jogos que não estão mais na lista ao vivo)
@@ -1521,7 +1344,7 @@
     const p = jogoAberto();
     // jogo aberto: narração e escalação (ESPN), xG e reserva (365Scores); sem servidor, também a 5Dollar pela chave pessoal
     const doAberto = p && p.vv.st === "in"
-      ? [atualizarDetalhe(p, false), atualizar365(p, false), atualizarPbp(p, false)].concat(WORKER5D ? [] : [atualizar5d(p)]).map(assimQueChegar)
+      ? [atualizarDetalhe(p, false), atualizar365(p, false)].concat(WORKER5D ? [] : [atualizar5d(p)]).map(assimQueChegar)
       : [];
     if (!doAberto.length) return seguir();
     Promise.all(doAberto).finally(seguir);
@@ -1542,7 +1365,7 @@
     }
     const res = await Promise.all(lista.map((p) => atualizarDetalhe(p, forcar && !ultimoDetalhe.has(p.vv.espn.code + ":" + p.vv.espn.id))));
     // painel: ataques do 365Scores de todos os jogos rolando (no ritmo do painel, a cada 20 s)
-    const r365 = await Promise.all(lista.filter((p) => p.vv.st === "in").map((p) => Promise.all([atualizar365(p, true).catch(() => false), atualizarPbp(p, true).catch(() => false), WORKER5D ? atualizar5d(p).catch(() => false) : false]).then((x) => x.some(Boolean))));
+    const r365 = await Promise.all(lista.filter((p) => p.vv.st === "in").map((p) => Promise.all([atualizar365(p, true).catch(() => false), WORKER5D ? atualizar5d(p).catch(() => false) : false]).then((x) => x.some(Boolean))));
     return res.some(Boolean) || r365.some(Boolean);
   }
 
@@ -1629,7 +1452,7 @@
       const a = await atualizarDetalhe(p, true);
       const b = p ? await atualizarElencos(p) : false;
       if (p) atualizarMinutos(p);
-      const d = p && p.vv.st === "in" ? (await Promise.all([atualizar365(p, true).catch(() => false), atualizarPbp(p, true).catch(() => false)])).some(Boolean) : false;
+      const d = p && p.vv.st === "in" ? await atualizar365(p, true).catch(() => false) : false;
       const c = await atualizarPainel(true);
       if (a || b || c || d) redesenhar();
     }, 60);
@@ -1637,7 +1460,7 @@
 
   function iniciar() {
     if (!LIGADO) return;
-    dados = (window.App && window.App.dados) || window.DADOS;
+    dados = (window.App && window.App.dados) || window.DADOS5;
     if (!dados || !dados.competicoes) return;
     document.addEventListener("visibilitychange", acordar);
     window.addEventListener("pageshow", acordar);

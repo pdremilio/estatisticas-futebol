@@ -3,7 +3,7 @@
  * Só quando está sem internet abre a última cópia guardada do site (com os últimos dados).
  * Pedidos para outros sites (ESPN, 5Dollar, servidor do ao vivo...) passam direto, sem mexer.
  */
-const CACHE = "scanball-v1";
+const CACHE = "scanball-v2"; // beta 8: troca o nome para descartar as cópias antigas (dados.js, dados-demo.js...)
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(
   caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())

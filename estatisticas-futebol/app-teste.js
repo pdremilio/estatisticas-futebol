@@ -2,11 +2,11 @@
 (function () {
   "use strict";
 
-  // beta 5: base nova (ESPN + FotMob) em dados5.js; se ela falhar, a página carrega a football-data (reserva)
-  const B5 = !!(window.DADOS5_OK && window.DADOS5);
-  const RESERVA = !B5 && !!window.DADOS5_TENTOU;
-  const DADOS = (B5 ? window.DADOS5 : window.DADOS) || window.DADOS_DEMO || null;
-  const DEMO = !B5 && !window.DADOS && !!window.DADOS_DEMO;
+  // base do site: dados5.js (ESPN + FotMob), gravada pelo robô do GitHub
+  const DADOS = (window.DADOS5 && window.DADOS5.competicoes && window.DADOS5) || null;
+  const B5 = !!DADOS;
+  // robô parado há mais de 12 h: o site segue com a última versão boa e avisa (o ao vivo não depende dele)
+  const PARADO = !!(DADOS && DADOS.ok_em && Date.now() - Date.parse(DADOS.ok_em) > 12 * 3600e3);
   const M = window.Motor;
 
   const COMP_INFO = {
@@ -164,16 +164,20 @@
   function escudo(id, cls = "esc") {
     const t = TIMES[id];
     const sig = h(siglaTime(id)), cor = corDe(id);
+    // escudo guardado no próprio site (o robô baixa); a ESPN fica de reserva se o arquivo local falhar
+    if (t && t.l) return `<img class="${cls}" src="escudos/${h(String(id))}.png" alt="" loading="lazy" data-alt="${h(t.e || "")}" data-f="${sig}" data-cor="${cor}">`;
     if (t && t.e) return `<img class="${cls}" src="${h(t.e)}" alt="" loading="lazy" data-f="${sig}" data-cor="${cor}">`;
     return `<span class="${cls} esc-falso" style="background:${cor}" aria-hidden="true">${sig}</span>`;
   }
   function seloComp(code) {
     const c = DADOS.competicoes[code];
+    if (c && c.eml) return `<img class="comp-sigla" src="escudos/liga-${h(code)}.png" alt="" loading="lazy" data-alt="${h(c.emblema || "")}" data-f="${h(code)}" data-cor="var(--tinta)">`;
     if (c && c.emblema) return `<img class="comp-sigla" src="${h(c.emblema)}" alt="" loading="lazy" data-f="${h(code)}" data-cor="var(--tinta)">`;
     return `<span class="comp-sigla" aria-hidden="true">${h(code)}</span>`;
   }
   document.addEventListener("error", (ev) => {
     const el = ev.target;
+    if (el && el.tagName === "IMG" && el.dataset.alt) { const alt = el.dataset.alt; delete el.dataset.alt; el.src = alt; return; } // local falhou: tenta a ESPN
     if (el && el.tagName === "IMG" && el.dataset.f) {
       const s = document.createElement("span");
       s.className = el.className + " esc-falso";
@@ -247,13 +251,10 @@
     if (DADOS && (DADOS.ok_em || DADOS.gerado_em)) {
       // beta 5: horário da última atualização que deu certo (se a ESPN falhar numa rodada, não finge que atualizou)
       const d = new Date(DADOS.ok_em || DADOS.gerado_em);
-      meta.innerHTML = DEMO ? "Dados de demonstração" : `Dados de ${pad(d.getDate())}/${pad(d.getMonth() + 1)} às ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      meta.innerHTML = `Dados de ${pad(d.getDate())}/${pad(d.getMonth() + 1)} às ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
-    if (RESERVA) {
-      document.getElementById("aviso").innerHTML = `<div class="aviso aviso-reserva"><div><b>Estamos com instabilidade na fonte principal de dados.</b> Por enquanto o site está usando a fonte reserva: jogos, tabelas e estatísticas básicas continuam funcionando, mas tipos de gol, períodos, escanteios, cartões e xG ficam indisponíveis até a fonte principal voltar.</div></div>`;
-    } else if (DEMO) {
-      const naWeb = /^https?:$/.test(location.protocol);
-      document.getElementById("aviso").innerHTML = `<div class="aviso"><div>Você está vendo dados de demonstração, com resultados inventados. ${naWeb ? "Os dados reais aparecem depois que a primeira atualização automática terminar (aba Actions do GitHub)." : "Rode o <b>atualizar.bat</b> para baixar os dados reais das competições."}</div></div>`;
+    if (PARADO) {
+      document.getElementById("aviso").innerHTML = `<div class="aviso aviso-reserva"><div><b>Tabelas e estatísticas sem atualizar há algumas horas.</b> O site está mostrando a última versão boa; o ao vivo (placar, lances e gráfico) segue normal.</div></div>`;
     }
     const temaSalvo = ler("tema", null);
     if (temaSalvo) document.documentElement.dataset.tema = temaSalvo;
@@ -297,13 +298,13 @@
     pedidosFim.add(k);
     window.AoVivo.carregarEncerrado(code, p).then((ok) => { if (!ok) setTimeout(() => pedidosFim.delete(k), 60000); }).catch(() => pedidosFim.delete(k));
   }
-  // aviso quando a ESPN não responde há alguns ciclos (o placar volta a ser o da football-data)
+  // aviso quando a ESPN não responde há alguns ciclos
   // (com a 5Dollar em dia, placar, minuto e gráfico seguem normais: o aviso fica discreto)
   const avisoFonte = () => {
     const AV = window.AoVivo;
     if (!(AV && AV.indisponivel && AV.indisponivel())) return "";
     if (AV.d5EmDia && AV.d5EmDia()) return `<div class="aviso-fonte aviso-leve" role="status">A ESPN está fora do ar agora: os nomes dos jogadores nos lances podem atrasar. Placar, minuto e gráfico seguem normais pela 5Dollar.</div>`;
-    return `<div class="aviso-fonte" role="status"><b>Dados ao vivo temporariamente indisponíveis.</b> A ESPN e a 5Dollar não estão respondendo; tentando de novo a cada 20 s. Enquanto isso, o placar vem da football-data, que atrasa alguns minutos.</div>`;
+    return `<div class="aviso-fonte" role="status"><b>Dados ao vivo temporariamente indisponíveis.</b> A ESPN e a 5Dollar não estão respondendo; tentando de novo a cada 20 s.</div>`;
   };
   const horaCurta = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const horaAtualizacao = (p) => { const v = p.vv || {}, t = [v.emDet || v.em, v.emPbp].filter(Boolean).sort().pop(); if (!t) return ""; const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
@@ -425,9 +426,8 @@
     return { h, a };
   }
 
-  const temChave5d = () => { try { return !!localStorage.getItem("sb_5d_chave"); } catch (e) { return false; } };
   const servidor5d = () => !!(window.AoVivo && AoVivo.servidor5d);
-  const fonte5d = () => servidor5d() || temChave5d();
+  const fonte5d = servidor5d;
   // ---------- avisos do ao vivo
   // O jogo é relido minuto a minuto (do 1º minuto até agora) com as mesmas regras; assim o aviso de agora e as
   // marcas no gráfico (onde cada aviso começou) saem iguais em qualquer computador, mesmo abrindo o jogo tarde.
@@ -788,7 +788,7 @@
     const fonte = fonteDe(v);
     L("Fonte principal", fonte === "5d" ? "5DollarFootballAPI (placar, lances, ataques e ataques perigosos)" : fonte === "espera" ? "esperando a 1ª resposta da 5DollarFootballAPI" : fonte5d() ? "365Scores (reserva: a 5Dollar está sem dados deste jogo)" : "365Scores");
     L("Lances", fonte === "365"
-      ? (v.pbp365 ? "contadores e narração do 365Scores + narração da ESPN" : "contadores do 365Scores + narração da ESPN") + " (a cada ~6–10 s)"
+      ? "contadores do 365Scores + narração da ESPN (a cada ~6–10 s)"
       : "contadores e eventos da 5Dollar (a cada ~8 s); a narração da ESPN (a cada ~10 s) completa com os nomes");
     L("xG", v.es365 && v.es365.xg ? `365Scores (a cada ${fonte === "365" ? "~6" : "~30"} s)` : "—");
     if (fonte === "365") {
@@ -798,7 +798,7 @@
     if (fonte5d()) {
       const st = (window.AoVivo && AoVivo.d5Status) || {}, d = v.d5;
       const estado5 = st.msg && st.msg !== "ok" ? h(st.msg) : d && d.semJogo ? "este jogo não está na lista ao vivo deles" : !d ? "conectando…" : "ok, lido a cada ~8 s" + (d.desde ? ` (desde ${horaCurta(d.desde)})` : "");
-      L("5DollarFootballAPI", estado5 + (servidor5d() ? " · pelo servidor do ScanBall (todos os jogos, para todos)" : " · pela sua chave (só o jogo aberto)"));
+      L("5DollarFootballAPI", estado5 + " · pelo servidor do ScanBall (todos os jogos, para todos)");
       if (d && d.ult && d.ult.da) L("Ataques perigosos", `${d.ult.da[0]} × ${d.ult.da[1]}${d.ult.at ? ` · ataques ${d.ult.at[0]} × ${d.ult.at[1]}` : ""} · último novo ${d.mudDa ? `há ${Math.round((Date.now() - d.mudDa) / 1000)} s` : "ainda não"}`);
     }
     if (v.rap) {
@@ -893,7 +893,7 @@
       (grupos[chave] = grupos[chave] || []).push(e);
     }
     const nomeLado = (l) => nomeTime(l === "h" ? p.h : p.a);
-    const descr = (x) => `${x.min || pr.slots[x.i].r + "'"} ${x.j ? x.j + " · " : ""}${NOME_MARCA[x.k]}${x.x ? " (" + x.x + ")" : ""}`;
+    const descr = (x) => `${x.min || pr.slots[x.i].r + "'"} ${x.j ? x.j + " · " : ""}${x.fb ? "chute para fora/bloqueado" : NOME_MARCA[x.k]}${x.x ? " (" + x.x + ")" : ""}`;
     const marcas = Object.values(grupos).map((g) => {
       const ord = g.slice().sort((a, b) => PRIOR[b.k] - PRIOR[a.k]);
       const info = g.slice().sort((a, b) => a.i - b.i).map(descr).join(" | ") + ` — ${nomeLado(g[0].l)}`;
@@ -942,9 +942,6 @@
           <button type="button" class="chip" data-prmodo="tendencia" aria-pressed="${opc.modo === "tendencia"}">Tendência</button>
           <button type="button" class="chip" data-propc="saldo" aria-pressed="${!!opc.saldo}">Só o saldo</button>
           <button type="button" class="chip" data-propc="padrao">Restaurar padrão</button></div>
-        <div class="pc-linha pc-chave"><span class="sub">5Dollar</span>${servidor5d() ? `<span class="sub">ligado para todos pelo servidor do ScanBall ✓</span>` : temChave5d()
-          ? `<span class="sub">chave salva neste navegador ✓</span><button type="button" class="chip" data-chave5d="remover">Remover chave</button>`
-          : `<input id="chave5d" type="password" autocomplete="off" placeholder="cole a chave da 5DollarFootballAPI" aria-label="Chave da 5DollarFootballAPI"><button type="button" class="chip" data-chave5d="salvar">Salvar</button><small class="sub">A chave fica só neste navegador; nunca vai para o site nem para o GitHub.</small>`}</div>
         <div class="pc-linha"><span class="sub">Alerta</span><button type="button" class="chip" data-propc="som" aria-pressed="${!!opc.som}">🔔 Som quando um aviso acender</button><a class="chip chip-link" href="#avisos">⚙ Escolher avisos, criar os seus e notificações</a></div>
         <p class="sub">"Só o minuto": cada barra mostra só o que aconteceu naquele minuto. "Tendência": cada barra carrega um pouco dos minutos anteriores. "Só o saldo": em cada minuto aparece só o time que dominou (barra = a diferença entre os dois); minuto equilibrado vira um tracinho cinza.</p>
       </div>` : "";
@@ -964,18 +961,10 @@
     </div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-chave5d], [data-prdev], [data-estper], [data-pvfiltro]");
+    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-prdev], [data-estper], [data-pvfiltro]");
     if (!t) return;
     if (t.dataset.estper) { estado.estPer = t.dataset.estper; aoVivoAtualizado(); return; }
     if (t.dataset.pvfiltro) { estado.pvFiltro = t.dataset.pvfiltro; guardar("pv_filtro", estado.pvFiltro); telaPainelVivo(); return; }
-    if (t.dataset.chave5d) {
-      try {
-        if (t.dataset.chave5d === "salvar") { const v = ((document.getElementById("chave5d") || {}).value || "").trim(); if (v) localStorage.setItem("sb_5d_chave", v); }
-        else localStorage.removeItem("sb_5d_chave");
-      } catch (err) {}
-      aoVivoAtualizado();
-      return;
-    }
     if (t.classList.contains("mk")) {
       const caixaP = t.closest(".pressao"), jogo = caixaP && caixaP.dataset.jogo;
       if (jogo) infoPressao[jogo] = t.dataset.info || "";
@@ -1158,7 +1147,7 @@
     switch (e.k) {
       case "gol": return `<b>GOL! ${t}</b>${j ? ` · ${j}` : ""}${e.own ? " (contra)" : e.pen ? " (pênalti)" : ""}`;
       case "alvo": return `${e.pen ? "Pênalti defendido" : "Chute no gol, defendido"}: ${quem}`;
-      case "fora": return `${e.pen ? "Pênalti perdido" : "Chute para fora"}: ${quem}`;
+      case "fora": return `${e.pen ? "Pênalti perdido" : e.fb ? "Chute para fora/bloqueado" : "Chute para fora"}: ${quem}`;
       case "bloq": return `Chute bloqueado: ${quem}`;
       case "trave": return `<b>Na trave!</b> ${quem}`;
       case "esc": return `Escanteio · ${t}`;
@@ -1382,7 +1371,7 @@
     // lances que o contador/eventos já registraram e a narração ainda não trouxe: entram iguais aos outros
     // (a narração da ESPN, quando chega, completa com o nome do jogador)
     const minVal = (m) => { const x = String(m || "").match(/(\d+)'?\s*(?:\+\s*(\d+))?/); return x ? Number(x[1]) + (Number(x[2]) || 0) / 100 : 0; };
-    const doContador = (v.prov || []).map((e) => ({ k: e.k, l: e.l, j: e.j || "", j2: e.x ? e.x.replace(/^sai /, "") : "", min: e.min, t: e.t, cont: true }));
+    const doContador = (v.prov || []).map((e) => ({ k: e.k, l: e.l, j: e.j || "", j2: e.x ? e.x.replace(/^sai /, "") : "", min: e.min, t: e.t, cont: true, fb: e.fb }));
     const todos = (v.lances || []).map((e, i) => ({ e, ord: minVal(e.min), seq: i + 1 })).concat(doContador.map((e) => ({ e, ord: minVal(e.min), seq: 1e9 + (e.t || 0) / 1e4 })));
     todos.sort((a, b) => b.ord - a.ord || b.seq - a.seq);
     const narr = todos.length ? (() => {
@@ -2109,36 +2098,6 @@
     aoVivoAtualizado();
   });
 
-  // aba Extras: escanteios e cartões de cada jogo (a favor x contra), para ver a tendência jogo a jogo
-  function extrasPorJogo(code, tid, jogos, lado) {
-    const base = lado === "casa" ? "do mandante (casa)" : lado === "fora" ? "do visitante (fora)" : "de " + nomeTime(tid);
-    const fim = jogos.filter(encerrada).slice().reverse();
-    const linhas = fim.map((p) => {
-      const casa = String(p.h) === String(tid), adv = casa ? p.a : p.h, e = p.es;
-      const i = casa ? 0 : 1, o = 1 - i;
-      const tem = e && e[0] != null && e[1] != null;
-      const par = (k) => (tem ? `<b>${e[k * 2 + i] ?? 0}</b><span>${e[k * 2 + o] ?? 0}</span>` : "<b>–</b><span>–</span>");
-      const cart = tem ? `<b>${(e[2 + i] || 0) + (e[4 + i] || 0)}${e[4 + i] ? '<i class="ic vermelho" title="Teve vermelho"></i>' : ""}</b><span>${(e[2 + o] || 0) + (e[4 + o] || 0)}</span>` : "<b>–</b><span>–</span>";
-      const gm = casa ? p.fh : p.fa, gs = casa ? p.fa : p.fh, r = gm > gs ? "V" : gm === gs ? "E" : "D";
-      return `<li class="clicavel" data-ir="jogo/${code}/${p.i}" role="link" tabindex="0">
-        <span class="data">${dataCurta(p.d)}</span>
-        <span class="conf"><span class="sub">${casa ? "x" : "@"}</span> ${h(nomeTime(adv))} <b>${gm}-${gs}</b></span>
-        <span class="ex-par" title="Escanteios: a favor · contra">${par(0)}</span>
-        <span class="ex-par" title="Cartões: a favor · contra">${cart}</span>
-        <span class="r ${r}">${r}</span></li>`;
-    }).join("");
-    const com = fim.filter((p) => p.es && p.es[0] != null);
-    const soma = (f) => com.reduce((s2, p) => s2 + f(p), 0);
-    const mEsc = com.length ? fNum(soma((p) => (p.es[0] || 0) + (p.es[1] || 0)) / com.length, 1) : "–";
-    const mCart = com.length ? fNum(soma((p) => (p.es[2] || 0) + (p.es[3] || 0) + (p.es[4] || 0) + (p.es[5] || 0)) / com.length, 1) : "–";
-    return `<div class="lateral">
-      <div class="lateral-cab"><h3>Escanteios e cartões ${h(base)}</h3>${controleUltimos()}</div>
-      ${linhas ? `<div class="ex-cab" aria-hidden="true"><span></span><span></span><span>Escanteios</span><span>Cartões</span><span></span></div>
-        <ul class="lista-lateral ex-lista">${linhas}</ul>
-        <p class="legenda-bolas"><span>Número da esquerda: a favor · da direita: contra. Média por jogo: ${mEsc} escanteios e ${mCart} cartões.</span></p>`
-        : `<p class="sub">Sem jogos encerrados antes desta partida.</p>`}
-    </div>`;
-  }
 
   function listaLateral(code, tid, jogos, lado, tempo) {
     const base = lado === "casa" ? "Jogos do mandante (casa)" : lado === "fora" ? "Jogos do visitante (fora)" : "Jogos de " + nomeTime(tid);
@@ -2292,7 +2251,7 @@
       </div>`;
     if (!temTimes) return cab;
     const incompleto = avisoIncompleto(code);
-    const semPar = p.semEspn && !temAoVivo(p) ? `<div class="aviso-fonte">Este jogo não foi encontrado na ESPN, então ele fica sem placar ao vivo, lances e escalações. O placar vem da football-data, que atrasa alguns minutos.</div>` : "";
+    const semPar = p.semEspn && !temAoVivo(p) ? `<div class="aviso-fonte">Este jogo não foi encontrado na ESPN, então ele fica sem narração e escalações.</div>` : "";
 
     const comVivo = temAoVivo(p) || encerradoRecente(code, p), comEsc = temAoVivo(p) || podeEscalacoes(code, p);
     const listaAbas = [...ABAS_JOGO, ...(comEsc ? [["escalacoes", "Escalações"]] : []), ...(comVivo ? [["aovivo", vivo ? '<span class="vivo-min">Ao vivo</span>' : "Ao vivo"]] : [])];
@@ -2501,25 +2460,6 @@
       <span class="res">${res}</span></li>`;
   }
 
-  function confrontoDireto(ha, aa) {
-    const l = [];
-    for (const code of comps) for (const p of preps[code].partidas) {
-      if (!encerrada(p)) continue;
-      const ids = [String(p.h), String(p.a)];
-      if (ids.includes(String(ha)) && ids.includes(String(aa))) l.push({ code, p });
-    }
-    l.sort((a, b) => (a.p.d < b.p.d ? 1 : -1));
-    if (!l.length) return `<p class="sub">Esses times ainda não se enfrentaram nas temporadas baixadas.</p>`;
-    let vh = 0, e = 0, va = 0;
-    for (const { p } of l) {
-      const gh = String(p.h) === String(ha) ? p.fh : p.fa, ga = String(p.h) === String(ha) ? p.fa : p.fh;
-      if (gh > ga) vh++; else if (gh === ga) e++; else va++;
-    }
-    return `<div class="h2h-resumo"><div class="c"><b>${vh}</b><span>${h(nomeTime(ha))}</span></div><div><b>${e}</b><span>empates</span></div><div class="f"><b>${va}</b><span>${h(nomeTime(aa))}</span></div></div>
-      <ul class="lista-mini">${l.map(({ code, p }) => `<li><span class="data">${dataCurta(p.d)}</span>${seloComp(code)}
-        <button type="button" data-ir="jogo/${code}/${p.i}">${h(nomeTime(p.h))} × ${h(nomeTime(p.a))}</button>
-        <span class="res">${p.fh}-${p.fa}${p.hh != null ? ` <span class="sub">(${p.hh}-${p.ha})</span>` : ""}</span></li>`).join("")}</ul>`;
-  }
 
   // ------------------------------------------------------------ CLASSIFICAÇÃO
   function telaClassificacao(code) {
@@ -3341,8 +3281,8 @@
     if (link) link.setAttribute("aria-current", "page");
 
     if (!DADOS || !comps.length) {
-      app.innerHTML = `<div class="painel"><div class="vazio"><strong>Ainda não há dados</strong>
-        Dê dois cliques em <b>atualizar.bat</b> (ou rode <code>python atualizar_dados.py</code>) para baixar as competições da football-data.org. Depois recarregue esta página.</div></div>`;
+      app.innerHTML = `<div class="painel"><div class="vazio"><strong>Não consegui carregar os dados</strong>
+        Confira a internet e recarregue a página. Se continuar, o robô de atualização pode estar publicando uma versão nova: tente de novo em alguns minutos.</div></div>`;
       return;
     }
     switch (aba) {

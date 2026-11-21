@@ -28,7 +28,7 @@ document.write('<link rel="stylesheet" href="estilo.css?v=' + VER_C + '">');</sc
   <div class="topo-linha">
     <a class="marca" href="#jogos" aria-label="ScanBall, ir para Jogos">
       <svg class="marca-icone" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0F6E5A"/><path d="M16 16 L16.00 6.40 A9.6 9.6 0 0 1 24.31 11.20 Z" fill="#F2C230"/><circle cx="16" cy="16" r="9.6" fill="none" stroke="#fff" stroke-width="2.1"/><polygon points="16.00,12.40 19.42,14.89 18.12,18.91 13.88,18.91 12.58,14.89" fill="#fff"/></svg>
-      <span class="marca-nome">ScanBall</span><small class="versao">beta 7</small>
+      <span class="marca-nome">ScanBall</span><small class="versao">beta 8</small>
     </a>
     <div class="topo-meta" id="topo-meta"></div>
     <button class="botao-conta botao-instalar" id="instalar" type="button" hidden title="Instalar o ScanBall como app"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M11 4h2v8.6l3.3-3.3 1.4 1.4L12 16.4 6.3 10.7l1.4-1.4L11 12.6zM5 18h14v2H5z"/></svg><span class="conta-rot">Instalar app</span></button>
@@ -50,22 +50,14 @@ document.write('<link rel="stylesheet" href="estilo.css?v=' + VER_C + '">');</sc
 <div id="aviso"></div>
 <main id="app" tabindex="-1"></main>
 <footer class="rodape">
-  ScanBall · Dados: 5DollarFootballAPI (ao vivo: placar, lances, ataques e ataques perigosos), ESPN (jogos, estatísticas e nomes nos lances), 365Scores (xG ao vivo e reserva) e FotMob (xG e rodadas); football-data.org como reserva. Projeções calculadas a partir dos placares; use como referência, não como garantia.
+  ScanBall · Dados: 5DollarFootballAPI (ao vivo: placar, lances, ataques e ataques perigosos), ESPN (jogos, estatísticas e nomes nos lances), 365Scores (xG ao vivo e reserva) e FotMob (xG e rodadas). Projeções calculadas a partir dos placares; use como referência, não como garantia.
 </footer>
 
-<!-- base principal: ESPN + FotMob (dados5.js). Se não carregar ou estiver parada há mais de 12 h, usa a football-data (reserva). -->
-<script>window.DADOS5_TENTOU = true; document.write('<script src="dados5.js?v=' + VER_D + '"><\/script>');</script>
-<script>(function () {
-  var d = window.DADOS5, ok = !!(d && d.competicoes && Object.keys(d.competicoes).length && d.ok_em && (Date.now() - Date.parse(d.ok_em) < 12 * 3600e3));
-  window.DADOS5_OK = ok;
-  if (!ok) document.write('<script src="dados.js?v=' + VER_D + '"><\/script>');
-})();</script>
-<script>(function () {
-  // dados de demonstração só quando não há dados de verdade (economiza ~150 KB em cada visita)
-  var semDados = !window.DADOS5_OK && !(window.DADOS && window.DADOS.competicoes);
-  var cod = ["config.js", "contas.js", "aovivo.js"].concat(semDados ? ["dados-demo.js"] : [], ["extra5d.js", "motor.js", "app.js"]);
-  cod.forEach(function (f) { document.write('<script src="' + f + '?v=' + (f === "extra5d.js" ? VER_D : VER_C) + '"><\/script>'); });
-})();</script>
+<!-- base do site: dados5.js (ESPN + FotMob), depois o código -->
+<script>document.write('<script src="dados5.js?v=' + VER_D + '"><\/script>');
+["config.js", "contas.js", "aovivo.js", "extra5d.js", "motor.js", "app.js"].forEach(function (f) {
+  document.write('<script src="' + f + '?v=' + (f === "extra5d.js" ? VER_D : VER_C) + '"><\/script>');
+});</script>
 <script>
 // app instalável: service worker + botão "Instalar app" (aparece só quando o navegador permite instalar)
 (function () {
