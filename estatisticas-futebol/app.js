@@ -829,7 +829,9 @@
       const msg = p.vv && p.vv.st === "pre" ? "O gráfico de pressão começa quando a bola rolar." : "Gráfico de pressão indisponível para este jogo.";
       return compacto ? "" : `<div class="pressao vazio-p"><p class="sub">${msg}</p></div>`;
     }
-    const opc = compacto ? Object.assign({}, OPC_PADRAO, { alvo: false, fora: false, bloq: false, trave: false, cartao: true, sub: false, modo: estado.prOpc.modo, saldo: estado.prOpc.saldo }) : estado.prOpc;
+    const noRadar = compacto === "radar";
+    const opc = noRadar ? Object.assign({}, estado.prOpc, { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: true, cartao: true, sub: false, aviso: false })
+      : compacto ? Object.assign({}, OPC_PADRAO, { alvo: false, fora: false, bloq: false, trave: false, cartao: true, sub: false, modo: estado.prOpc.modo, saldo: estado.prOpc.saldo }) : estado.prOpc;
     const n = pr.slots.length, L = 6, W = n * L, H = 100, meio = H / 2;
     const atual = pr.atual == null ? pr.ultimo : pr.atual;
     const prov = p.vv.prov || [];
@@ -886,7 +888,7 @@
     if (opc.gol) for (const e of evs) if (e.k === "gol") linhas += `<line x1="${e.i * L + L / 2}" x2="${e.i * L + L / 2}" y1="0" y2="${H}" class="p-gol ${e.l === "h" ? "c" : "f"}"/>`;
 
     // marcas: tamanho fixo em pixels, empilhadas (até 2 por minuto e lado); toque mostra todas
-    const bloco = compacto ? (window.innerWidth < 560 ? 4 : 3) : window.innerWidth < 560 ? 3 : window.innerWidth < 900 ? 2 : 1;
+    const bloco = noRadar ? (window.innerWidth < 420 ? 4 : window.innerWidth < 760 ? 3 : 2) : compacto ? (window.innerWidth < 560 ? 4 : 3) : window.innerWidth < 560 ? 3 : window.innerWidth < 900 ? 2 : 1;
     const grupos = {};
     for (const e of evs) {
       if (!opc[grupoMarca(e.k)]) continue;
@@ -928,6 +930,10 @@
     const resumo = (l) => `${conta(l, ["gol", "alvo", "trave"])} no gol/trave · ${conta(l, ["fora", "bloq"])} fora/bloq.`;
     const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${faixa}
           <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/>${linhas}${barras}</svg>`;
+    if (noRadar) {
+      return `<div class="pressao pressao-mini pressao-radar" data-jogo="${h(String(p.i))}"><div class="pressao-area">${svg}${marcas}</div><div class="pressao-eixo" aria-hidden="true">${eixo}</div>
+        <p class="pressao-info" aria-live="polite">${infoPressao[p.i] ? h(infoPressao[p.i]) : "Toque numa marca para ver o lance."}</p></div>`;
+    }
     if (compacto) {
       return `<div class="pressao-avisos">${blocoAlerta(p, true)}</div><div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}${marcasAv}</div>${blocoPressao5(p, true)}</div>`;
     }
@@ -1269,8 +1275,9 @@
     </section>`);
   }
 
-  // ---------- RADAR SCANBALL (beta): placar, linha do tempo, campo com o momento do jogo, gráfico de pressão,
-  // lance a lance (com "Ataque" e "Ataque perigoso" contados pela 5Dollar) e estatísticas por tempo.
+  // ---------- RADAR SCANBALL (beta), versão 2: compacto e deitado, tipo widget de radar.
+  // Gráfico de pressão em cima (com todas as marcas: gols, chutes, bloqueados, escanteios, cartões), barra do placar,
+  // lance a lance à esquerda (com "Ataque" e "Ataque perigoso" contados pela 5Dollar) e estatísticas Total/1º/2º à direita.
   // Tudo com os dados que o site já tem: a 5Dollar a cada ~8 s e a narração da ESPN.
   let radarGrafico = (() => { try { return localStorage.getItem("sb_radar_graf") !== "0"; } catch (e) { return true; } })();
   const minDe = (m) => { const x = String(m || "").match(/(\d+)'?\s*(?:\+\s*(\d+))?/); return x ? Number(x[1]) + (Number(x[2]) || 0) / 100 : 0; };
@@ -1284,90 +1291,51 @@
     todos.sort((a, b) => b.ord - a.ord || b.seq - a.seq);
     return todos.map((x) => x.e);
   }
-  function textoRadar(p, e) {
+  // ícones do lance a lance do radar: setas na direção do ataque (mandante para a direita)
+  const SETA = (l, dupla) => `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" class="seta ${l === "a" ? "f" : "c"}"><g transform="${l === "a" ? "rotate(180 12 12)" : ""}">${dupla
+    ? '<path d="M3 6l7 6-7 6M12 6l7 6-7 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'
+    : '<path d="M4 12h13M12 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'}</g></svg>`;
+  const iconeRadar = (e) => (e.k === "atq" ? SETA(e.l) : e.k === "perigo" ? SETA(e.l, true) : ICONE_LANCE[e.k] || "");
+  const textoRadarLinha = (p, e) => {
     const t = h(nomeTime(e.l === "h" ? p.h : p.a));
-    if (e.k === "perigo") return `<b>Ataque perigoso</b> · ${t}${e.n > 1 ? ` <span class="sub">×${e.n}</span>` : ""}`;
-    if (e.k === "atq") return `Ataque · ${t}${e.n > 1 ? ` <span class="sub">×${e.n}</span>` : ""}`;
+    if (e.k === "perigo") return `<b>Ataque perigoso</b> do ${t}${e.n > 1 ? ` <small>×${e.n}</small>` : ""}`;
+    if (e.k === "atq") return `Ataque do ${t}${e.n > 1 ? ` <small>×${e.n}</small>` : ""}`;
     return textoLance(p, e);
-  }
-  const ICONE_RADAR = Object.assign({}, ICONE_LANCE, { atq: "›", perigo: "»" });
-  // o que está acontecendo agora: o último ataque contado nos últimos 25 s (perigoso vale mais)
-  function momentoRadar(p) {
-    const log = (p.vv && p.vv.d5 && p.vv.d5.log) || [], agora = Date.now();
-    const rec = log.filter((x) => agora - x.t < 25000);
-    if (!rec.length) return null;
-    const perigo = rec.filter((x) => x.q === "da").pop();
-    const ult = perigo && agora - perigo.t < 15000 ? perigo : rec[rec.length - 1];
-    return { l: ult.l, tipo: ult.q === "da" ? "perigo" : "atq" };
-  }
-  function campoRadar(p, mom, ultLance) {
-    const W = 105, H = 68;
-    let zona = "", rotulo = "", bola = "";
-    if (mom) {
-      const casa = mom.l === "h", perigo = mom.tipo === "perigo";
-      const x0 = casa ? (perigo ? W * 0.7 : W * 0.5) : 0, larg = perigo ? W * 0.3 : W * 0.5;
-      zona = `<rect class="rsb-zona ${casa ? "c" : "f"} ${perigo ? "forte" : ""}" x="${x0}" y="0" width="${larg}" height="${H}"/>`;
-      const bx = casa ? (perigo ? W * 0.86 : W * 0.68) : (perigo ? W * 0.14 : W * 0.32);
-      bola = `<circle class="rsb-onda ${casa ? "c" : "f"}" cx="${bx}" cy="${H / 2}" r="5"/><circle class="rsb-bola" cx="${bx}" cy="${H / 2}" r="1.8"/>`;
-      rotulo = `${perigo ? "Ataque perigoso" : "Ataque"} · ${h(nomeTime(casa ? p.h : p.a))}`;
-    }
-    // lance de destaque recente (gol, chute, escanteio, cartão) por cima do campo
-    let destaque = "";
-    if (ultLance && Date.now() - ultLance.t < 20000) destaque = `<div class="rsb-destaque ${ultLance.l === "a" ? "f" : "c"}"><span class="ic-l">${ICONE_LANCE[ultLance.k] || ""}</span>${textoLance(p, ultLance)}</div>`;
-    return `<div class="rsb-campo"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Campo com o momento do jogo"><rect class="r-gramado" x="0" y="0" width="${W}" height="${H}"/>${zona}
-      <g class="r-linhas"><rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}"/><line x1="${W / 2}" y1="0.5" x2="${W / 2}" y2="${H - 0.5}"/><circle cx="${W / 2}" cy="${H / 2}" r="9.15"/>
-      <rect x="0.5" y="${H / 2 - 20.15}" width="16.5" height="40.3"/><rect x="${W - 17}" y="${H / 2 - 20.15}" width="16.5" height="40.3"/>
-      <rect x="0.5" y="${H / 2 - 9.15}" width="5.5" height="18.3"/><rect x="${W - 6}" y="${H / 2 - 9.15}" width="5.5" height="18.3"/></g>${bola}</svg>
-      <div class="rsb-campo-times"><span class="c">${h(nomeTime(p.h))} ➜</span><span class="f">⬅ ${h(nomeTime(p.a))}</span></div>
-      <div class="rsb-momento ${mom ? (mom.l === "h" ? "c" : "f") : ""}">${mom ? rotulo : "Bola em jogo · sem ataque contado agora"}</div>${destaque}</div>`;
-  }
-  function linhaTempoRadar(p, lances) {
-    const v = p.vv || {}, W = 300, x = (m) => Math.min(W, (Math.min(m, 95) / 95) * W);
-    const agora = p.s === "PAUSED" ? 45 : minDe(v.min);
-    const marcas = lances.filter((e) => ["gol", "amarelo", "vermelho", "2amarelo"].includes(e.k)).map((e) => {
-      const cx = x(Math.floor(minDe(e.min))), y = e.l === "h" ? 6 : 26;
-      return e.k === "gol" ? `<text x="${cx}" y="${y + 4}" class="rsb-tl-gol" text-anchor="middle">⚽</text>`
-        : `<rect x="${cx - 2.5}" y="${y - 3.5}" width="5" height="7" rx="1" class="${e.k === "amarelo" ? "am" : "vm"}"/>`;
-    }).join("");
-    const ticks = [0, 15, 30, 45, 60, 75, 90].map((m) => `<text x="${x(m)}" y="44" text-anchor="middle">${m === 45 ? "INT" : m}</text>`).join("");
-    return `<svg class="rsb-tl" viewBox="-6 0 ${W + 12} 48" role="img" aria-label="Linha do tempo do jogo">
-      <rect x="0" y="14" width="${W}" height="4" rx="2" class="trilho"/><rect x="0" y="14" width="${x(agora)}" height="4" rx="2" class="feito"/>
-      <line x1="${x(45)}" y1="10" x2="${x(45)}" y2="22" class="int"/>${marcas}${ticks}</svg>`;
-  }
-  const RADAR_EST = [["alvo", "Chutes no gol"], ["fora5", "Para fora / bloq."], ["da", "Ataques perigosos"], ["atk", "Ataques"], ["esc", "Escanteios"], ["faltas", "Faltas"],
-    ["amarelos", "Amarelos"], ["vermelhos", "Vermelhos"], ["imped", "Impedimentos"], ["defesas", "Defesas"], ["posse", "Posse", "%"], ["xg", "xG"]];
+  };
+  // estatísticas do radar: [chave, rótulo, ícone]
+  const RADAR_EST = [["alvo", "Chutes no gol", "◉"], ["fora5", "Para fora / bloq.", "○"], ["da", "Ataques perigosos", "»"], ["atk", "Ataques", "›"],
+    ["esc", "Escanteios", "⚑"], ["faltas", "Faltas", "✕"], ["amarelos", "Amarelos", '<i class="ic amarelo"></i>'], ["vermelhos", "Vermelhos", '<i class="ic vermelho"></i>'],
+    ["imped", "Impedimentos", "⚐"], ["defesas", "Defesas", "🧤"], ["posse", "Posse de bola", "◐", "%"], ["xg", "xG", "xG"]];
   function radarScanBall(p, code, vivo, fim) {
     const v = p.vv || {};
-    const sit = vivo ? (p.s === "PAUSED" ? "Intervalo" : v.min ? `${(v.per || 1) >= 2 ? "2º tempo" : "1º tempo"} · ${h(v.min)}` : "Ao vivo") : fim ? "Encerrado" : `${DIA_CURTO(p.d)} · ${hora(p.d)}`;
+    const sit = vivo ? (p.s === "PAUSED" ? "Intervalo" : v.min ? `${(v.per || 1) >= 2 ? "2º tempo" : "1º tempo"} · ${h(v.min)}` : "Ao vivo") : fim ? "Final da partida" : `${DIA_CURTO(p.d)} · ${hora(p.d)}`;
     const lances = lancesDoRadar(p);
     const visto = p.vv && p.vv.espn ? novosDoRadar(p) : Infinity;
-    const mom = vivo && p.s === "IN_PLAY" ? momentoRadar(p) : null;
-    const ultLance = lances.find((e) => e.t && e.k !== "atq" && e.k !== "perigo");
     const per = estatPeriodo(v), es = per.es;
     const num = (x) => (x == null ? null : Number(String(x).replace("%", "")));
-    const grade = es ? RADAR_EST.filter(([k]) => es[k] && (num(es[k][0]) != null || num(es[k][1]) != null)).map(([k, rot, suf = ""]) => {
+    const grade = es ? RADAR_EST.filter(([k]) => es[k] && (num(es[k][0]) != null || num(es[k][1]) != null)).map(([k, rot, ic, suf = ""]) => {
       const a = num(es[k][0]) || 0, b = num(es[k][1]) || 0, f = (x) => (k === "xg" ? fNum(x, 2) : Math.round(x)) + suf;
-      return `<div class="rsb-est"><b class="${a > b ? "mais" : ""}">${f(a)}</b><span>${rot}</span><b class="${b > a ? "mais" : ""}">${f(b)}</b></div>`;
+      return `<div class="rsb-est"><div class="rsb-est-n"><b class="${a > b ? "mais" : ""}">${f(a)}</b><span class="rsb-est-ic">${ic}</span><b class="${b > a ? "mais" : ""}">${f(b)}</b></div><span class="rsb-est-rot">${rot}</span></div>`;
     }).join("") : "";
-    const feed = lances.slice(0, 60).map((e, i) => `<li class="${e.k === "perigo" ? "perigo " : ""}${e.k === "marco" ? "marco" : e.l === "a" ? "f" : "c"}${i === 0 ? " atual" : ""}${!e.cont && e.seq > visto ? " novo" : ""}">
-        <span class="m">${h(e.min || "")}</span><span class="ic-l">${ICONE_RADAR[e.k] || ""}</span><span class="t">${textoRadar(p, e)}</span></li>`).join("");
-    return `<section class="rsb">
-      <div class="rsb-topo">
-        <span class="rsb-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span>
-        <span class="rsb-placar">${vivo || fim ? `${p.fh ?? "–"}<i>-</i>${p.fa ?? "–"}` : "×"}</span>
-        <span class="rsb-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span>
+    const feed = lances.slice(0, 80).map((e, i) => `<li class="${e.k === "perigo" ? "perigo " : ""}${e.k === "marco" ? "marco" : e.l === "a" ? "f" : "c"}${i === 0 ? " atual" : ""}${!e.cont && e.seq > visto ? " novo" : ""}">
+        <span class="m">${h(e.min || "")}</span><span class="ic-l">${iconeRadar(e)}</span><span class="t">${textoRadarLinha(p, e)}</span></li>`).join("");
+    return `<section class="rsb${radarGrafico ? "" : " sem-graf"}">
+      <div class="rsb-graf">
+        <button type="button" class="rsb-chave" data-radargraf role="switch" aria-checked="${radarGrafico}"><i></i>Gráfico de pressão</button>
+        ${radarGrafico ? graficoPressao(p, "radar") : ""}
       </div>
-      <div class="rsb-sit"><span class="sub">${seloComp(code)} ${h(nomeComp(code))}</span><span class="${vivo ? "vivo-min" : "sub"}">${sit}</span></div>
-      ${linhaTempoRadar(p, lances)}
-      ${vivo || fim ? campoRadar(p, mom, ultLance) : ""}
-      <div class="rsb-graf-cab"><button type="button" class="rsb-chave" data-radargraf role="switch" aria-checked="${radarGrafico}"><i></i>Gráfico de pressão</button></div>
-      ${radarGrafico ? graficoPressao(p, true) : ""}
-      <div class="rsb-grade">
-        <div class="rsb-col"><h3>Lance a lance</h3>${feed ? `<ul class="radar-lista rsb-feed" aria-live="polite">${feed}</ul>` : '<p class="sub">Os lances aparecem quando a bola rolar.</p>'}</div>
-        <div class="rsb-col"><h3>Estatísticas</h3>${per.chips}${grade ? `<div class="rsb-ests">${grade}</div>` : `<p class="sub">${per.vazio || "Estatísticas ainda não disponíveis."}</p>`}</div>
+      <div class="rsb-barra">
+        <span class="rsb-nome c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span>
+        <span class="rsb-placar">${vivo || fim ? `${p.fh ?? "–"} - ${p.fa ?? "–"}` : "×"}</span>
+        <span class="rsb-nome f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span>
       </div>
-      <p class="rsb-aviso"><b>Radar ScanBall · beta.</b> Estamos testando: pode ter erros ou atrasos. Os números vêm da 5Dollar a cada ~8 s (gols e escanteios chegam em ~10 s; chutes podem levar 20–40 s) e os nomes, faltas e substituições da ESPN.</p>
-      <p class="janela-rodape"><a href="${location.pathname}#jogo/${h(code)}/${h(p.i)}" target="_blank" rel="noopener">Abrir no ScanBall</a></p>
+      <div class="rsb-corpo">
+        <div class="rsb-lances">${feed ? `<ul class="rsb-feed" aria-live="polite">${feed}</ul>` : '<p class="rsb-vazio">Os lances aparecem quando a bola rolar.</p>'}</div>
+        <div class="rsb-stats">${per.chips.replace("est-per", "est-per rsb-abas").replace(">Jogo todo<", ">Total<").replace(">1º tempo<", ">1º tempo<")}${grade ? `<div class="rsb-ests">${grade}</div>` : `<p class="rsb-vazio">${per.vazio || "Estatísticas ainda não disponíveis."}</p>`}</div>
+      </div>
+      <div class="rsb-rodape"><span class="rsb-sit${vivo ? " vivo" : ""}">${sit}</span>
+        <span class="rsb-beta" title="Radar ScanBall em teste: pode ter erros ou atrasos. Números da 5Dollar a cada ~8 s (gols e escanteios ~10 s; chutes 20–40 s); nomes, faltas e substituições da ESPN.">Radar beta · em teste ⓘ</span>
+        <a href="${location.pathname}#jogo/${h(code)}/${h(p.i)}" target="_blank" rel="noopener">ScanBall ↗</a></div>
     </section>`;
   }
 
