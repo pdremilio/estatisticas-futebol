@@ -33,6 +33,7 @@ COMPETICOES = [
     ("PD", "esp.1", "La Liga", "Espanha", 87, "ESP"),
     ("SA", "ita.1", "Serie A", "Itália", 55, "ITA"),
     ("BL1", "ger.1", "Bundesliga", "Alemanha", 54, "GER"),
+    ("BL2", "ger.2", "2. Bundesliga", "Alemanha", 146, "GER"),
     ("FL1", "fra.1", "Ligue 1", "França", 53, "FRA"),
     ("PPL", "por.1", "Liga Portugal", "Portugal", 61, "POR"),
     ("DED", "ned.1", "Eredivisie", "Holanda", 57, "NED"),

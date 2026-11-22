@@ -48,6 +48,7 @@ LIGAS = {
     "PD": (["spain"], ["la liga", "laliga", "primera division"], []),
     "SA": (["italy"], ["serie a"], []),
     "BL1": (["germany"], ["bundesliga"], ["2.", "2 "]),
+    "BL2": (["germany"], ["2. bundesliga", "2 bundesliga", "bundesliga 2"], ["3.", "3 "]),
     "FL1": (["france"], ["ligue 1"], []),
     "PPL": (["portugal"], ["primeira", "liga portugal"], ["2"]),
     "DED": (["netherlands", "holland"], ["eredivisie"], []),

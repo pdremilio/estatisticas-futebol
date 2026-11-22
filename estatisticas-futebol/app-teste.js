@@ -15,6 +15,7 @@
     PD: { nome: "La Liga", pais: "Espanha" },
     SA: { nome: "Serie A", pais: "Itália" },
     BL1: { nome: "Bundesliga", pais: "Alemanha" },
+    BL2: { nome: "2. Bundesliga", pais: "Alemanha" },
     FL1: { nome: "Ligue 1", pais: "França" },
     PPL: { nome: "Liga Portugal", pais: "Portugal" },
     DED: { nome: "Eredivisie", pais: "Holanda" },
