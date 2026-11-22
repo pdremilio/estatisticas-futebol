@@ -96,6 +96,8 @@ jobs:
             VCT=$(cat _site/app-teste.js _site/motor-teste.js _site/aovivo-teste.js _site/estilo-teste.css _site/contas.js _site/config.js 2>/dev/null | sha1sum | cut -c1-10)
             sed -i "s/__VC__/$VCT/; s/__VD__/${GITHUB_RUN_ID}/" _site/teste.html
           fi
+          # o site aberto (ou o app instalado) confere este arquivo e se atualiza sozinho quando a versão muda
+          printf '{"c":"%s","t":"%s","d":"%s"}\n' "$VC" "${VCT:-}" "$GITHUB_RUN_ID" > _site/versao.json
 
       - name: Enviar o site
         uses: actions/upload-pages-artifact@v3
