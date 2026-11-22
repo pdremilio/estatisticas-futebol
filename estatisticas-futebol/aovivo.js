@@ -1097,7 +1097,12 @@
           if (!cur[q] || !d5.ult[q]) continue;
           for (const [i, l] of [[0, "h"], [1, "a"]]) {
             const d = cur[q][i] - d5.ult[q][i];
-            if (d > 0 && d < 40) { d5[q][l][k] = (d5[q][l][k] || 0) + d; d5.log.push({ t: agora, l, q, n: d, k }); mudou = true; if (q === "da") d5.mudDa = agora; }
+            if (d > 0 && d < 40) {
+              d5[q][l][k] = (d5[q][l][k] || 0) + d; d5.log.push({ t: agora, l, q, n: d, k }); mudou = true; if (q === "da") d5.mudDa = agora;
+              // lance a lance do Radar ScanBall: "Ataque" / "Ataque perigoso" de cada time, na hora em que a 5Dollar contou
+              (d5.feed = d5.feed || []).push({ t: agora, l, q, n: d, min: (sl.ad ? sl.b + "+" + sl.ad : String(sl.b)) + "'" });
+              if (d5.feed.length > 80) d5.feed.splice(0, d5.feed.length - 80);
+            }
           }
         }
       }

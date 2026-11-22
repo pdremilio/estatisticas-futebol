@@ -962,8 +962,9 @@
     </div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-prdev], [data-estper], [data-pvfiltro]");
+    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-prdev], [data-estper], [data-pvfiltro], [data-radargraf]");
     if (!t) return;
+    if (t.hasAttribute("data-radargraf")) { radarGrafico = !radarGrafico; try { localStorage.setItem("sb_radar_graf", radarGrafico ? "1" : "0"); } catch (err) {} aoVivoAtualizado(); return; }
     if (t.dataset.estper) { estado.estPer = t.dataset.estper; aoVivoAtualizado(); return; }
     if (t.dataset.pvfiltro) { estado.pvFiltro = t.dataset.pvfiltro; guardar("pv_filtro", estado.pvFiltro); telaPainelVivo(); return; }
     if (t.classList.contains("mk")) {
@@ -1220,6 +1221,13 @@
   }
   const botaoJanela = (code, p, cls = "") => `<button type="button" class="botao-janela ${cls}" data-janela="${h(code)}/${h(p.i)}" title="Abrir este jogo numa janela pequena" aria-label="Abrir este jogo numa janela pequena">
     <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>${cls === "so-icone" ? "" : "Janela"}</button>`;
+  const RADAR_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".7"/><path d="M12 12 L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>';
+  const botaoRadar = (code, p, cls = "") => `<button type="button" class="botao-janela botao-radar ${cls}" data-radar="${h(code)}/${h(p.i)}" title="Abrir o Radar ScanBall (beta) deste jogo" aria-label="Abrir o Radar ScanBall deste jogo">${RADAR_SVG}${cls === "so-icone" ? "" : "Radar <small>beta</small>"}</button>`;
+  function abrirRadar(rota) {
+    const url = location.pathname + "?janela=1&radar=1#jogo/" + rota;
+    const w = window.open(url, "sbr_" + rota.replace(/\W/g, "_"), "popup=yes,width=640,height=820");
+    if (!w) location.href = url;
+  }
   function abrirJanela(rota) {
     const url = location.pathname + "?janela=1#jogo/" + rota;
     const w = window.open(url, "sb_" + rota.replace(/\W/g, "_"), "popup=yes,width=470,height=860");
@@ -1227,6 +1235,8 @@
   }
   // fase de captura: o botão dentro do cartão do painel não pode abrir o jogo por baixo
   document.addEventListener("click", (e) => {
+    const r = e.target.closest && e.target.closest("[data-radar]");
+    if (r) { e.preventDefault(); e.stopPropagation(); abrirRadar(r.dataset.radar); return; }
     const b = e.target.closest && e.target.closest("[data-janela]");
     if (!b) return;
     e.preventDefault(); e.stopPropagation();
@@ -1234,18 +1244,21 @@
   }, true);
 
   function abaAoVivo(p, code) {
-    return `<div class="painel-corpo">${avisoFonte()}${code && !MODO_JANELA ? `<div class="vivo-acoes">${botaoJanela(code, p)}</div>` : ""}${graficoPressao(p)}${blocoAoVivo(p) || '<p class="sub">Estatísticas e lances aparecem quando o jogo começar.</p>'}</div>`;
+    return `<div class="painel-corpo">${avisoFonte()}${code && !MODO_JANELA ? `<div class="vivo-acoes">${botaoRadar(code, p)}${botaoJanela(code, p)}</div>` : ""}${graficoPressao(p)}${blocoAoVivo(p) || '<p class="sub">Estatísticas e lances aparecem quando o jogo começar.</p>'}</div>`;
   }
 
   // ---------- janela pequena de um jogo (?janela=1#jogo/...): placar, gráfico, radar e estatísticas
   const MODO_JANELA = /[?&]janela=1/.test(location.search);
+  const MODO_RADAR = MODO_JANELA && /[?&]radar=1/.test(location.search);
   if (MODO_JANELA) document.documentElement.classList.add("modo-janela");
+  if (MODO_RADAR) document.documentElement.classList.add("modo-radar");
   function telaJanela(code, id) {
     const p = acharPartida(code, id);
     estado.sel = null; estado.abaVista = "aovivo";
     if (!p) { app.innerHTML = `<div class="painel"><div class="vazio"><strong>Jogo não encontrado</strong></div></div>`; return; }
-    document.title = `${nomeTime(p.h)} × ${nomeTime(p.a)} · ScanBall`;
+    document.title = `${MODO_RADAR ? "Radar · " : ""}${nomeTime(p.h)} × ${nomeTime(p.a)} · ScanBall`;
     const vivo = aoVivo(p), fim = encerrada(p);
+    if (MODO_RADAR) { pintarApp("radar/" + code + "/" + p.i, radarScanBall(p, code, vivo, fim)); return; }
     const situacao = vivo ? (p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : '<span class="vivo">Ao vivo</span>') : fim ? "Encerrado" : `${DIA_CURTO(p.d)} · ${hora(p.d)}`;
     pintarApp("janela/" + code + "/" + p.i, `<section class="janela-jogo">
       <div class="pv-topo">${seloComp(code)}<span class="sub">${h(nomeComp(code))}</span><span class="pv-min">${situacao}</span></div>
@@ -1254,6 +1267,108 @@
       ${temAoVivo(p) ? abaAoVivo(p) : `<div class="painel-corpo"><div class="vazio vazio-curto">${p.semEspn ? "Este jogo não foi encontrado na ESPN." : "Os dados ao vivo aparecem quando o jogo estiver perto de começar."}</div></div>`}
       <p class="janela-rodape"><a href="${location.pathname}#jogo/${h(code)}/${h(p.i)}" target="_blank" rel="noopener">Abrir no ScanBall</a></p>
     </section>`);
+  }
+
+  // ---------- RADAR SCANBALL (beta): placar, linha do tempo, campo com o momento do jogo, gráfico de pressão,
+  // lance a lance (com "Ataque" e "Ataque perigoso" contados pela 5Dollar) e estatísticas por tempo.
+  // Tudo com os dados que o site já tem: a 5Dollar a cada ~8 s e a narração da ESPN.
+  let radarGrafico = (() => { try { return localStorage.getItem("sb_radar_graf") !== "0"; } catch (e) { return true; } })();
+  const minDe = (m) => { const x = String(m || "").match(/(\d+)'?\s*(?:\+\s*(\d+))?/); return x ? Number(x[1]) + (Number(x[2]) || 0) / 100 : 0; };
+  function lancesDoRadar(p) {
+    const v = p.vv || {};
+    const doContador = (v.prov || []).map((e) => ({ k: e.k, l: e.l, j: e.j || "", j2: e.x ? e.x.replace(/^sai /, "") : "", min: e.min, t: e.t, cont: true, fb: e.fb }));
+    const ataques = ((v.d5 && v.d5.feed) || []).map((x) => ({ k: x.q === "da" ? "perigo" : "atq", l: x.l, n: x.n, min: x.min, t: x.t, cont: true }));
+    const todos = (v.lances || []).map((e, i) => ({ e, ord: minDe(e.min), seq: i + 1 }))
+      .concat(doContador.map((e) => ({ e, ord: minDe(e.min), seq: 1e9 + (e.t || 0) / 1e4 })))
+      .concat(ataques.map((e) => ({ e, ord: minDe(e.min), seq: 2e9 + (e.t || 0) / 1e4 })));
+    todos.sort((a, b) => b.ord - a.ord || b.seq - a.seq);
+    return todos.map((x) => x.e);
+  }
+  function textoRadar(p, e) {
+    const t = h(nomeTime(e.l === "h" ? p.h : p.a));
+    if (e.k === "perigo") return `<b>Ataque perigoso</b> · ${t}${e.n > 1 ? ` <span class="sub">×${e.n}</span>` : ""}`;
+    if (e.k === "atq") return `Ataque · ${t}${e.n > 1 ? ` <span class="sub">×${e.n}</span>` : ""}`;
+    return textoLance(p, e);
+  }
+  const ICONE_RADAR = Object.assign({}, ICONE_LANCE, { atq: "›", perigo: "»" });
+  // o que está acontecendo agora: o último ataque contado nos últimos 25 s (perigoso vale mais)
+  function momentoRadar(p) {
+    const log = (p.vv && p.vv.d5 && p.vv.d5.log) || [], agora = Date.now();
+    const rec = log.filter((x) => agora - x.t < 25000);
+    if (!rec.length) return null;
+    const perigo = rec.filter((x) => x.q === "da").pop();
+    const ult = perigo && agora - perigo.t < 15000 ? perigo : rec[rec.length - 1];
+    return { l: ult.l, tipo: ult.q === "da" ? "perigo" : "atq" };
+  }
+  function campoRadar(p, mom, ultLance) {
+    const W = 105, H = 68;
+    let zona = "", rotulo = "", bola = "";
+    if (mom) {
+      const casa = mom.l === "h", perigo = mom.tipo === "perigo";
+      const x0 = casa ? (perigo ? W * 0.7 : W * 0.5) : 0, larg = perigo ? W * 0.3 : W * 0.5;
+      zona = `<rect class="rsb-zona ${casa ? "c" : "f"} ${perigo ? "forte" : ""}" x="${x0}" y="0" width="${larg}" height="${H}"/>`;
+      const bx = casa ? (perigo ? W * 0.86 : W * 0.68) : (perigo ? W * 0.14 : W * 0.32);
+      bola = `<circle class="rsb-onda ${casa ? "c" : "f"}" cx="${bx}" cy="${H / 2}" r="5"/><circle class="rsb-bola" cx="${bx}" cy="${H / 2}" r="1.8"/>`;
+      rotulo = `${perigo ? "Ataque perigoso" : "Ataque"} · ${h(nomeTime(casa ? p.h : p.a))}`;
+    }
+    // lance de destaque recente (gol, chute, escanteio, cartão) por cima do campo
+    let destaque = "";
+    if (ultLance && Date.now() - ultLance.t < 20000) destaque = `<div class="rsb-destaque ${ultLance.l === "a" ? "f" : "c"}"><span class="ic-l">${ICONE_LANCE[ultLance.k] || ""}</span>${textoLance(p, ultLance)}</div>`;
+    return `<div class="rsb-campo"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Campo com o momento do jogo"><rect class="r-gramado" x="0" y="0" width="${W}" height="${H}"/>${zona}
+      <g class="r-linhas"><rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}"/><line x1="${W / 2}" y1="0.5" x2="${W / 2}" y2="${H - 0.5}"/><circle cx="${W / 2}" cy="${H / 2}" r="9.15"/>
+      <rect x="0.5" y="${H / 2 - 20.15}" width="16.5" height="40.3"/><rect x="${W - 17}" y="${H / 2 - 20.15}" width="16.5" height="40.3"/>
+      <rect x="0.5" y="${H / 2 - 9.15}" width="5.5" height="18.3"/><rect x="${W - 6}" y="${H / 2 - 9.15}" width="5.5" height="18.3"/></g>${bola}</svg>
+      <div class="rsb-campo-times"><span class="c">${h(nomeTime(p.h))} ➜</span><span class="f">⬅ ${h(nomeTime(p.a))}</span></div>
+      <div class="rsb-momento ${mom ? (mom.l === "h" ? "c" : "f") : ""}">${mom ? rotulo : "Bola em jogo · sem ataque contado agora"}</div>${destaque}</div>`;
+  }
+  function linhaTempoRadar(p, lances) {
+    const v = p.vv || {}, W = 300, x = (m) => Math.min(W, (Math.min(m, 95) / 95) * W);
+    const agora = p.s === "PAUSED" ? 45 : minDe(v.min);
+    const marcas = lances.filter((e) => ["gol", "amarelo", "vermelho", "2amarelo"].includes(e.k)).map((e) => {
+      const cx = x(Math.floor(minDe(e.min))), y = e.l === "h" ? 6 : 26;
+      return e.k === "gol" ? `<text x="${cx}" y="${y + 4}" class="rsb-tl-gol" text-anchor="middle">⚽</text>`
+        : `<rect x="${cx - 2.5}" y="${y - 3.5}" width="5" height="7" rx="1" class="${e.k === "amarelo" ? "am" : "vm"}"/>`;
+    }).join("");
+    const ticks = [0, 15, 30, 45, 60, 75, 90].map((m) => `<text x="${x(m)}" y="44" text-anchor="middle">${m === 45 ? "INT" : m}</text>`).join("");
+    return `<svg class="rsb-tl" viewBox="-6 0 ${W + 12} 48" role="img" aria-label="Linha do tempo do jogo">
+      <rect x="0" y="14" width="${W}" height="4" rx="2" class="trilho"/><rect x="0" y="14" width="${x(agora)}" height="4" rx="2" class="feito"/>
+      <line x1="${x(45)}" y1="10" x2="${x(45)}" y2="22" class="int"/>${marcas}${ticks}</svg>`;
+  }
+  const RADAR_EST = [["alvo", "Chutes no gol"], ["fora5", "Para fora / bloq."], ["da", "Ataques perigosos"], ["atk", "Ataques"], ["esc", "Escanteios"], ["faltas", "Faltas"],
+    ["amarelos", "Amarelos"], ["vermelhos", "Vermelhos"], ["imped", "Impedimentos"], ["defesas", "Defesas"], ["posse", "Posse", "%"], ["xg", "xG"]];
+  function radarScanBall(p, code, vivo, fim) {
+    const v = p.vv || {};
+    const sit = vivo ? (p.s === "PAUSED" ? "Intervalo" : v.min ? `${(v.per || 1) >= 2 ? "2º tempo" : "1º tempo"} · ${h(v.min)}` : "Ao vivo") : fim ? "Encerrado" : `${DIA_CURTO(p.d)} · ${hora(p.d)}`;
+    const lances = lancesDoRadar(p);
+    const visto = p.vv && p.vv.espn ? novosDoRadar(p) : Infinity;
+    const mom = vivo && p.s === "IN_PLAY" ? momentoRadar(p) : null;
+    const ultLance = lances.find((e) => e.t && e.k !== "atq" && e.k !== "perigo");
+    const per = estatPeriodo(v), es = per.es;
+    const num = (x) => (x == null ? null : Number(String(x).replace("%", "")));
+    const grade = es ? RADAR_EST.filter(([k]) => es[k] && (num(es[k][0]) != null || num(es[k][1]) != null)).map(([k, rot, suf = ""]) => {
+      const a = num(es[k][0]) || 0, b = num(es[k][1]) || 0, f = (x) => (k === "xg" ? fNum(x, 2) : Math.round(x)) + suf;
+      return `<div class="rsb-est"><b class="${a > b ? "mais" : ""}">${f(a)}</b><span>${rot}</span><b class="${b > a ? "mais" : ""}">${f(b)}</b></div>`;
+    }).join("") : "";
+    const feed = lances.slice(0, 60).map((e, i) => `<li class="${e.k === "perigo" ? "perigo " : ""}${e.k === "marco" ? "marco" : e.l === "a" ? "f" : "c"}${i === 0 ? " atual" : ""}${!e.cont && e.seq > visto ? " novo" : ""}">
+        <span class="m">${h(e.min || "")}</span><span class="ic-l">${ICONE_RADAR[e.k] || ""}</span><span class="t">${textoRadar(p, e)}</span></li>`).join("");
+    return `<section class="rsb">
+      <div class="rsb-topo">
+        <span class="rsb-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span>
+        <span class="rsb-placar">${vivo || fim ? `${p.fh ?? "–"}<i>-</i>${p.fa ?? "–"}` : "×"}</span>
+        <span class="rsb-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span>
+      </div>
+      <div class="rsb-sit"><span class="sub">${seloComp(code)} ${h(nomeComp(code))}</span><span class="${vivo ? "vivo-min" : "sub"}">${sit}</span></div>
+      ${linhaTempoRadar(p, lances)}
+      ${vivo || fim ? campoRadar(p, mom, ultLance) : ""}
+      <div class="rsb-graf-cab"><button type="button" class="rsb-chave" data-radargraf role="switch" aria-checked="${radarGrafico}"><i></i>Gráfico de pressão</button></div>
+      ${radarGrafico ? graficoPressao(p, true) : ""}
+      <div class="rsb-grade">
+        <div class="rsb-col"><h3>Lance a lance</h3>${feed ? `<ul class="radar-lista rsb-feed" aria-live="polite">${feed}</ul>` : '<p class="sub">Os lances aparecem quando a bola rolar.</p>'}</div>
+        <div class="rsb-col"><h3>Estatísticas</h3>${per.chips}${grade ? `<div class="rsb-ests">${grade}</div>` : `<p class="sub">${per.vazio || "Estatísticas ainda não disponíveis."}</p>`}</div>
+      </div>
+      <p class="rsb-aviso"><b>Radar ScanBall · beta.</b> Estamos testando: pode ter erros ou atrasos. Os números vêm da 5Dollar a cada ~8 s (gols e escanteios chegam em ~10 s; chutes podem levar 20–40 s) e os nomes, faltas e substituições da ESPN.</p>
+      <p class="janela-rodape"><a href="${location.pathname}#jogo/${h(code)}/${h(p.i)}" target="_blank" rel="noopener">Abrir no ScanBall</a></p>
+    </section>`;
   }
 
   // ---------- aba "Ao vivo" do topo: todos os jogos rolando, para quem não consegue assistir
@@ -1290,7 +1405,7 @@
           <span><small>Posse</small>${num(es, "posse", 0)}<i>×</i>${num(es, "posse", 1)}</span></div>` : "";
       const fav = favoritos.has(chaveFav(x.code, p));
       return `<article class="painel painel-vivo-card" role="link" tabindex="0" data-ir="jogo/${x.code}/${p.i}">
-        <div class="pv-topo">${seloComp(x.code)}<span class="sub">${h(nomeComp(x.code))}</span>${fav ? `<i class="fav-time">${ESTRELA_SVG(12)}</i>` : ""}<span class="pv-min">${p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : v.min ? `<span class="vivo-min">${h(v.min)}</span>` : '<span class="vivo">Ao vivo</span>'}</span>${botaoJanela(x.code, p, "so-icone")}</div>
+        <div class="pv-topo">${seloComp(x.code)}<span class="sub">${h(nomeComp(x.code))}</span>${fav ? `<i class="fav-time">${ESTRELA_SVG(12)}</i>` : ""}<span class="pv-min">${p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : v.min ? `<span class="vivo-min">${h(v.min)}</span>` : '<span class="vivo">Ao vivo</span>'}</span>${botaoRadar(x.code, p, "so-icone")}${botaoJanela(x.code, p, "so-icone")}</div>
         <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span><span class="pv-gols">${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}</span><span class="pv-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
         ${graficoPressao(p, true) || (temAoVivo(p) ? '<p class="sub pv-carregando">Carregando lances…</p>' : '<p class="sub pv-carregando">Sem dados ao vivo para este jogo.</p>')}
         ${est}${radarLances(p, true)}${ultimos ? `<ul class="pv-ev">${ultimos}</ul>` : ""}
