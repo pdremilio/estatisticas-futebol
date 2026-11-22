@@ -3308,6 +3308,46 @@
     document.querySelectorAll("tr[data-ir]").forEach((tr) => tr.setAttribute("tabindex", "0"));
   }
   window.addEventListener("hashchange", render);
+
+  // ---------- versão nova: o site aberto (e o app instalado) se atualiza sozinho, sem limpar cache nem reinstalar.
+  // O robô publica versao.json a cada atualização. Código novo: se a tela não está à vista, recarrega na hora;
+  // se está à vista, aparece um aviso "Atualizar agora" (e recarrega assim que a tela sair de vista).
+  // Dados novos (tabelas e estatísticas): recarrega quando o app ficou 10 min ou mais fora de vista.
+  (function versaoNova() {
+    const minha = String(window.VER_C || "");
+    if (!/^https?:$/.test(location.protocol) || !/^[0-9a-f]{10}$/.test(minha)) return; // arquivo local / sem versão do robô
+    let nova = null, dadosNovos = false, foraDesde = document.hidden ? Date.now() : 0;
+    const recarregar = () => { try { sessionStorage.setItem("sb_atualizou", "1"); } catch (e) {} location.reload(); };
+    function avisar() {
+      if (document.getElementById("aviso-versao")) return;
+      const el = document.createElement("div");
+      el.id = "aviso-versao"; el.className = "aviso-versao"; el.setAttribute("role", "status");
+      el.innerHTML = `<span>O ScanBall foi atualizado.</span><button type="button" class="chip ativo">Atualizar agora</button>`;
+      el.querySelector("button").addEventListener("click", recarregar);
+      document.body.appendChild(el);
+    }
+    function decidir() {
+      const longe = document.hidden && foraDesde && Date.now() - foraDesde > 10 * 60e3;
+      if (document.hidden && (nova || (dadosNovos && longe))) return recarregar();
+      if (nova) avisar();
+    }
+    async function conferir() {
+      try {
+        const v = await fetch("versao.json?x=" + Date.now(), { cache: "no-store" }).then((r) => (r.ok ? r.json() : null));
+        if (!v) return;
+        const c = window.SB_TESTE ? v.t : v.c;
+        if (c && c !== minha) nova = c;
+        if (v.d && String(v.d) !== String(window.VER_D)) dadosNovos = true;
+        decidir();
+      } catch (e) {}
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) { foraDesde = Date.now(); if (nova) recarregar(); else conferir(); }
+      else { conferir(); foraDesde = 0; }
+    });
+    setTimeout(conferir, 60e3);
+    setInterval(conferir, 5 * 60e3);
+  })();
   // número de jogos rolando na aba "Ao vivo" do topo
   function contadorVivo() {
     const el = document.getElementById("qtd-vivo");

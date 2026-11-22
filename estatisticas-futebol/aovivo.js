@@ -798,6 +798,32 @@
   // ao lance do contador que combina com ela. Assim cada lance aparece uma vez só, no gráfico e na lista.
   const CAMPO_CONTADOR = { alvo: "alvo", trave: "alvo", fora: "alvo", bloq: "alvo", esc: "esc", amarelo: "amarelo", vermelho: "vermelho", "2amarelo": "vermelho" };
   const valMin = (x) => x.per * 1000 + x.m;
+  // TRAVA: nunca mostrar mais lances do que a 5Dollar contou, por time e por tipo. Se sobrar (o mesmo lance entrou
+  // contado ao vivo e também refeito pelo histórico do servidor, ou a 5Dollar corrigiu a contagem), sai o repetido:
+  // primeiro o do histórico que tem um "gêmeo" ao vivo no mesmo minuto (±1), depois os do histórico mais novos,
+  // por último os ao vivo mais novos.
+  const GRUPOS = [["alvo", ["alvo", "trave"]], ["fora", ["fora", "bloq"]], ["esc", ["esc"]], ["amarelo", ["amarelo"]], ["vermelho", ["vermelho", "2amarelo"]]];
+  function travar(rap, ativas, recs) {
+    const f = ativas.includes("5d") ? "5d" : ativas[0];
+    const u = (f && rap.ult && rap.ult[f]) || rap.histUlt;
+    if (!u) return recs;
+    const fora = new Set();
+    [["h", 0], ["a", 1]].forEach(([l, i]) => {
+      for (const [campo, ks] of GRUPOS) {
+        const v = u[campo];
+        if (!Array.isArray(v) || v[i] == null) continue;
+        // "no gol" da 5Dollar inclui os gols (o gol tem a marca dele)
+        const max = campo === "alvo" ? Math.max(0, v[i] - ((Array.isArray(u.gol) && u.gol[i]) || 0)) : v[i];
+        const do_ = recs.filter((x) => x.l === l && ks.includes(x.k));
+        let sobra = do_.length - max;
+        if (sobra <= 0) continue;
+        const gemeo = (x) => x.hist && do_.some((y) => !y.hist && Math.abs(valMin(y) - valMin(x)) <= 1);
+        const ordem = [...do_].sort((a, b) => (gemeo(b) - gemeo(a)) || (!!b.hist - !!a.hist) || (b.t - a.t) || (valMin(b) - valMin(a)));
+        for (const x of ordem) { if (sobra-- <= 0) break; fora.add(x); }
+      }
+    });
+    return fora.size ? recs.filter((x) => !fora.has(x)) : recs;
+  }
   function conferirRapidos(p) {
     const vv = p.vv, pr = vv && vv.pr, rap = vv && vv.rap;
     // guarda a narração completa (o que fica escondido é refeito a cada conferência)
@@ -815,7 +841,7 @@
     const narr = pr ? pr.ev0.filter((e) => CAMPO_CONTADOR[e.k]).map((e) => ({ e, me: minutoDe(pr.slots[e.i]) })) : [];
     // casa cada lance do contador com um lance da narração (mesmo time, tipo igual primeiro, depois "outro chute",
     // minuto perto); cada lance da narração serve para um só
-    const recs = rap.pend.filter((x) => x.k !== "gol").sort((a, b) => valMin(a) - valMin(b) || a.t - b.t);
+    const recs = travar(rap, ativas, rap.pend.filter((x) => x.k !== "gol")).sort((a, b) => valMin(a) - valMin(b) || a.t - b.t);
     const par = new Map(), usado = new Set();
     for (const exato of [true, false]) {
       for (const x of recs) {
@@ -852,7 +878,8 @@
     }
     // provisórias que ainda esperam a narração, já na posição do gráfico
     const atual = pr ? (pr.atual == null ? pr.ultimo : pr.atual) : -1;
-    vv.prov = pr ? rap.pend.map((x) => {
+    const mostra = new Set(recs);
+    vv.prov = pr ? rap.pend.filter((x) => x.k === "gol" || mostra.has(x)).map((x) => {
       const n = par.get(x);
       // casado: posição e minuto exatos da narração, tipo do contador, nome do jogador
       // "para fora" da 5Dollar inclui os bloqueados: se a narração diz qual dos dois foi, fica o tipo dela
@@ -1225,6 +1252,11 @@
       rap.histOk = true; criou = true;
       const tem = (c) => fotos.some((f) => f.v[c]);
       rap.histCampos = { alvo: tem("ch") || tem("cf"), esc: tem("esc"), amarelo: tem("am"), vermelho: tem("vm") };
+    }
+    // a última foto do servidor: total de cada tipo (serve de trava quando não há contagem ao vivo, ex.: jogo encerrado)
+    if (fotos.length) {
+      const v = fotos[fotos.length - 1].v;
+      rap.histUlt = { gol: v.g, alvo: v.ch, fora: v.cf, esc: v.esc, amarelo: v.am, vermelho: v.vm };
     }
     if (criou) conferirRapidos(p);
     return criou;
