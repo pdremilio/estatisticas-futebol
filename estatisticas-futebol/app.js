@@ -889,30 +889,29 @@
     if (iniProrr > 0) linhas += `<line x1="${iniProrr * L}" x2="${iniProrr * L}" y1="0" y2="${H}" class="p-tempo"/>`;
     if (opc.gol) for (const e of evs) if (e.k === "gol") linhas += `<line x1="${e.i * L + L / 2}" x2="${e.i * L + L / 2}" y1="0" y2="${H}" class="p-gol ${e.l === "h" ? "c" : "f"}"/>`;
 
-    // marcas: pequenas e LADO A LADO no minuto em que aconteceram. Se não couber, a marca anda um pouquinho para o
-    // lado; se ainda não couber, encosta (uma sobre a outra); só em último caso sobe uma "fileira" (até 3; no radar 4)
+    // marcas: pequenas, SEMPRE em cima da barrinha do minuto em que aconteceram (nunca andam para o minuto seguinte).
+    // Mais de um lance no mesmo minuto: um em cima do outro (fileiras; até 4, depois encostam). Marcas de minutos
+    // vizinhos podem encostar de lado (no celular a barrinha é mais fina que o ícone).
     const mk = TAM_MARCA[opc.tam] || TAM_MARCA.p, tamMk = compacto && !noRadar ? Math.max(5, mk - 1) : mk;
     const sel = noRadar ? ".pressao-radar" : compacto ? ".pressao-mini:not(.pressao-radar)" : ".pressao:not(.pressao-mini)";
     const largG = (document.querySelector(sel + " .pressao-area") || {}).offsetWidth
       || (noRadar ? window.innerWidth - 20 : compacto ? 320 : Math.min(window.innerWidth - 40, 760));
-    const maxFil = noRadar ? 4 : compacto ? 1 : 3, porMin = largG / n, tol = Math.max(tamMk * 2.4, porMin * 2);
+    const maxFil = compacto && !noRadar ? 1 : 4;
     const fil = { h: [], a: [] }, usadas = { h: 0, a: 0 };
     const lista = evs.filter((e) => opc[grupoMarca(e.k)] && e.i < n).sort((a, b) => a.i - b.i || PRIOR[b.k] - PRIOR[a.k]);
     const nomeLado = (l) => nomeTime(l === "h" ? p.h : p.a);
     const descr = (x) => `${x.min || pr.slots[x.i].r + "'"} ${x.j ? x.j + " · " : ""}${x.fb ? "chute para fora/bloqueado" : NOME_MARCA[x.k]}${x.x ? " (" + x.x + ")" : ""}`;
     const marcas = lista.map((e) => {
       const w = e.k === "gol" ? tamMk + 4 : tamMk, x = ((e.i + 0.5) / n) * largG, F = fil[e.l];
-      let lin = -1, pos = x;
-      const tenta = (folga) => { for (let j = 0; j < F.length; j++) { const q = Math.max(x, F[j] + w / 2 + folga); if (q - x <= tol) { lin = j; pos = q; return true; } } return false; };
-      if (!tenta(1) && !tenta(-w * 0.55)) { // nem lado a lado nem encostando: nova fileira (se ainda tiver)
-        if (F.length < maxFil) { lin = F.length; F.push(-1e9); pos = x; }
-        else { let m = 0; for (let j = 1; j < F.length; j++) if (F[j] < F[m]) m = j; lin = m; pos = Math.min(Math.max(x, F[m] - w * 0.6), x + tol); }
-      }
-      F[lin] = pos + w / 2; usadas[e.l] = Math.max(usadas[e.l], lin + 1);
-      pos = Math.min(Math.max(pos, w / 2), largG - w / 2);
-      const mesmos = lista.filter((y) => y.l === e.l && Math.abs(y.i - e.i) <= 1);
+      let lin = -1;
+      const pos = x;
+      for (let j = 0; j < F.length && lin < 0; j++) if (x - F[j] >= w * 0.5) lin = j; // fileira livre (encostar de lado pode)
+      if (lin < 0 && F.length < maxFil) { lin = F.length; F.push(-1e9); }
+      if (lin < 0) { lin = 0; for (let j = 1; j < F.length; j++) if (F[j] < F[lin]) lin = j; } // sem fileira: encosta em cima
+      F[lin] = Math.max(F[lin], pos); usadas[e.l] = Math.max(usadas[e.l], lin + 1);
+      const mesmos = lista.filter((y) => y.l === e.l && y.i === e.i);
       const info = mesmos.map(descr).join(" | ") + ` — ${nomeLado(e.l)}`;
-      return { e, lin, left: (pos / largG) * 100, info };
+      return { e, lin, left: Math.min(Math.max(pos, w / 2), largG - w / 2) / largG * 100, info };
     });
     const LH = tamMk + 3, zona = Math.max(1, usadas.h, usadas.a) * LH + 4;
     const marcasHtml = marcas.map(({ e, lin, left, info }) => {
