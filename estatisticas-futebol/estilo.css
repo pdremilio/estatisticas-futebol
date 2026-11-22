@@ -1257,9 +1257,12 @@ html.modo-radar, .modo-radar body { height: 100%; margin: 0; overflow: hidden; b
 .rsb-chave i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: #fff; transition: transform .2s; }
 .rsb-chave[aria-checked="true"] i { background: var(--casa); } .rsb-chave[aria-checked="true"] i::after { transform: translateX(12px); }
 .rsb .pressao-radar { margin: 0; padding: 0 2px; background: none; border: 0; box-shadow: none; }
-.rsb .pressao-radar .pressao-area { height: clamp(74px, 19vh, 118px); }
-.rsb .pressao-radar .pressao-area svg { top: 17px; bottom: 17px; height: calc(100% - 34px); }
+.rsb .pressao-radar .pressao-area { height: clamp(150px, 30vh, 176px); }
+.rsb .pressao-radar .pressao-area svg { top: 47px; bottom: 47px; height: calc(100% - 94px); }
 .rsb .pressao-radar .mk { pointer-events: auto; }
+.rsb .pressao-radar .mk.mk-n1, .rsb .pressao-radar .mk.mk-n2, .rsb .pressao-radar .mk.mk-n3,
+.rsb .pressao-radar .mk.mk-c.mk-gol.mk-n1, .rsb .pressao-radar .mk.mk-f.mk-gol.mk-n1 { display: grid; }
+.rsb .pressao-radar .mk.mk-mais::after { right: -9px; top: -3px; }
 .rsb .pressao-radar .mk.mk-gol { background: var(--superficie); }
 .rsb .pressao-radar .pressao-eixo { height: 13px; font-size: 9.5px; }
 .rsb .pressao-radar .pressao-info { margin: 0 0 3px; font-size: 11.5px; min-height: 1.25em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1323,7 +1326,7 @@ html.modo-radar, .modo-radar body { height: 100%; margin: 0; overflow: hidden; b
 @media (max-width: 360px) { .rsb-nome .esc, .rsb-nome img { display: none; } .rsb-beta { display: none; } }
 /* janela baixinha (deitada, tipo widget): gráfico menor */
 @media (max-height: 420px) and (min-width: 521px) {
-  .rsb .pressao-radar .pressao-area { height: 66px; }
+  .rsb .pressao-radar .pressao-area { height: 140px; }
   .rsb .pressao-radar .pressao-info { display: none; }
   .rsb-barra { padding: 4px 10px; } .rsb-placar { font-size: 19px; padding: 3px 10px; }
   .rsb-feed li { padding: 4px 8px; } .rsb-est-n b { font-size: 15px; }

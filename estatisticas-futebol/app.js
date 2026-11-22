@@ -823,6 +823,7 @@
     if (!fonte5d() || fonteDe(p.vv) !== "365" || !p.vv || p.vv.st !== "in") return "";
     return `<div class="aviso-5d" role="status">5Dollar sem dados deste jogo há mais de 2 min: o 365Scores assumiu o gráfico e as estatísticas.</div>`;
   }
+  const RADAR_ZONA = 47; // altura (px) da faixa de marcas em cima e embaixo do gráfico do radar (4 marcas empilhadas)
   function graficoPressao(p, compacto) {
     const pr = p.vv && p.vv.pr;
     if (!pr) {
@@ -901,7 +902,10 @@
       const ord = g.slice().sort((a, b) => PRIOR[b.k] - PRIOR[a.k]);
       const info = g.slice().sort((a, b) => a.i - b.i).map(descr).join(" | ") + ` — ${nomeLado(g[0].l)}`;
       const left = (((ord[0].i + 0.5) / n) * 100).toFixed(2);
-      return ord.slice(0, 2).map((e, j) => `<button type="button" class="mk mk-${e.k} ${e.l === "h" ? "mk-c" : "mk-f"} mk-n${j}${j === 1 && g.length > 2 ? " mk-mais" : ""}" style="left:${left}%" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${iconeMarca(e.k)}</button>`).join("");
+      // no radar: todas as marcas do bloco empilhadas (até 4; a 4ª ganha um "+" se tiver mais), a mais importante perto das barras
+      const qt = noRadar ? 4 : 2;
+      const pos = (j) => (noRadar ? `;${g[0].l === "h" ? "top" : "bottom"}:${RADAR_ZONA - 12 - j * 11}px` : "");
+      return ord.slice(0, qt).map((e, j) => `<button type="button" class="mk mk-${e.k} ${e.l === "h" ? "mk-c" : "mk-f"} mk-n${j}${j === qt - 1 && g.length > qt ? " mk-mais" : ""}" style="left:${left}%${pos(j)}" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${iconeMarca(e.k)}</button>`).join("");
     }).join("");
 
     // avisos: o ícone fica no meio do gráfico, no minuto em que o aviso começou (toque mostra o texto)
