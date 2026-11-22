@@ -320,7 +320,8 @@
     esc: "escanteio", amarelo: "cartão amarelo", vermelho: "cartão vermelho", "2amarelo": "2º amarelo (expulso)", sub: "substituição" };
   const PRIOR = { gol: 9, vermelho: 8, "2amarelo": 8, trave: 7, alvo: 6, amarelo: 5, fora: 4, bloq: 3, sub: 2, esc: 1 };
   const grupoMarca = (k) => (k === "amarelo" || k === "vermelho" || k === "2amarelo" ? "cartao" : k);
-  const OPC_PADRAO = { gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, aviso: true, modo: "tendencia", saldo: true, som: false };
+  const TAM_MARCA = { p: 6, m: 8, g: 10 }; // tamanho das marcas do gráfico (px): pequeno, médio, grande
+  const OPC_PADRAO = { tam: "p", gol: true, alvo: true, fora: true, bloq: true, trave: true, esc: false, cartao: true, sub: true, aviso: true, modo: "tendencia", saldo: true, som: false };
   estado.prOpc = Object.assign({}, OPC_PADRAO, ler("pr_opc", {}));
   estado.prConfig = false;
   const infoPressao = {}; // texto da marca tocada, por jogo (cada gráfico tem o seu)
@@ -823,7 +824,7 @@
     if (!fonte5d() || fonteDe(p.vv) !== "365" || !p.vv || p.vv.st !== "in") return "";
     return `<div class="aviso-5d" role="status">5Dollar sem dados deste jogo há mais de 2 min: o 365Scores assumiu o gráfico e as estatísticas.</div>`;
   }
-  const RADAR_ZONA = 47; // altura (px) da faixa de marcas em cima e embaixo do gráfico do radar (4 marcas empilhadas)
+  const botoesTam = (opc) => [["p", "Pequenos"], ["m", "Médios"], ["g", "Grandes"]].map(([k, rot]) => `<button type="button" class="chip" data-prtam="${k}" aria-pressed="${(opc.tam || "p") === k}">${rot}</button>`).join("");
   function graficoPressao(p, compacto) {
     const pr = p.vv && p.vv.pr;
     if (!pr) {
@@ -888,25 +889,37 @@
     if (iniProrr > 0) linhas += `<line x1="${iniProrr * L}" x2="${iniProrr * L}" y1="0" y2="${H}" class="p-tempo"/>`;
     if (opc.gol) for (const e of evs) if (e.k === "gol") linhas += `<line x1="${e.i * L + L / 2}" x2="${e.i * L + L / 2}" y1="0" y2="${H}" class="p-gol ${e.l === "h" ? "c" : "f"}"/>`;
 
-    // marcas: tamanho fixo em pixels, empilhadas (até 2 por minuto e lado); toque mostra todas
-    const bloco = noRadar ? (window.innerWidth < 420 ? 4 : window.innerWidth < 760 ? 3 : 2) : compacto ? (window.innerWidth < 560 ? 4 : 3) : window.innerWidth < 560 ? 3 : window.innerWidth < 900 ? 2 : 1;
-    const grupos = {};
-    for (const e of evs) {
-      if (!opc[grupoMarca(e.k)]) continue;
-      const chave = e.l + Math.floor(e.i / bloco);
-      (grupos[chave] = grupos[chave] || []).push(e);
-    }
+    // marcas: pequenas e LADO A LADO no minuto em que aconteceram. Se não couber, a marca anda um pouquinho para o
+    // lado; se ainda não couber, encosta (uma sobre a outra); só em último caso sobe uma "fileira" (até 3; no radar 4)
+    const mk = TAM_MARCA[opc.tam] || TAM_MARCA.p, tamMk = compacto && !noRadar ? Math.max(5, mk - 1) : mk;
+    const sel = noRadar ? ".pressao-radar" : compacto ? ".pressao-mini:not(.pressao-radar)" : ".pressao:not(.pressao-mini)";
+    const largG = (document.querySelector(sel + " .pressao-area") || {}).offsetWidth
+      || (noRadar ? window.innerWidth - 20 : compacto ? 320 : Math.min(window.innerWidth - 40, 760));
+    const maxFil = noRadar ? 4 : compacto ? 1 : 3, porMin = largG / n, tol = Math.max(tamMk * 2.4, porMin * 2);
+    const fil = { h: [], a: [] }, usadas = { h: 0, a: 0 };
+    const lista = evs.filter((e) => opc[grupoMarca(e.k)] && e.i < n).sort((a, b) => a.i - b.i || PRIOR[b.k] - PRIOR[a.k]);
     const nomeLado = (l) => nomeTime(l === "h" ? p.h : p.a);
     const descr = (x) => `${x.min || pr.slots[x.i].r + "'"} ${x.j ? x.j + " · " : ""}${x.fb ? "chute para fora/bloqueado" : NOME_MARCA[x.k]}${x.x ? " (" + x.x + ")" : ""}`;
-    const marcas = Object.values(grupos).map((g) => {
-      const ord = g.slice().sort((a, b) => PRIOR[b.k] - PRIOR[a.k]);
-      const info = g.slice().sort((a, b) => a.i - b.i).map(descr).join(" | ") + ` — ${nomeLado(g[0].l)}`;
-      const left = (((ord[0].i + 0.5) / n) * 100).toFixed(2);
-      // no radar: todas as marcas do bloco empilhadas (até 4; a 4ª ganha um "+" se tiver mais), a mais importante perto das barras
-      const qt = noRadar ? 4 : 2;
-      const pos = (j) => (noRadar ? `;${g[0].l === "h" ? "top" : "bottom"}:${RADAR_ZONA - 12 - j * 11}px` : "");
-      return ord.slice(0, qt).map((e, j) => `<button type="button" class="mk mk-${e.k} ${e.l === "h" ? "mk-c" : "mk-f"} mk-n${j}${j === qt - 1 && g.length > qt ? " mk-mais" : ""}" style="left:${left}%${pos(j)}" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${iconeMarca(e.k)}</button>`).join("");
+    const marcas = lista.map((e) => {
+      const w = e.k === "gol" ? tamMk + 4 : tamMk, x = ((e.i + 0.5) / n) * largG, F = fil[e.l];
+      let lin = -1, pos = x;
+      const tenta = (folga) => { for (let j = 0; j < F.length; j++) { const q = Math.max(x, F[j] + w / 2 + folga); if (q - x <= tol) { lin = j; pos = q; return true; } } return false; };
+      if (!tenta(1) && !tenta(-w * 0.55)) { // nem lado a lado nem encostando: nova fileira (se ainda tiver)
+        if (F.length < maxFil) { lin = F.length; F.push(-1e9); pos = x; }
+        else { let m = 0; for (let j = 1; j < F.length; j++) if (F[j] < F[m]) m = j; lin = m; pos = Math.min(Math.max(x, F[m] - w * 0.6), x + tol); }
+      }
+      F[lin] = pos + w / 2; usadas[e.l] = Math.max(usadas[e.l], lin + 1);
+      pos = Math.min(Math.max(pos, w / 2), largG - w / 2);
+      const mesmos = lista.filter((y) => y.l === e.l && Math.abs(y.i - e.i) <= 1);
+      const info = mesmos.map(descr).join(" | ") + ` — ${nomeLado(e.l)}`;
+      return { e, lin, left: (pos / largG) * 100, info };
+    });
+    const LH = tamMk + 3, zona = Math.max(1, usadas.h, usadas.a) * LH + 4;
+    const marcasHtml = marcas.map(({ e, lin, left, info }) => {
+      const y = zona - 2 - (lin + 1) * LH + 1.5 - (e.k === "gol" ? 2 : 0);
+      return `<button type="button" class="mk mk-${e.k} ${e.l === "h" ? "mk-c" : "mk-f"}" style="left:${left.toFixed(2)}%;${e.l === "h" ? "top" : "bottom"}:${y.toFixed(1)}px" data-info="${h(info)}" title="${h(info)}" aria-label="${h(info)}">${iconeMarca(e.k)}</button>`;
     }).join("");
+    const estiloArea = `style="--mk:${tamMk}px;--zona:${zona}px"`;
 
     // avisos: o ícone fica no meio do gráfico, no minuto em que o aviso começou (toque mostra o texto)
     // (dois avisos muito perto viram um ícone só, o mais forte, com os dois textos)
@@ -935,11 +948,11 @@
     const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${faixa}
           <line x1="0" x2="${W}" y1="${meio}" y2="${meio}" class="p-eixo"/>${linhas}${barras}</svg>`;
     if (noRadar) {
-      return `<div class="pressao pressao-mini pressao-radar" data-jogo="${h(String(p.i))}"><div class="pressao-area">${svg}${marcas}</div><div class="pressao-eixo" aria-hidden="true">${eixo}</div>
+      return `<div class="pressao pressao-mini pressao-radar" data-jogo="${h(String(p.i))}"><div class="pressao-area" ${estiloArea}>${svg}${marcasHtml}</div><div class="pressao-eixo" aria-hidden="true">${eixo}</div>
         <p class="pressao-info" aria-live="polite">${infoPressao[p.i] ? h(infoPressao[p.i]) : "Toque numa marca para ver o lance."}</p></div>`;
     }
     if (compacto) {
-      return `<div class="pressao-avisos">${blocoAlerta(p, true)}</div><div class="pressao pressao-mini"><div class="pressao-area">${svg}${marcas}${marcasAv}</div>${blocoPressao5(p, true)}</div>`;
+      return `<div class="pressao-avisos">${blocoAlerta(p, true)}</div><div class="pressao pressao-mini"><div class="pressao-area" ${estiloArea}>${svg}${marcasHtml}${marcasAv}</div>${blocoPressao5(p, true)}</div>`;
     }
     const simb = TIPOS_MARCA.filter(([k]) => opc[k] && k !== "esc" && k !== "aviso").map(([k]) => {
       const ex = k === "cartao" ? '<i class="mk-ex mk-amarelo"></i><i class="mk-ex mk-vermelho"></i>' : `<i class="mk-ex mk-${k}">${iconeMarca(k)}</i>`;
@@ -948,6 +961,7 @@
       + (opc.aviso && marcasAv ? `<span title="${AV.pressao.ic} pressão · ${AV.gol.ic} gol próximo · ${AV.fav.ic} favorito pressionando · ${AV.over.ic} jogo over">${AV.pressao.ic}${AV.gol.ic}${AV.fav.ic}${AV.over.ic} avisos</span>` : "");
     const config = estado.prConfig ? `<div class="pressao-config" role="group" aria-label="O que aparece no gráfico">
         <div class="pc-linha"><span class="sub">Mostrar</span>${TIPOS_MARCA.map(([k, rot]) => `<button type="button" class="chip" data-propc="${k}" aria-pressed="${!!opc[k]}">${rot}</button>`).join("")}</div>
+        <div class="pc-linha"><span class="sub">Ícones</span>${botoesTam(opc)}</div>
         <div class="pc-linha"><span class="sub">Barras</span>
           <button type="button" class="chip" data-prmodo="minuto" aria-pressed="${opc.modo !== "tendencia"}">Só o minuto</button>
           <button type="button" class="chip" data-prmodo="tendencia" aria-pressed="${opc.modo === "tendencia"}">Tendência</button>
@@ -962,7 +976,7 @@
         <button type="button" class="pressao-engr" data-prconfig aria-expanded="${!!estado.prConfig}" title="Escolher o que aparece no gráfico">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>Exibir</button></div>
       ${config}
-      <div class="pressao-area">${svg}${marcas}${marcasAv}</div>
+      <div class="pressao-area" ${estiloArea}>${svg}${marcasHtml}${marcasAv}</div>
       <div class="pressao-eixo" aria-hidden="true">${eixo}</div>
       ${blocoPressao5(p)}
       <div class="pressao-leg"><span><i class="marcador c"></i>${h(nomeTime(p.h))} <small class="sub">${resumo("h")}</small></span><span><small class="sub">${resumo("a")}</small> ${h(nomeTime(p.a))}<i class="marcador f"></i></span></div>
@@ -972,7 +986,7 @@
     </div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-prdev], [data-estper], [data-pvfiltro], [data-radargraf]");
+    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-prdev], [data-estper], [data-pvfiltro], [data-radargraf], [data-prtam]");
     if (!t) return;
     if (t.hasAttribute("data-radargraf")) { radarGrafico = !radarGrafico; try { localStorage.setItem("sb_radar_graf", radarGrafico ? "1" : "0"); } catch (err) {} aoVivoAtualizado(); return; }
     if (t.dataset.estper) { estado.estPer = t.dataset.estper; aoVivoAtualizado(); return; }
@@ -988,6 +1002,7 @@
     if (t.hasAttribute("data-prdev")) { estado.prDev = !estado.prDev; aoVivoAtualizado(); return; }
     if (t.hasAttribute("data-prconfig")) estado.prConfig = !estado.prConfig;
     else if (t.dataset.prmodo) estado.prOpc.modo = t.dataset.prmodo;
+    else if (t.dataset.prtam) estado.prOpc.tam = t.dataset.prtam;
     else if (t.dataset.propc === "padrao") estado.prOpc = Object.assign({}, OPC_PADRAO);
     else estado.prOpc[t.dataset.propc] = !estado.prOpc[t.dataset.propc];
     guardar("pr_opc", estado.prOpc);
@@ -1325,7 +1340,8 @@
         <span class="m">${h(e.min || "")}</span><span class="ic-l">${iconeRadar(e)}</span><span class="t">${textoRadarLinha(p, e)}</span></li>`).join("");
     return `<section class="rsb${radarGrafico ? "" : " sem-graf"}">
       <div class="rsb-graf">
-        <button type="button" class="rsb-chave" data-radargraf role="switch" aria-checked="${radarGrafico}"><i></i>Gráfico de pressão</button>
+        <div class="rsb-graf-cab"><button type="button" class="rsb-chave" data-radargraf role="switch" aria-checked="${radarGrafico}"><i></i>Gráfico de pressão</button>
+        ${radarGrafico ? `<span class="rsb-tam" role="group" aria-label="Tamanho dos ícones">Ícones ${[["p", "P"], ["m", "M"], ["g", "G"]].map(([k, r]) => `<button type="button" data-prtam="${k}" aria-pressed="${(estado.prOpc.tam || "p") === k}" title="${{ p: "Pequenos", m: "Médios", g: "Grandes" }[k]}">${r}</button>`).join("")}</span>` : ""}</div>
         ${radarGrafico ? graficoPressao(p, "radar") : ""}
       </div>
       <div class="rsb-barra">
@@ -3301,8 +3317,10 @@
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && estado.sel && !document.querySelector("dialog[open]")) ir("jogos");
   });
-  let eraLado = ladoALado();
+  let eraLado = ladoALado(), larguraEra = window.innerWidth, tRedim = 0;
   window.addEventListener("resize", () => {
+    clearTimeout(tRedim);
+    tRedim = setTimeout(() => { if (Math.abs(window.innerWidth - larguraEra) > 30 && document.querySelector(".pressao .mk")) { larguraEra = window.innerWidth; aoVivoAtualizado(); } }, 250);
     const agora = ladoALado();
     if (agora !== eraLado) { eraLado = agora; if (/^#jogo\//.test(location.hash)) render(); }
   });

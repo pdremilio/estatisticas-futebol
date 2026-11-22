@@ -1257,12 +1257,11 @@ html.modo-radar, .modo-radar body { height: 100%; margin: 0; overflow: hidden; b
 .rsb-chave i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: #fff; transition: transform .2s; }
 .rsb-chave[aria-checked="true"] i { background: var(--casa); } .rsb-chave[aria-checked="true"] i::after { transform: translateX(12px); }
 .rsb .pressao-radar { margin: 0; padding: 0 2px; background: none; border: 0; box-shadow: none; }
-.rsb .pressao-radar .pressao-area { height: clamp(150px, 30vh, 176px); }
-.rsb .pressao-radar .pressao-area svg { top: 47px; bottom: 47px; height: calc(100% - 94px); }
 .rsb .pressao-radar .mk { pointer-events: auto; }
-.rsb .pressao-radar .mk.mk-n1, .rsb .pressao-radar .mk.mk-n2, .rsb .pressao-radar .mk.mk-n3,
-.rsb .pressao-radar .mk.mk-c.mk-gol.mk-n1, .rsb .pressao-radar .mk.mk-f.mk-gol.mk-n1 { display: grid; }
-.rsb .pressao-radar .mk.mk-mais::after { right: -9px; top: -3px; }
+.rsb-graf-cab { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rsb-tam { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--tinta-3); }
+.rsb-tam button { min-width: 22px; height: 20px; padding: 0 5px; border: 1px solid var(--linha); border-radius: 4px; background: none; color: var(--tinta-2); font: 700 11px var(--fonte); cursor: pointer; }
+.rsb-tam button[aria-pressed="true"] { background: var(--tinta); color: #0C1814; border-color: var(--tinta); }
 .rsb .pressao-radar .mk.mk-gol { background: var(--superficie); }
 .rsb .pressao-radar .pressao-eixo { height: 13px; font-size: 9.5px; }
 .rsb .pressao-radar .pressao-info { margin: 0 0 3px; font-size: 11.5px; min-height: 1.25em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1326,8 +1325,26 @@ html.modo-radar, .modo-radar body { height: 100%; margin: 0; overflow: hidden; b
 @media (max-width: 360px) { .rsb-nome .esc, .rsb-nome img { display: none; } .rsb-beta { display: none; } }
 /* janela baixinha (deitada, tipo widget): gráfico menor */
 @media (max-height: 420px) and (min-width: 521px) {
-  .rsb .pressao-radar .pressao-area { height: 140px; }
+  .rsb .pressao-radar { --barras: 52px; }
   .rsb .pressao-radar .pressao-info { display: none; }
   .rsb-barra { padding: 4px 10px; } .rsb-placar { font-size: 19px; padding: 3px 10px; }
   .rsb-feed li { padding: 4px 8px; } .rsb-est-n b { font-size: 15px; }
 }
+
+/* ---------- marcas do gráfico de pressão: tamanho escolhido (Ícones: pequenos/médios/grandes = --mk), lado a lado.
+   A faixa das marcas (--zona) cresce só quando precisa de mais de uma fileira; --barras = altura das barras. */
+.pressao { --barras: 92px; }
+.pressao-mini { --barras: 60px; }
+.rsb .pressao-radar { --barras: clamp(60px, 16vh, 100px); }
+@media (max-width: 640px) { .pressao { --barras: 84px; } .pressao-mini { --barras: 56px; } }
+.pressao .pressao-area { height: calc(var(--barras) + 2 * var(--zona, 22px)); }
+.pressao .pressao-area svg { top: var(--zona, 22px); bottom: var(--zona, 22px); height: calc(100% - 2 * var(--zona, 22px)); }
+.pressao .pressao-area .mk { width: var(--mk, 8px); height: var(--mk, 8px); font-size: calc(var(--mk, 8px) * 1.1); line-height: var(--mk, 8px); }
+.pressao .pressao-area .mk.mk-fora, .pressao .pressao-area .mk.mk-bloq { border-width: max(1.5px, calc(var(--mk, 8px) * .2)); }
+.pressao .pressao-area .mk.mk-trave { width: calc(var(--mk, 8px) * 1.2); height: calc(var(--mk, 8px) * .9); border-width: max(1.5px, calc(var(--mk, 8px) * .22)); border-bottom: 0; }
+.pressao .pressao-area .mk.mk-esc { width: calc(var(--mk, 8px) * .9); height: calc(var(--mk, 8px) * 1.1); }
+.pressao .pressao-area .mk.mk-amarelo, .pressao .pressao-area .mk.mk-vermelho, .pressao .pressao-area .mk.mk-2amarelo { width: calc(var(--mk, 8px) * .75); height: calc(var(--mk, 8px) * 1.05); transform: translateX(-50%); }
+.pressao .pressao-area .mk.mk-gol { width: calc(var(--mk, 8px) + 4px); height: calc(var(--mk, 8px) + 4px); font-size: calc(var(--mk, 8px) * .95); line-height: 1; box-shadow: 0 0 0 1.2px currentColor; }
+.pressao .pressao-area .mk.mk-sub { font-size: calc(var(--mk, 8px) * 1.2); }
+.pressao .pressao-area .mk.mk-aviso { width: calc(var(--mk, 8px) + 8px); height: calc(var(--mk, 8px) + 8px); font-size: calc(var(--mk, 8px) + 1px); line-height: calc(var(--mk, 8px) + 8px); top: 50%; bottom: auto; transform: translate(-50%, -50%); }
+.pressao .pressao-area .mk:hover, .pressao .pressao-area .mk:focus-visible { outline-width: 1.5px; z-index: 5; }
