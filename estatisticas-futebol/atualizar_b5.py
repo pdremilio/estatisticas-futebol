@@ -47,6 +47,7 @@ COMPETICOES = [
     ("UECL", "uefa.europa.conf", "Conference League", "Europa", 10216, "INT"),
     ("LIB", "conmebol.libertadores", "Libertadores", "América do Sul", 45, "INT"),
     ("SUL", "conmebol.sudamericana", "Sul-Americana", "América do Sul", 299, "INT"),
+    ("ACL", "afc.champions", "AFC Champions League", "Ásia", 525, "INT"),
     # beta 6: competições novas (ao vivo pela 5DollarFootballAPI; pré-jogo pela ESPN + FotMob, com o que tiver)
     ("UNL", "uefa.nations", "Nations League", "Europa", 9806, "INT"),
     ("SPL", "ksa.1", "Saudi Pro League", "Arábia Saudita", 536, "KSA"),
@@ -58,7 +59,7 @@ COMPETICOES = [
     ("DEN", "den.1", "Superliga", "Dinamarca", 46, "DEN"),
     ("ECU", "ecu.1", "LigaPro", "Equador", 246, "ECU"),
 ]
-COPAS = {"CL", "UEL", "UECL", "LIB", "SUL", "UNL"}
+COPAS = {"CL", "UEL", "UECL", "LIB", "SUL", "UNL", "ACL"}
 
 ESPN = os.environ.get("ESPN_BASE", "https://site.api.espn.com/apis/site/v2/sports/soccer/")
 ESPN_V2 = os.environ.get("ESPN_V2_BASE", "https://site.api.espn.com/apis/v2/sports/soccer/")

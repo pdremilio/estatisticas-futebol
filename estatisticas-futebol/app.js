@@ -25,6 +25,7 @@
     ARG: { nome: "Liga Profesional", pais: "Argentina" }, CHI: { nome: "Primera División", pais: "Chile" }, COL: { nome: "Primera A", pais: "Colômbia" },
     UEL: { nome: "Europa League", pais: "Europa" }, UECL: { nome: "Conference League", pais: "Europa" },
     LIB: { nome: "Libertadores", pais: "América do Sul" }, SUL: { nome: "Sul-Americana", pais: "América do Sul" },
+    ACL: { nome: "AFC Champions League", pais: "Ásia" },
     UNL: { nome: "Nations League", pais: "Europa" }, SPL: { nome: "Saudi Pro League", pais: "Arábia Saudita" }, BEL: { nome: "Pro League", pais: "Bélgica" },
     SPR: { nome: "Premiership", pais: "Escócia" }, J1: { nome: "J1 League", pais: "Japão" }, NOR: { nome: "Eliteserien", pais: "Noruega" },
     SWE: { nome: "Allsvenskan", pais: "Suécia" }, DEN: { nome: "Superliga", pais: "Dinamarca" }, ECU: { nome: "LigaPro", pais: "Equador" },
