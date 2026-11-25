@@ -1,9 +1,10 @@
 /* ScanBall · service worker (deixa o site ser instalado como app)
  * Sempre busca a versão nova na internet primeiro: nada fica "preso" numa versão velha.
  * Só quando está sem internet abre a última cópia guardada do site (com os últimos dados).
+ * Beta 9: a página sempre revalida com o servidor (nunca fica numa versão velha depois de uma atualização).
  * Pedidos para outros sites (ESPN, 5Dollar, servidor do ao vivo...) passam direto, sem mexer.
  */
-const CACHE = "scanball-v2"; // beta 8: troca o nome para descartar as cópias antigas (dados.js, dados-demo.js...)
+const CACHE = "scanball-v3"; // beta 9: troca o nome para descartar as cópias antigas
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(
   caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
@@ -14,7 +15,9 @@ self.addEventListener("fetch", (e) => {
   // a chave ignora o "?v=..." (muda a cada 2 min): guarda só a última cópia de cada arquivo
   const chave = url.origin + url.pathname;
   e.respondWith(
-    fetch(req).then((r) => {
+    // a página (index.html/teste.html) sempre confere com o servidor, sem usar a cópia do navegador: senão, logo depois
+    // de uma atualização, o aviso "atualizado" voltava ou a página nova demorava até 10 min para chegar
+    (req.mode === "navigate" ? fetch(req.url, { cache: "no-cache", credentials: "same-origin" }) : fetch(req)).then((r) => {
       if (r && r.ok && r.type === "basic") { const c = r.clone(); caches.open(CACHE).then((cache) => cache.put(chave, c)).catch(() => {}); }
       return r;
     }).catch(async () => {

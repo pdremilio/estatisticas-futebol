@@ -452,6 +452,7 @@
     mostrar: { pressao: true, gol: true, fav: true, over: true },
     notif: { ativo: false, avisos: { pressao: false, gol: true, fav: true, over: true, meu: true }, acoes: { gol: true, vermelho: true, inicio: false, intervalo: false, fim: false }, jogos: "todos" },
     meus: [],
+    pre: true, // usar os dados do pré-jogo (favorito, over 2,5, ambas marcam, horário dos gols) para completar os avisos
   };
   function lerCfgAv() {
     const c = ler("avisos_cfg", {}) || {};
@@ -463,6 +464,7 @@
       }),
       meus: Array.isArray(c.meus) ? c.meus : [],
       icones: c.icones && typeof c.icones === "object" ? c.icones : {},
+      pre: c.pre !== false,
     };
   }
   // ícones dos avisos: o usuário pode trocar (base de emojis abaixo ou qualquer um colado)
@@ -474,6 +476,7 @@
   function aplicarIcones() { for (const k in IC_PADRAO) AV[k].ic = icAv(k); }
   estado.cfgAv = lerCfgAv();
   let cfgAvVer = 1;
+  const usaPre = () => estado.cfgAv.pre !== false;
   const salvarCfgAv = () => { guardar("avisos_cfg", estado.cfgAv); aplicarIcones(); cfgAvVer++; };
   // avisos próprios: cada um é uma lista de condições; todas precisam valer no mesmo minuto
   const LADOS = { qq: "um dos times", ambos: "os dois times", total: "os dois somados", h: "o mandante", a: "o visitante", fav: "o favorito", zebra: "a zebra" };
@@ -546,12 +549,14 @@
     }
     const soma = (arr, a, b) => { let t = 0; for (let k = Math.max(0, a); k <= b; k++) t += arr[k] || 0; return t; };
     const outro = (l) => (l === "h" ? "a" : "h");
-    const fav = favoritoDe(p);
+    // pré-jogo desligado: os avisos usam só o que está acontecendo no jogo (sem favorito, sem over 2,5 do pré)
+    const comPre = usaPre(), fav = comPre ? favoritoDe(p) : null;
+    const xpPre = comPre ? (() => { const code = codeDoJogo(p); return code && preps[code] ? projecaoDo(code, p) : null; })() : null;
     const nome = (l) => h(nomeTime(l === "h" ? p.h : p.a));
     let ultGol = -1, ultGolLado = null, ph = 0, pa = 0;
     const meus = estado.cfgAv.meus.filter((a) => a.ativo !== false && a.conds && a.conds.length).map((a) => ({ a, st: null }));
     let ov25 = null;
-    if (meus.length) { const code = codeDoJogo(p), xp = code && preps[code] ? projecaoDo(code, p) : null; ov25 = xp && xp.proj ? xp.proj.ov[2] : null; }
+    if (meus.length && xpPre) ov25 = xpPre.proj ? xpPre.proj.ov[2] : null;
     let st = null; // aviso ligado: { tipo, l, sub, ini, falhas, info }
     const marcas = [];
     const desligar = () => { st = null; };
@@ -650,7 +655,7 @@
     let atualAv = null;
     if (vivo && st) {
       const x = st.info || { mins: 3, share: 0, perigo: 0, b: 0 };
-      const dica = st.tipo === "over" ? "" : dicaHorario(p, st.l, x.b);
+      const dica = st.tipo === "over" || !comPre ? "" : dicaHorario(p, st.l, x.b);
       let txt;
       if (st.tipo === "pressao") txt = `<b>${nome(st.l)}</b> pressionando forte há ${x.mins} min (${x.share}% da pressão)`;
       else if (st.tipo === "gol") txt = `<b>${nome(st.l)}</b> com pressão absurda há ${x.mins} min · ${x.perigo} lances perigosos · gol pode estar próximo`;
@@ -658,12 +663,19 @@
       else if (st.sub === "continua") txt = `<b>${nome(st.l)}</b> marcou e continua pressionando · jogo com cara de mais gols`;
       else if (st.sub === "fav") txt = `<b>${nome(st.l)}</b> (favorito) perdendo: pressiona, mas toma contra-ataque · jogo com cara de mais gols`;
       else txt = `Jogo lá e cá: <b>${nome("h")}</b> e <b>${nome("a")}</b> chegando com perigo · jogo com cara de mais gols`;
-      if (st.tipo === "over") {
-        const code = codeDoJogo(p), xp = code && preps[code] ? projecaoDo(code, p) : null;
-        if (xp && xp.proj && xp.proj.ov[2] >= 0.5) txt += ` · pré-jogo: ${Math.round(xp.proj.ov[2] * 100)}% de over 2,5`;
-      }
+      // complemento do pré-jogo (opção "Usar o pré-jogo"): o que os números de antes do jogo dizem sobre esse aviso
+      let apoioPre = false;
+      const pj = xpPre && xpPre.proj;
+      if (st.tipo === "over" && pj) {
+        const ov = pj.ov[2], bt = pj.btts;
+        if (ov >= 0.5 || bt >= 0.5) txt += ` · pré-jogo: ${ov >= 0.5 ? `${Math.round(ov * 100)}% de over 2,5` : ""}${ov >= 0.5 && bt >= 0.5 ? ", " : ""}${bt >= 0.5 ? `${Math.round(bt * 100)}% de ambas marcam` : ""}`;
+        apoioPre = ov >= 0.55;
+      } else if ((st.tipo === "pressao" || st.tipo === "gol") && fav) {
+        txt += st.l === fav.l ? ` · favorito do pré-jogo (${Math.round(fav.p * 100)}% de chance)` : " · é a zebra do pré-jogo pressionando";
+        apoioPre = st.l === fav.l;
+      } else if (st.tipo === "fav") apoioPre = true;
       if (dica) txt += `<br><small>💡 ${h(dica)}</small>`;
-      atualAv = { tipo: st.tipo, sub: st.sub, ini: st.ini, nivel: AV[st.tipo].nivel, ic: AV[st.tipo].ic, l: st.l, tid: st.l === "h" ? p.h : p.a, txt, mins: x.mins, share: x.share, perigo: x.perigo };
+      atualAv = { apoioPre, tipo: st.tipo, sub: st.sub, ini: st.ini, nivel: AV[st.tipo].nivel, ic: AV[st.tipo].ic, l: st.l, tid: st.l === "h" ? p.h : p.a, txt, mins: x.mins, share: x.share, perigo: x.perigo };
     }
     const ativos = atualAv ? [atualAv] : [];
     if (vivo) for (const mm of meus) if (mm.st) {
@@ -986,8 +998,9 @@
     </div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-prdev], [data-estper], [data-pvfiltro], [data-radargraf], [data-prtam]");
+    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-prdev], [data-estper], [data-pvfiltro], [data-radargraf], [data-prtam], [data-pvpre]");
     if (!t) return;
+    if (t.hasAttribute("data-pvpre")) { estado.cfgAv.pre = !usaPre(); salvarCfgAv(); aoVivoAtualizado(); return; }
     if (t.hasAttribute("data-radargraf")) { radarGrafico = !radarGrafico; try { localStorage.setItem("sb_radar_graf", radarGrafico ? "1" : "0"); } catch (err) {} aoVivoAtualizado(); return; }
     if (t.dataset.estper) { estado.estPer = t.dataset.estper; aoVivoAtualizado(); return; }
     if (t.dataset.pvfiltro) { estado.pvFiltro = t.dataset.pvfiltro; guardar("pv_filtro", estado.pvFiltro); telaPainelVivo(); return; }
@@ -1021,22 +1034,50 @@
     return 5;
   };
   const LADO = (pos) => { const p = String(pos || "").toUpperCase(); return /^L/.test(p) ? 0 : /-L$/.test(p) ? 1 : /^R/.test(p) ? 4 : /-R$/.test(p) ? 3 : 2; };
+  // divide os jogadores de linha em fileiras do campinho. Robusto para escalação "estranha" da ESPN (posição vazia,
+  // formação que não soma 10, goleiro sem posição): nunca deixa 6+ jogadores espremidos na mesma fileira
+  const FORM_PADRAO = { 10: [4, 3, 3], 9: [4, 3, 2], 8: [4, 3, 1], 7: [3, 3, 1] };
+  function fatiar(lista, tamanhos) {
+    const out = []; let k = 0;
+    tamanhos.forEach((q, i) => { const fim = i === tamanhos.length - 1 ? lista.length : k + q; if (fim > k) out.push(lista.slice(k, fim)); k = fim; });
+    return out;
+  }
   function linhasDaFormacao(t) {
-    const tit = t.jog.filter((j) => j.tit);
-    const gol = tit.filter((j) => PROF(j.pos) === 0);
-    const linha = tit.filter((j) => PROF(j.pos) !== 0).sort((a, b) => PROF(a.pos) - PROF(b.pos) || LADO(a.pos) - LADO(b.pos) || a.ordem - b.ordem);
-    const nums = String(t.form || "").split("-").map(Number).filter((x) => x > 0);
-    let linhas = [];
-    if (nums.length && nums.reduce((a, b) => a + b, 0) === linha.length) {
-      let k = 0;
-      for (const q of nums) { linhas.push(linha.slice(k, k + q)); k += q; }
-    } else {
+    let tit = t.jog.filter((j) => j.tit);
+    if (tit.length > 11) tit = tit.slice().sort((a, b) => a.ordem - b.ordem).slice(0, 11);
+    let gol = tit.filter((j) => PROF(j.pos) === 0);
+    if (!gol.length) { const g1 = tit.find((j) => j.ordem === 1); if (g1) gol = [g1]; }
+    if (gol.length > 1) gol = gol.slice().sort((a, b) => a.ordem - b.ordem).slice(0, 1);
+    const resto = tit.filter((j) => !gol.includes(j));
+    // sem posição nenhuma: a ordem da ESPN (formationPlace) já vai da defesa para o ataque
+    const semPos = resto.every((j) => PROF(j.pos) === 5 && LADO(j.pos) === 2);
+    const linha = resto.slice().sort((a, b) => (semPos ? 0 : PROF(a.pos) - PROF(b.pos) || LADO(a.pos) - LADO(b.pos)) || a.ordem - b.ordem);
+    const nums = String(t.form || "").split("-").map(Number).filter((x) => x > 0 && x < 7);
+    let linhas;
+    if (nums.length >= 2 && nums.reduce((a, b) => a + b, 0) === linha.length) linhas = fatiar(linha, nums);
+    else if (!semPos) {
       const porProf = {};
       for (const j of linha) (porProf[PROF(j.pos)] = porProf[PROF(j.pos)] || []).push(j);
       linhas = Object.keys(porProf).sort().map((k) => porProf[k]);
-    }
-    linhas = linhas.map((l) => l.slice().sort((a, b) => LADO(a.pos) - LADO(b.pos) || a.ordem - b.ordem));
+    } else linhas = fatiar(linha, nums.length >= 2 ? nums : FORM_PADRAO[linha.length] || [4, 4, 2]);
+    // fileira com gente demais (posições da ESPN incompletas): reparte numa formação padrão
+    if (linhas.some((l) => l.length > 5)) linhas = fatiar(linha, FORM_PADRAO[linha.length] || [Math.ceil(linha.length / 3), Math.ceil(linha.length / 3), linha.length]);
+    linhas = linhas.filter((l) => l.length).map((l) => l.slice().sort((a, b) => LADO(a.pos) - LADO(b.pos) || a.ordem - b.ordem));
     return gol.length || linhas.length ? [gol.slice(0, 1), ...linhas] : null;
+  }
+  // antes da escalação oficial: campinho com os prováveis titulares (1 goleiro + 10 de linha com mais minutos)
+  function escalacaoProvavel(p) {
+    const ele = p.vv && p.vv.elenco;
+    if (!ele) return null;
+    const out = {};
+    for (const l of ["h", "a"]) {
+      const e = ele[l], prov = provaveisTitulares(p, l);
+      if (!e || prov.size < 7) continue;
+      const jog = [...prov].map((id, n) => { const s = e.jog[id] || {}; return { id, n: s.n || "", nc: s.nc || "", num: s.num != null ? s.num : "", pos: s.pos || "", tit: true, ordem: PROF(s.pos) === 0 ? 1 : 2 + n }; });
+      const t = { jog, form: "" }, ls = linhasDaFormacao(t);
+      out[l] = { jog, form: ls ? ls.slice(1).map((x) => x.length).join("-") : "", prov: true };
+    }
+    return out.h || out.a ? out : null;
   }
   const temporadaDe = (p, l, j) => { const e = p.vv && p.vv.elenco && p.vv.elenco[l]; return (e && j.id && e.jog[j.id]) || null; };
   function destaquesElenco(p, l) {
@@ -1069,7 +1110,7 @@
       const ordem = l === "h" ? ls.slice().reverse() : ls;
       return `<div class="campo-metade ${l}">${ordem.map((linha) => `<div class="campo-linha">${(l === "a" ? linha.slice().reverse() : linha).map((j) => jogador(l, j, top)).join("")}</div>`).join("")}</div>`;
     };
-    const cab = (l, tid) => `<div class="campo-cab ${l === "h" ? "c" : "f"}">${escudo(tid)}<b>${h(nomeTime(tid))}</b><span class="sub">${h((e[l] && e[l].form) || "")}</span></div>`;
+    const cab = (l, tid) => `<div class="campo-cab ${l === "h" ? "c" : "f"}">${escudo(tid)}<b>${h(nomeTime(tid))}</b><span class="sub">${h((e[l] && e[l].form) || "")}${e[l] && e[l].prov ? " · provável" : ""}</span></div>`;
     return `<div class="campo-bloco">${cab("a", p.a)}<div class="campo">${metade("a")}<div class="campo-meio"></div>${metade("h")}</div>${cab("h", p.h)}
       <p class="sub nota">Números de cada jogador na temporada desta competição: <b>G</b> gols · <b>A</b> assistências · <b>J</b> jogos. <span class="cj-num art">dourado</span> = artilheiro do time, <span class="cj-num gar">azul</span> = líder de assistências.</p></div>`;
   }
@@ -1160,7 +1201,7 @@
       const temElenco = ele && ((ele.h && Object.keys(ele.h.jog).length) || (ele.a && Object.keys(ele.a.jog).length));
       const t5 = p.vv && p.vv.tit5 && (p.vv.tit5.h || p.vv.tit5.a);
       return `<div class="painel-corpo">${avisoFonte()}<div class="vazio vazio-curto"><strong>Escalações ainda não divulgadas</strong>Elas costumam sair cerca de 1 hora antes do jogo.${temElenco ? " Enquanto isso, veja os prováveis titulares e o elenco de cada time." : " Carregando os elencos…"}</div>
-        ${temElenco ? `${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div><p class="sub nota"><b>Prováveis titulares</b>: o goleiro e os 10 jogadores de linha com mais minutos na temporada (${h(temporada || "")}) — é uma estimativa, não a escalação oficial.${t5 ? " <b>Tit.</b>: em quantas das últimas partidas do time o jogador começou jogando." : ""} J, Min, G, A, CG e Cart.: números na temporada. Fonte: ESPN.</p>` : ""}</div>`;
+        ${temElenco ? `${(() => { const ep = escalacaoProvavel(p); return ep ? campinho(p, ep).replace('<div class="campo-bloco">', '<div class="campo-bloco campo-provavel"><p class="campo-aviso">Provável escalação · estimativa pelos minutos na temporada, não é a oficial</p>') : ""; })()}${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div><p class="sub nota"><b>Prováveis titulares</b>: o goleiro e os 10 jogadores de linha com mais minutos na temporada (${h(temporada || "")}) — é uma estimativa, não a escalação oficial.${t5 ? " <b>Tit.</b>: em quantas das últimas partidas do time o jogador começou jogando." : ""} J, Min, G, A, CG e Cart.: números na temporada. Fonte: ESPN.</p>` : ""}</div>`;
     }
     return `<div class="painel-corpo">${avisoFonte()}${campinho(p, e)}
       ${barraOrdemEsc()}<div class="esc-grade">${tabelaJogadores(p, "h", p.h)}${tabelaJogadores(p, "a", p.a)}</div>
@@ -1287,7 +1328,7 @@
     const situacao = vivo ? (p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : p.vv && p.vv.min ? `<span class="vivo-min">${h(p.vv.min)}</span>` : '<span class="vivo">Ao vivo</span>') : fim ? "Encerrado" : `${DIA_CURTO(p.d)} · ${hora(p.d)}`;
     pintarApp("janela/" + code + "/" + p.i, `<section class="janela-jogo">
       <div class="pv-topo">${seloComp(code)}<span class="sub">${h(nomeComp(code))}</span><span class="pv-min">${situacao}</span></div>
-      <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span><span class="pv-gols">${vivo || fim ? `${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}` : "<i>×</i>"}</span><span class="pv-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
+      <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b>${marcaVermelho(p, "h")}</span><span class="pv-gols">${vivo || fim ? `${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}` : "<i>×</i>"}</span><span class="pv-time f">${marcaVermelho(p, "a")}<b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
       ${p.hh != null && (vivo || fim) ? `<p class="sub janela-1t">(${p.hh}x${p.ha}) no 1º tempo</p>` : ""}
       ${temAoVivo(p) ? abaAoVivo(p) : `<div class="painel-corpo"><div class="vazio vazio-curto">${p.semEspn ? "Este jogo não foi encontrado na ESPN." : "Os dados ao vivo aparecem quando o jogo estiver perto de começar."}</div></div>`}
       <p class="janela-rodape"><a href="${location.pathname}#jogo/${h(code)}/${h(p.i)}" target="_blank" rel="noopener">Abrir no ScanBall</a></p>
@@ -1345,9 +1386,9 @@
         ${radarGrafico ? graficoPressao(p, "radar") : ""}
       </div>
       <div class="rsb-barra">
-        <span class="rsb-nome c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span>
+        <span class="rsb-nome c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b>${marcaVermelho(p, "h")}</span>
         <span class="rsb-placar">${vivo || fim ? `${p.fh ?? "–"} - ${p.fa ?? "–"}` : "×"}</span>
-        <span class="rsb-nome f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span>
+        <span class="rsb-nome f">${marcaVermelho(p, "a")}<b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span>
       </div>
       <div class="rsb-corpo">
         <div class="rsb-lances">${feed ? `<ul class="rsb-feed" aria-live="polite">${feed}</ul>` : '<p class="rsb-vazio">Os lances aparecem quando a bola rolar.</p>'}</div>
@@ -1367,15 +1408,16 @@
     // filtro pelos avisos (⚡ 🔥 ⭐ 📈); os jogos com aviso vêm primeiro
     const avDe = new Map(todosVivos.map((x) => [x, avisosAtivos(x.p)]));
     const FILTROS_PV = [["todos", "Todos"], ["aviso", "Com aviso"], ["fav", `${AV.fav.ic} Favorito pressionando`], ["gol", `${AV.gol.ic} Gol próximo`], ["over", `${AV.over.ic} Jogo over`], ["pressao", `${AV.pressao.ic} Pressão`], ["meu", `${AV.meu.ic} Meus avisos`]]
-      .filter(([k]) => k === "todos" || k === "aviso" || (k === "meu" ? estado.cfgAv.meus.length : estado.cfgAv.mostrar[k] !== false));
+      .filter(([k]) => k === "todos" || k === "aviso" || (k === "meu" ? estado.cfgAv.meus.length : estado.cfgAv.mostrar[k] !== false && (k !== "fav" || usaPre())));
     const filtro = FILTROS_PV.some((f) => f[0] === estado.pvFiltro) ? estado.pvFiltro : "todos";
     const passaPv = (x, f) => { const l = avDe.get(x) || []; return f === "todos" || (f === "aviso" ? l.length > 0 : l.some((a) => a.tipo === f)); };
     const vivos = todosVivos.filter((x) => passaPv(x, filtro));
     const chipsPv = todosVivos.length ? `<div class="chips pv-filtros" role="group" aria-label="Filtrar pelos avisos">${FILTROS_PV.map(([k, rot]) => {
       const q = todosVivos.filter((x) => passaPv(x, k)).length;
       return `<button type="button" class="chip${q ? "" : " chip-zero"}" data-pvfiltro="${k}" aria-pressed="${filtro === k}">${rot} <small>${q}</small></button>`;
-    }).join("")}</div>` : "";
-    const pesoAv = (x) => { const l = avDe.get(x) || []; return l.length ? Math.max(...l.map((a) => AV[a.tipo].prior)) : 0; };
+    }).join("")}<button type="button" class="chip chip-pre" data-pvpre role="switch" aria-checked="${usaPre()}" title="${usaPre() ? "Os avisos usam o pré-jogo para completar (favorito, over 2,5, ambas marcam, horário dos gols). Toque para usar só o ao vivo." : "Os avisos usam só o ao vivo. Toque para completar com o pré-jogo."}"><i></i>Usar o pré-jogo</button></div>` : "";
+    // com o pré-jogo ligado, o aviso que o pré-jogo confirma sobe um pouco na lista
+    const pesoAv = (x) => { const l = avDe.get(x) || []; return l.length ? Math.max(...l.map((a) => AV[a.tipo].prior + (usaPre() && a.apoioPre ? 0.5 : 0))) : 0; };
     const pesoFav = (x) => (favoritos.has(chaveFav(x.code, x.p)) ? 4 : 0) + (favTimes.has(String(x.p.h)) || favTimes.has(String(x.p.a)) ? 2 : 0) + (favLigas.has(x.code) ? 1 : 0);
     vivos.sort((a, b) => pesoFav(b) - pesoFav(a) || pesoAv(b) - pesoAv(a) || comps.indexOf(a.code) - comps.indexOf(b.code) || (a.p.d < b.p.d ? -1 : 1));
     const agora = Date.now();
@@ -1394,7 +1436,7 @@
       const fav = favoritos.has(chaveFav(x.code, p));
       return `<article class="painel painel-vivo-card" role="link" tabindex="0" data-ir="jogo/${x.code}/${p.i}">
         <div class="pv-topo">${seloComp(x.code)}<span class="sub">${h(nomeComp(x.code))}</span>${fav ? `<i class="fav-time">${ESTRELA_SVG(12)}</i>` : ""}<span class="pv-min">${p.s === "PAUSED" ? '<span class="vivo">Intervalo</span>' : v.min ? `<span class="vivo-min">${h(v.min)}</span>` : '<span class="vivo">Ao vivo</span>'}</span>${botaoRadar(x.code, p, "so-icone")}${botaoJanela(x.code, p, "so-icone")}</div>
-        <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b></span><span class="pv-gols">${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}</span><span class="pv-time f"><b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
+        <div class="pv-placar"><span class="pv-time c">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b>${marcaVermelho(p, "h")}</span><span class="pv-gols">${p.fh ?? "–"}<i>x</i>${p.fa ?? "–"}</span><span class="pv-time f">${marcaVermelho(p, "a")}<b>${h(nomeTime(p.a))}</b>${escudo(p.a)}</span></div>
         ${graficoPressao(p, true) || (temAoVivo(p) ? '<p class="sub pv-carregando">Carregando lances…</p>' : '<p class="sub pv-carregando">Sem dados ao vivo para este jogo.</p>')}
         ${est}${radarLances(p, true)}${ultimos ? `<ul class="pv-ev">${ultimos}</ul>` : ""}
       </article>`;
@@ -1833,6 +1875,19 @@
     <span class="chance">Chance de vitória</span><span class="odds">Odd justa*</span>${TEM_ODDS ? '<span class="odds">Odd casas**</span>' : ""}<span class="gols">Placar</span></div>`;
   const NOTA_ODD = `<p class="nota-odd">*Odd justa = 1 ÷ chance calculada pela projeção do site (<a href="#modelo">como a chance é calculada</a>). Não é a odd das casas de apostas: serve para comparar com ela.${TEM_ODDS ? "<br>**Odd casas = odd da bet365 (5Dollar) ou, nos jogos sem ela, a média das casas de apostas (The Odds API). Em verde quando está acima da odd justa, ou seja, quando há valor segundo a projeção." : ""}</p>`;
 
+  // cartões vermelhos de cada time (5Dollar primeiro; ESPN se a 5Dollar não tiver o jogo)
+  function vermelhosDe(p) {
+    const v = p && p.vv;
+    if (!v) return null;
+    const c = v.d5 && v.d5.fx && v.d5.fx.cards;
+    if (c && c.home && c.away && c.home.red != null && c.away.red != null) return [Number(c.home.red) || 0, Number(c.away.red) || 0];
+    const e = v.es && v.es.vermelhos;
+    return e ? [Number(e[0]) || 0, Number(e[1]) || 0] : null;
+  }
+  const marcaVermelho = (p, lado) => {
+    const vm = vermelhosDe(p), n = vm ? vm[lado === "h" ? 0 : 1] : 0;
+    return n > 0 ? `<i class="vm-time" title="${n} ${n === 1 ? "cartão vermelho" : "cartões vermelhos"}" aria-label="${n} ${n === 1 ? "cartão vermelho" : "cartões vermelhos"}">${'<i class="ic vermelho"></i>'.repeat(Math.min(n, 3))}</i>` : "";
+  };
   function linhaJogo(code, p) {
     const fim = encerrada(p), vivo = aoVivo(p);
     const k = chaveFav(code, p), fav = favoritos.has(k);
@@ -1857,8 +1912,8 @@
       <span class="quando">${vivo && p.vv && p.vv.min ? `<span>${hora(p.d)}</span><b class="vivo-min">${h(p.vv.min)}</b>${(() => { const al = alertaPressao(p); return al ? `<i class="alerta-lista n${al.nivel} av-${al.tipo} ${al.l === "h" ? "c" : "f"}" title="${h(AV[al.tipo].nome)}: ${h(al.txt.replace(/<br>.*$/, "").replace(/<[^>]+>/g, ""))}">${al.ic}</i>` : ""; })()}` : `<span>${DIA_CURTO(p.d)}</span><b>${hora(p.d)}</b>`}</span>
       <span class="situacao">${ROT_STATUS(p)}</span>
       <span class="equipes">
-        <span class="${vH ? "venc" : perdeu(vH, vA)}">${escudo(p.h)}<span>${h(nomeTime(p.h))}</span>${marcaFav(p.h)}</span>
-        <span class="${vA ? "venc" : perdeu(vA, vH)}">${escudo(p.a)}<span>${h(nomeTime(p.a))}</span>${marcaFav(p.a)}</span>
+        <span class="${vH ? "venc" : perdeu(vH, vA)}">${escudo(p.h)}<span>${h(nomeTime(p.h))}</span>${marcaVermelho(p, "h")}${marcaFav(p.h)}</span>
+        <span class="${vA ? "venc" : perdeu(vA, vH)}">${escudo(p.a)}<span>${h(nomeTime(p.a))}</span>${marcaVermelho(p, "a")}${marcaFav(p.a)}</span>
       </span>
       <span class="chance" title="Chance de vitória do mandante, empate e visitante">${chance}</span>
       <span class="odds" title="Odd justa: 1 ÷ chance calculada. Não é a odd da casa de apostas.">${oddH ? `<span>${oddH}</span><span>${oddA}</span>` : ""}</span>
@@ -2842,6 +2897,8 @@
         <button type="button" class="botao-ic" data-trocaric="${k}" aria-label="Trocar o ícone de ${AV[k].nome}" title="Trocar o ícone">${AV[k].ic}</button>
         <label for="avm-${k}"><b>${AV[k].nome}</b><small>${DESCR_AV[k]}</small></label></div>`).join("")}</div>
       ${tipos.includes(estado.trocandoIc) ? seletorIcone(estado.trocandoIc, AV[estado.trocandoIc].ic) : ""}
+      <div class="av-pre"><label class="check"><input type="checkbox" data-avpre ${usaPre() ? "checked" : ""}> <b>Usar o pré-jogo para completar os avisos</b></label>
+        <p class="sub">Ligado: os avisos também olham os números de antes do jogo — quem era o favorito, chance de over 2,5 e de ambas marcam, e em que parte do jogo os times costumam marcar. Isso aparece no texto do aviso, o aviso que o pré-jogo confirma sobe no painel Ao vivo, e o ${AV.fav.ic} Favorito pressionando funciona. Desligado: os avisos usam só o que está acontecendo no jogo (o ${AV.fav.ic} e as condições de pré-jogo dos "Meus avisos" ficam parados).</p></div>
       <p class="sub">Toque no ícone de um aviso para trocar.</p>
 
       <h3>Meus avisos</h3>
@@ -2913,6 +2970,7 @@
     if (!t || !t.dataset) return;
     const cfg = estado.cfgAv, ds = t.dataset;
     if (ds.avmostrar) { cfg.mostrar[ds.avmostrar] = t.checked; salvarCfgAv(); return; }
+    if (t.hasAttribute("data-avpre")) { cfg.pre = t.checked; salvarCfgAv(); render(); return; }
     if (ds.icoutro) {
       // só o 1º "caractere visível" (um emoji pode ter vários códigos)
       const v = t.value.trim(), seg = typeof Intl !== "undefined" && Intl.Segmenter ? [...new Intl.Segmenter("pt", { granularity: "grapheme" }).segment(v)][0] : null;
@@ -3419,16 +3477,76 @@
   // O robô publica versao.json a cada atualização. Código novo: se a tela não está à vista, recarrega na hora;
   // se está à vista, aparece um aviso "Atualizar agora" (e recarrega assim que a tela sair de vista).
   // Dados novos (tabelas e estatísticas): recarrega quando o app ficou 10 min ou mais fora de vista.
+  // ---------- novidades da versão: aparece uma vez na primeira entrada depois da atualização (e no selo "beta" do topo)
+  const NOVIDADES = {
+    v: "beta 9",
+    itens: [
+      ["🟥", "Cartão vermelho na lista de jogos", "o cartãozinho aparece ao lado do time na lista, no painel Ao vivo e no radar."],
+      ["👕", "Campinho da provável escalação", "antes da escalação oficial já dá para ver o provável time em campo. E o campinho não embola mais os jogadores."],
+      ["📋", "Avisos com o pré-jogo", "os avisos podem usar os números de antes do jogo (favorito, over 2,5, ambas marcam). Liga e desliga no painel Ao vivo e em Avisos."],
+      ["🔄", "Aviso de atualização", "sempre que sair versão nova o site avisa, e mostra este resumo do que mudou."],
+      ["⚡", "App mais leve", "o app aberto por muito tempo no PC não vai mais acumulando memória."],
+      ["🛠️", "Correção de bugs", "substituições que apareciam repetidas no jogo ao vivo e lances que às vezes apareciam duas vezes no lance a lance."],
+    ],
+  };
+  function mostrarNovidades(forcar) {
+    if (MODO_JANELA || document.getElementById("novidades")) return;
+    let visto = "";
+    try { visto = localStorage.getItem("sb_novidades") || ""; } catch (e) {}
+    if (!forcar && visto === NOVIDADES.v) return;
+    const el = document.createElement("div");
+    el.id = "novidades"; el.className = "novidades-fundo";
+    el.innerHTML = `<div class="novidades" role="dialog" aria-modal="true" aria-labelledby="nov-tit">
+      <p class="novidades-selo">ScanBall atualizado</p>
+      <h2 id="nov-tit">O que mudou na ${h(NOVIDADES.v)}</h2>
+      <ul>${NOVIDADES.itens.map(([ic, tit, txt]) => `<li><span class="nov-ic" aria-hidden="true">${ic}</span><span><b>${h(tit)}</b> ${h(txt)}</span></li>`).join("")}</ul>
+      <button type="button" class="botao-q nov-ok">Entendi</button></div>`;
+    const fechar = () => { try { localStorage.setItem("sb_novidades", NOVIDADES.v); } catch (e) {} el.remove(); };
+    el.addEventListener("click", (e) => { if (e.target === el || e.target.closest(".nov-ok")) fechar(); });
+    document.addEventListener("keydown", function esc(e) { if (e.key === "Escape") { fechar(); document.removeEventListener("keydown", esc); } });
+    document.body.appendChild(el);
+    el.querySelector(".nov-ok").focus();
+  }
+  document.addEventListener("click", (e) => {
+    const v = e.target.closest && e.target.closest(".marca .versao");
+    if (!v) return;
+    e.preventDefault(); mostrarNovidades(true);
+  });
+  setTimeout(() => {
+    // voltou de uma atualização feita sozinha (com o site minimizado): conta que atualizou
+    let auto = false;
+    try { auto = sessionStorage.getItem("sb_atualizou") === "1"; sessionStorage.removeItem("sb_atualizou"); } catch (e) {}
+    let visto = "";
+    try { visto = localStorage.getItem("sb_novidades") || ""; } catch (e) {}
+    if (visto !== NOVIDADES.v) mostrarNovidades();
+    else if (auto && !MODO_JANELA) avisoRapido("ScanBall atualizado para a versão mais nova ✓");
+  }, 1200);
+  function avisoRapido(txt) {
+    const el = document.createElement("div");
+    el.className = "aviso-versao aviso-ok"; el.setAttribute("role", "status"); el.textContent = txt;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 6000);
+  }
+  // ---------- versão nova do site: o robô grava versao.json ({ c: código, t: código do teste, d: dados }).
+  // Visível: aparece a faixa "Atualizar agora" (e ela fica até atualizar). Minimizado/em outra aba: atualiza sozinho.
+  // App aberto há muitas horas: quando ninguém mexe por 15 min, recarrega para pegar os dados do dia (e soltar memória).
   (function versaoNova() {
     const minha = String(window.VER_C || "");
     if (!/^https?:$/.test(location.protocol) || !/^[0-9a-f]{10}$/.test(minha)) return; // arquivo local / sem versão do robô
-    let nova = null, dadosNovos = false, foraDesde = document.hidden ? Date.now() : 0;
-    const recarregar = () => { try { sessionStorage.setItem("sb_atualizou", "1"); } catch (e) {} location.reload(); };
+    const abriu = Date.now();
+    let nova = null, dadosNovos = false, foraDesde = document.hidden ? Date.now() : 0, ultConf = 0, mexeu = Date.now();
+    // recarrega pedindo a página nova ao servidor (sem a cópia guardada pelo navegador)
+    const recarregar = () => {
+      try { sessionStorage.setItem("sb_atualizou", "1"); } catch (e) {}
+      const vai = () => location.reload();
+      fetch(location.pathname + location.search, { cache: "reload", credentials: "same-origin" }).then(vai, vai);
+      setTimeout(vai, 4000);
+    };
     function avisar() {
       if (document.getElementById("aviso-versao")) return;
       const el = document.createElement("div");
       el.id = "aviso-versao"; el.className = "aviso-versao"; el.setAttribute("role", "status");
-      el.innerHTML = `<span>O ScanBall foi atualizado.</span><button type="button" class="chip ativo">Atualizar agora</button>`;
+      el.innerHTML = `<span>Saiu uma versão nova do ScanBall.</span><button type="button" class="chip ativo">Atualizar agora</button>`;
       el.querySelector("button").addEventListener("click", recarregar);
       document.body.appendChild(el);
     }
@@ -3436,8 +3554,12 @@
       const longe = document.hidden && foraDesde && Date.now() - foraDesde > 10 * 60e3;
       if (document.hidden && (nova || (dadosNovos && longe))) return recarregar();
       if (nova) avisar();
+      // aberto há mais de 6 h e parado há 15 min (ninguém mexendo): recarrega com os dados novos
+      if (!document.hidden && dadosNovos && Date.now() - abriu > 6 * 3600e3 && Date.now() - mexeu > 15 * 60e3 && !document.querySelector(".novidades-fundo")) recarregar();
     }
     async function conferir() {
+      if (Date.now() - ultConf < 20000) return;
+      ultConf = Date.now();
       try {
         const v = await fetch("versao.json?x=" + Date.now(), { cache: "no-store" }).then((r) => (r.ok ? r.json() : null));
         if (!v) return;
@@ -3447,12 +3569,16 @@
         decidir();
       } catch (e) {}
     }
+    for (const ev of ["pointerdown", "keydown", "wheel"]) document.addEventListener(ev, () => { mexeu = Date.now(); }, { passive: true });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) { foraDesde = Date.now(); if (nova) recarregar(); else conferir(); }
-      else { conferir(); foraDesde = 0; }
+      else { ultConf = 0; conferir(); foraDesde = 0; }
     });
-    setTimeout(conferir, 60e3);
-    setInterval(conferir, 5 * 60e3);
+    // no PC, trocar de janela não esconde a página: confere também quando a janela do app volta a ter foco
+    window.addEventListener("focus", conferir);
+    window.addEventListener("online", () => { ultConf = 0; conferir(); });
+    setTimeout(conferir, 15e3);
+    setInterval(conferir, 3 * 60e3);
   })();
   // número de jogos rolando na aba "Ao vivo" do topo
   function contadorVivo() {

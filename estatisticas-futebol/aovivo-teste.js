@@ -624,7 +624,27 @@
     "Impedimentos": "imped", "Defesas do goleiro": "defesas", "Total de passes": "passes" };
   function chaveSessao(gid, tipo) { return "sb365" + (tipo || "") + "_" + gid; }
   function lerSessao(gid, tipo) { try { return JSON.parse(sessionStorage.getItem(chaveSessao(gid, tipo)) || "null"); } catch (e) { return null; } }
-  function gravarSessao(gid, obj, tipo) { try { sessionStorage.setItem(chaveSessao(gid, tipo), JSON.stringify(obj)); } catch (e) {} }
+  // cópia na aba (para recarregar sem perder o jogo). Grava no máximo a cada 20 s por jogo, e o que não é
+  // regravado há horas sai: o app aberto por dias no PC não vai enchendo a memória da aba
+  const escritoEm = new Map(), INICIO_PAG = Date.now();
+  function gravarSessao(gid, obj, tipo) {
+    const k = chaveSessao(gid, tipo), agora = Date.now();
+    if (agora - (escritoEm.get(k) || 0) < 20000) return;
+    escritoEm.set(k, agora);
+    try { sessionStorage.setItem(k, JSON.stringify(obj)); } catch (e) { limparSessao(true); }
+  }
+  function limparSessao(cheio) {
+    const agora = Date.now();
+    try {
+      for (let i = sessionStorage.length - 1; i >= 0; i--) {
+        const k = sessionStorage.key(i);
+        if (!k || !/^sb365/.test(k)) continue;
+        const t = escritoEm.get(k);
+        if (cheio ? !t || agora - t > 20 * 60e3 : (t ? agora - t > 4 * 3600e3 : agora - INICIO_PAG > 30 * 60e3)) { sessionStorage.removeItem(k); escritoEm.delete(k); }
+      }
+    } catch (e) {}
+  }
+  setInterval(() => limparSessao(false), 30 * 60e3);
   const ultimo365 = new Map();
   async function atualizar365(p, forcar) {
     if (!p || !p.vv || !p.vv.espn || p.vv.st !== "in") return false;
@@ -838,7 +858,8 @@
     // trecho do jogo coberto pelo contador (o histórico do servidor cobre desde o início)
     const inicios = ativas.map((f) => rap.contaDe && rap.contaDe[f]).filter(Boolean);
     const cobre = (me) => !!me && (rap.histOk || inicios.some((x) => valMin(me) >= valMin(x) - 1));
-    const narr = pr ? pr.ev0.filter((e) => CAMPO_CONTADOR[e.k]).map((e) => ({ e, me: minutoDe(pr.slots[e.i]) })) : [];
+    // (substituições também: a da 5Dollar chega primeiro e vale; a da narração, quando chega, só completa)
+    const narr = pr ? pr.ev0.filter((e) => CAMPO_CONTADOR[e.k] || e.k === "sub").map((e) => ({ e, me: minutoDe(pr.slots[e.i]) })) : [];
     // casa cada lance do contador com um lance da narração (mesmo time, tipo igual primeiro, depois "outro chute",
     // minuto perto); cada lance da narração serve para um só
     const recs = travar(rap, ativas, rap.pend.filter((x) => x.k !== "gol")).sort((a, b) => valMin(a) - valMin(b) || a.t - b.t);
@@ -850,7 +871,8 @@
         for (const n of narr) {
           if (usado.has(n) || n.e.l !== x.l || !n.me || !perto(x, n.me)) continue;
           if (exato ? n.e.k !== x.k : !combina(x.k, n.e.k)) continue;
-          const d = Math.abs(valMin(x) - valMin(n.me));
+          // troca: o mesmo jogador entrando (sobrenome) tem preferência sobre só o minuto perto
+          const d = Math.abs(valMin(x) - valMin(n.me)) - (x.k === "sub" && mesmoJogador(x.j, n.e.j) ? 10 : 0);
           if (d < dif) { dif = d; melhor = n; }
         }
         if (melhor) {
@@ -864,8 +886,8 @@
     for (const n of narr) if (usado.has(n) || (contaTipo(n.e.k) && cobre(n.me))) esconde.add(n.e);
     if (pr) {
       pr.ev = esconde.size ? pr.ev0.filter((e) => !esconde.has(e)) : pr.ev0;
-      const seqs = new Set([...esconde].map((e) => e.seq).filter(Boolean));
-      vv.lances = seqs.size ? pr.lances0.filter((l) => !(l.seq && seqs.has(Number(l.seq)) && CAMPO_CONTADOR[l.k])) : pr.lances0;
+      const seqs = new Set([...esconde].map((e) => Number(e.seq)).filter(Boolean)); // (a ESPN às vezes manda o número como texto)
+      vv.lances = seqs.size ? pr.lances0.filter((l) => !(l.seq && seqs.has(Number(l.seq)) && (CAMPO_CONTADOR[l.k] || l.k === "sub"))) : pr.lances0;
     }
     // gol é único: se a narração já tem todos os gols que o placar mostra, o gol do contador sai (mesmo que o
     // minuto da narração e o do contador não batam)
@@ -883,6 +905,7 @@
       const n = par.get(x);
       // casado: posição e minuto exatos da narração, tipo do contador, nome do jogador
       // "para fora" da 5Dollar inclui os bloqueados: se a narração diz qual dos dois foi, fica o tipo dela
+      if (n && x.k === "sub") return { i: n.e.i, l: x.l, k: "sub", j: x.j || n.e.j || "", x: x.x || n.e.x || "", min: n.e.min || x.r + "'", prov: false, t: x.t };
       if (n) return { i: n.e.i, l: x.l, k: x.k === "fora" && (n.e.k === "bloq" || n.e.k === "fora") ? n.e.k : x.k, j: n.e.j || "", x: n.e.x || "", min: n.e.min || x.r + "'", prov: false, t: x.t };
       let i = pr.idx[x.per + ":" + (x.m > LIM[x.per] ? LIM[x.per] : x.m) + ":" + (x.m > LIM[x.per] ? x.m - LIM[x.per] : 0)];
       // o gráfico ainda não tem aquele minuto (ex.: 45+3, quando a narração não abriu os acréscimos): vai para o
@@ -1138,6 +1161,8 @@
     if (mudou) conferirRapidos(p);
     return mudou;
   }
+  const ultimoNome = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().split(/\s+/).pop().replace(/[^a-z]/g, "");
+  const mesmoJogador = (a, b) => !!a && !!b && ultimoNome(a).length > 1 && ultimoNome(a) === ultimoNome(b);
   const semAcento = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
 
   // ---------- gráfico de um jogo que já acabou: narração da ESPN (buscada só quando alguém pede) + ataques e
