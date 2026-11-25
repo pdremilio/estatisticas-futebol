@@ -467,6 +467,7 @@
         n: a.displayName, nc: a.shortName || a.lastName || a.displayName, num: a.jersey || "", pos: (a.position && a.position.abbreviation) || "",
         jg: s.appearances || 0, g: s.totalGoals || 0, a: s.goalAssists || 0, cg: s.shotsOnTarget || 0, ch: s.totalShots || 0,
         am: s.yellowCards || 0, vm: s.redCards || 0, df: s.saves || 0, gs: s.goalsConceded || 0,
+        semEst: !(a.statistics && a.statistics.splits), // a ESPN não mandou os números deste atleta no elenco
       };
     }
     const se = (j && j.season) || {};
@@ -505,15 +506,22 @@
   function faseCore(lg, ano, tipo) {
     const k = lg + ":" + ano + ":" + tipo;
     if (!tiposCore.has(k)) tiposCore.set(k, (async () => {
+      let falhou = false;
       for (let n = 1; n <= 6; n++) {
         const t = await buscarJSON(`${CORE}${lg}/seasons/${ano}/types/${n}`);
-        if (!t) break;
+        if (!t) { falhou = n === 1; break; }
         if (String(t.type) === String(tipo)) return n;
       }
+      if (falhou) setTimeout(() => tiposCore.delete(k), 60e3); // ESPN não respondeu: tenta descobrir de novo depois
       return 1;
     })());
     return tiposCore.get(k);
   }
+  // min: undefined = ainda não buscou · null = buscando · número = minutos · -1 = a ESPN não tem esse número.
+  // Busca falhou (ESPN lenta ou limitando pedidos)? tenta de novo no próximo ciclo, até 3 vezes — antes, a falha
+  // virava "0 minutos" para sempre. Os relacionados do jogo são todos buscados (o "jogos" do elenco da ESPN às
+  // vezes vem atrasado ou vazio); antes da escalação, só quem tem jogos ou veio sem números no elenco.
+  const minBuscando = new Set();
   async function atualizarMinutos(p) {
     const aba = window.App && window.App.abaAberta && window.App.abaAberta();
     if (aba !== "escalacoes" || !p || !p.vv || !p.vv.elenco || !p.vv.espn) return false;
@@ -525,18 +533,30 @@
       const esc = p.vv.esc && p.vv.esc[l];
       const ids = (esc ? esc.jog.map((j) => String(j.id)) : Object.keys(e.jog)).filter((id) => e.jog[id] && e.jog[id].min === undefined);
       if (!ids.length) continue;
-      for (const id of ids) e.jog[id].min = e.jog[id].jg ? null : 0; // null = carregando; quem não jogou fica com 0
-      const buscar = ids.filter((id) => e.jog[id].min === null);
+      const buscar = [];
+      for (const id of ids) {
+        const s = e.jog[id];
+        if (esc || s.jg || s.semEst) { s.min = null; buscar.push(id); } else s.min = 0; // sem jogos na temporada
+      }
       if (buscar.length) {
-        const n = await faseCore(lg, e.ano, e.tipo);
-        for (let i = 0; i < buscar.length; i += 6) {
-          await Promise.all(buscar.slice(i, i + 6).map(async (id) => {
-            const j = await buscarJSON(`${CORE}${lg}/seasons/${e.ano}/types/${n}/athletes/${id}/statistics`);
-            let m = 0;
-            for (const c of (j && j.splits && j.splits.categories) || []) for (const x of c.stats || []) if (x.name === "minutes") m = Number(x.value) || 0;
-            e.jog[id].min = m;
-          }));
-        }
+        const chave = lg + ":" + l + ":" + buscar[0];
+        if (minBuscando.has(chave)) continue;
+        minBuscando.add(chave);
+        try {
+          const n = await faseCore(lg, e.ano, e.tipo);
+          // de 4 em 4 (com um respiro), para a ESPN não recusar pedidos demais de uma vez
+          for (let i = 0; i < buscar.length; i += 4) {
+            await Promise.all(buscar.slice(i, i + 4).map(async (id) => {
+              const s = e.jog[id];
+              const j = await buscarJSON(`${CORE}${lg}/seasons/${e.ano}/types/${n}/athletes/${id}/statistics`);
+              if (!j) { s.tent = (s.tent || 0) + 1; s.min = s.tent >= 3 ? (s.jg ? -1 : 0) : undefined; return; }
+              let m = null;
+              for (const c of (j.splits && j.splits.categories) || []) for (const x of c.stats || []) if (x.name === "minutes") m = Number(x.value) || 0;
+              s.min = m != null ? m : s.jg ? -1 : 0;
+            }));
+            if (i + 4 < buscar.length) await new Promise((r) => setTimeout(r, 250));
+          }
+        } finally { minBuscando.delete(chave); }
       }
       mudou = true;
       redesenhar();

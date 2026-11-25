@@ -1128,15 +1128,15 @@
   function provaveisTitulares(p, l) {
     const e = p.vv && p.vv.elenco && p.vv.elenco[l];
     if (!e) return new Set();
-    const peso = (s) => (s.min != null ? s.min : (s.jg || 0) * 60);
+    const peso = (s) => (s.min != null && s.min >= 0 ? s.min : (s.jg || 0) * 60);
     const lista = Object.entries(e.jog).filter(([, s]) => s.jg > 0 || s.min > 0).sort((a, b) => peso(b[1]) - peso(a[1]) || b[1].jg - a[1].jg);
     const gol = lista.find(([, s]) => PROF(s.pos) === 0);
     const linha = lista.filter(([, s]) => PROF(s.pos) !== 0).slice(0, 10);
     return new Set([...(gol ? [gol[0]] : []), ...linha.map(([id]) => id)]);
   }
   estado.escOrd = ler("esc_ord", "pos");
-  const valorEsc = (s, k, t5) => (k === "t5" ? (t5 == null ? -1 : t5) : !s ? -1 : k === "cart" ? s.am * 1 + s.vm * 3 : k === "min" ? (s.min == null ? -1 : s.min) : s[k] || 0);
-  const fMin = (m) => (m == null ? "…" : m >= 1000 ? Math.floor(m / 1000) + "." + String(m % 1000).padStart(3, "0") : String(m));
+  const valorEsc = (s, k, t5) => (k === "t5" ? (t5 == null ? -1 : t5) : !s ? -1 : k === "cart" ? s.am * 1 + s.vm * 3 : k === "min" ? (s.min == null || s.min < 0 ? -1 : s.min) : s[k] || 0);
+  const fMin = (m) => (m == null ? "…" : m < 0 ? "–" : m >= 1000 ? Math.floor(m / 1000) + "." + String(m % 1000).padStart(3, "0") : String(m));
   function tabelaJogadores(p, l, tid) {
     const e = p.vv.esc && p.vv.esc[l];
     const ele = p.vv.elenco && p.vv.elenco[l];
@@ -1175,7 +1175,7 @@
       // escalação ainda não saiu: prováveis titulares (1 goleiro + 10 de linha com mais minutos) e o resto do elenco
       const lista = Object.entries(ele.jog).map(([id, s]) => ({ id, n: s.n, num: s.num, pos: s.pos, g: 0, a: 0 }));
       if (ord === "pos") {
-        const peso = (j) => { const s = ele.jog[j.id]; return s.min != null ? s.min : (s.jg || 0) * 60; };
+        const peso = (j) => { const s = ele.jog[j.id]; return s.min != null && s.min >= 0 ? s.min : (s.jg || 0) * 60; };
         const tit = lista.filter((j) => prov.has(String(j.id))).sort((a, b) => PROF(a.pos) - PROF(b.pos) || peso(b) - peso(a));
         const resto = lista.filter((j) => !prov.has(String(j.id))).sort((a, b) => peso(b) - peso(a) || ele.jog[b.id].jg - ele.jog[a.id].jg);
         corpo = `${tit.length ? `<table class="dados esc-tab">${cabT("Prováveis titulares")}<tbody>${tit.map((j) => linha(j, "")).join("")}</tbody></table>` : ""}
