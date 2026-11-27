@@ -78,7 +78,7 @@
     dia: null, compJogos: "todas", vistaTabela: "TOTAL",
     ordem: ler("ordem", "hora"), ocultarEncerrados: ler("ocultar", false), soFavoritos: false, busca: "",
     abaJogo: "inteiro", recorte: "lado", ultimos: 5, subClass: "tabela", tempo: 1,
-    rkOrdem: ler("rk_ordem", "elo"), rkN: ler("rk_n", 5), rkFiltro: "todos", pvFiltro: ler("pv_filtro", "todos"),
+    rkOrdem: ler("rk_ordem", "elo"), rkN: ler("rk_n", 5), rkFiltro: "todos", pvFiltro: ler("pv_filtro", "todos"), pvModo: ler("pv_modo", "cards"), pvOrd: ler("pv_ord", ""),
   };
 
   // ------------------------------------------------------------ utilidades
@@ -998,11 +998,13 @@
     </div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-prdev], [data-estper], [data-pvfiltro], [data-radargraf], [data-prtam], [data-pvpre]");
+    const t = e.target.closest && e.target.closest(".pressao .mk, [data-propc], [data-prmodo], [data-prconfig], [data-prdev], [data-estper], [data-pvfiltro], [data-radargraf], [data-prtam], [data-pvpre], [data-pvmodo], [data-pvord]");
     if (!t) return;
     if (t.hasAttribute("data-pvpre")) { estado.cfgAv.pre = !usaPre(); salvarCfgAv(); aoVivoAtualizado(); return; }
     if (t.hasAttribute("data-radargraf")) { radarGrafico = !radarGrafico; try { localStorage.setItem("sb_radar_graf", radarGrafico ? "1" : "0"); } catch (err) {} aoVivoAtualizado(); return; }
     if (t.dataset.estper) { estado.estPer = t.dataset.estper; aoVivoAtualizado(); return; }
+    if (t.dataset.pvmodo) { estado.pvModo = t.dataset.pvmodo; guardar("pv_modo", estado.pvModo); telaPainelVivo(); return; }
+    if (t.dataset.pvord != null) { e.stopPropagation(); estado.pvOrd = estado.pvOrd === t.dataset.pvord ? "" : t.dataset.pvord; guardar("pv_ord", estado.pvOrd); telaPainelVivo(); return; }
     if (t.dataset.pvfiltro) { estado.pvFiltro = t.dataset.pvfiltro; guardar("pv_filtro", estado.pvFiltro); telaPainelVivo(); return; }
     if (t.classList.contains("mk")) {
       const caixaP = t.closest(".pressao"), jogo = caixaP && caixaP.dataset.jogo;
@@ -1441,12 +1443,77 @@
         ${est}${radarLances(p, true)}${ultimos ? `<ul class="pv-ev">${ultimos}</ul>` : ""}
       </article>`;
     };
+    // ---------- modo LISTA: uma linha por jogo, números lado a lado (casa-fora), quem domina fica destacado
+    const par = (es, k) => (es && es[k] && es[k][0] != null && es[k][1] != null ? [Number(es[k][0]) || 0, Number(es[k][1]) || 0] : null);
+    const da10 = (p) => { // ataques perigosos nos últimos 10 minutos (contados pela 5Dollar)
+      const v = p.vv || {}, pr = v.pr, d = v.d5 && v.d5.da;
+      if (!pr || !d) return null;
+      const atual = pr.atual == null ? pr.ultimo : pr.atual;
+      if (atual == null || atual < 0) return null;
+      const out = [0, 0];
+      [["h", 0], ["a", 1]].forEach(([l, i]) => { for (const k in d[l] || {}) { const ix = pr.idx[k]; if (ix != null && ix > atual - 10 && ix <= atual) out[i] += d[l][k] || 0; } });
+      return out;
+    };
+    const dadosLinha = (x) => {
+      const p = x.p, v = p.vv || {}, perSalvo = estado.estPer;
+      estado.estPer = "todo"; // na lista, sempre o jogo todo
+      const es = estatPeriodo(v).es || v.es || null;
+      estado.estPer = perSalvo;
+      const pm = pressaoMomento(p);
+      return { x, p, es, ch: par(es, "chutes"), alvo: par(es, "alvo"), esc: par(es, "esc"), da: par(es, "da"), da10: da10(p), posse: par(es, "posse"), xg: par(es, "xg"),
+        pm: pm && pm.tot >= 0.5 ? pm.h : null, min: parseInt(String(v.min || "").replace(/\D.*$/, ""), 10) || 0 };
+    };
+    const COL_PV = [["min", "Min", (d) => d.min], ["ch", "Chutes", (d) => d.ch && d.ch[0] + d.ch[1]], ["alvo", "No gol", (d) => d.alvo && d.alvo[0] + d.alvo[1]],
+      ["esc", "Escanteios", (d) => d.esc && d.esc[0] + d.esc[1]], ["da", "Ataq. perigosos", (d) => d.da && d.da[0] + d.da[1]], ["da10", "AP 10'", (d) => d.da10 && d.da10[0] + d.da10[1]],
+      ["posse", "Posse", (d) => d.posse && Math.abs(d.posse[0] - 50)], ["xg", "xG", (d) => d.xg && d.xg[0] + d.xg[1]], ["pm", "Pressão 5'", (d) => (d.pm == null ? null : Math.abs(d.pm - 50))]];
+    const celPar = (v, dec, suf = "") => {
+      if (!v) return '<td class="pvl-n vazio">–</td>';
+      const [a, b] = v, f = (n) => (dec ? fNum(n, dec) : Math.round(n)) + suf;
+      // destaque: um lado com bem mais que o outro (pelo menos 3 a mais e quase o dobro)
+      const dom = a - b >= (dec ? 0.5 : 3) && a >= b * 1.8 ? " dom-c" : b - a >= (dec ? 0.5 : 3) && b >= a * 1.8 ? " dom-f" : "";
+      return `<td class="pvl-n${dom}"><b class="${a > b ? "c" : ""}">${f(a)}</b><i>-</i><b class="${b > a ? "f" : ""}">${f(b)}</b></td>`;
+    };
+    const tabelaPv = (lista) => {
+      const linhas = lista.map(dadosLinha);
+      const ord = COL_PV.find((c) => c[0] === estado.pvOrd);
+      if (ord) linhas.sort((a, b) => (ord[2](b) ?? -1) - (ord[2](a) ?? -1));
+      const temXg = linhas.some((d) => d.xg);
+      const cols = COL_PV.filter((c) => c[0] !== "xg" || temXg);
+      const cab = (c) => c[0] === "min" ? "" : `<th scope="col" class="pvl-n"><button type="button" data-pvord="${c[0]}" aria-pressed="${estado.pvOrd === c[0]}" title="Ordenar por ${c[1].toLowerCase()} (de novo para voltar à ordem normal)">${c[1]}${estado.pvOrd === c[0] ? " ▾" : ""}</button></th>`;
+      const linha = (d) => {
+        const { x, p } = d, v = p.vv || {}, o = oddsDo(x.code, p), avs = avDe.get(x) || [];
+        const min = p.s === "PAUSED" ? '<span class="vivo">Int</span>' : v.min ? `<span class="vivo-min">${h(v.min)}</span>` : '<span class="vivo">•</span>';
+        const ht = p.hh != null && p.ha != null && (v.per >= 2 || p.s === "PAUSED") ? `<small>(${p.hh}-${p.ha})</small>` : "";
+        const fav = favoritos.has(chaveFav(x.code, p));
+        const pmCel = d.pm == null ? '<td class="pvl-n vazio">–</td>' : `<td class="pvl-pm" title="Pressão nos últimos 5 min: ${d.pm}% × ${100 - d.pm}%"><span class="pp-barra"><i style="width:${d.pm}%"></i></span><small>${d.pm}-${100 - d.pm}</small></td>`;
+        const celulas = cols.slice(1).map((c) => c[0] === "pm" ? pmCel : c[0] === "posse" ? celPar(d.posse, 0, "") : c[0] === "xg" ? celPar(d.xg, 2) : celPar(d[c[0]])).join("");
+        return `<tr data-ir="jogo/${x.code}/${p.i}"${avs.length ? ' class="com-aviso"' : ""}>
+          <td class="pvl-jogo"><span class="pvl-j-min">${min}${avs.map((a) => h(icAv(a.tipo, a))).join("")}</span><span class="pvl-j-t">${escudo(p.h)}<b>${h(nomeTime(p.h))}</b>${marcaVermelho(p, "h")}<em>${p.fh ?? "–"}</em></span><span class="pvl-j-t">${escudo(p.a)}<b>${h(nomeTime(p.a))}</b>${marcaVermelho(p, "a")}<em>${p.fa ?? "–"}</em></span></td>
+          <td class="pvl-av">${fav ? `<i class="fav-time">${ESTRELA_SVG(11)}</i>` : ""}${avs.map((a) => `<span title="${h(a.txt || AV[a.tipo].nome || "")}">${h(icAv(a.tipo, a))}</span>`).join("")}</td>
+          <td class="pvl-liga" title="${h(nomeComp(x.code))}">${seloComp(x.code)}<span>${h(nomeComp(x.code))}</span></td>
+          <td class="pvl-min">${min}</td>
+          <td class="pvl-casa"><span>${marcaVermelho(p, "h")}<b>${h(nomeTime(p.h))}</b>${escudo(p.h)}</span></td>
+          <td class="pvl-placar"><b>${p.fh ?? "–"}-${p.fa ?? "–"}</b>${ht}</td>
+          <td class="pvl-fora"><span>${escudo(p.a)}<b>${h(nomeTime(p.a))}</b>${marcaVermelho(p, "a")}</span></td>
+          <td class="pvl-odds" title="${o ? (o.fonte === "bet365" ? "Odds pré-jogo bet365 (casa · fora)" : `Odds pré-jogo, média de ${o.n} casas (casa · fora)`) : "Sem odds pré-jogo"}">${o && o.c ? `${fNum(o.c, 2)}<i>·</i>${fNum(o.f, 2)}` : "–"}</td>
+          ${celulas}
+          <td class="pvl-acoes">${botaoRadar(x.code, p, "so-icone")}${botaoJanela(x.code, p, "so-icone")}</td></tr>`;
+      };
+      return `<div class="painel pvl-caixa"><div class="pvl-rola"><table class="pv-tabela">
+        <thead><tr><th scope="col" class="pvl-jogo">Jogo</th><th scope="col" class="pvl-av"><span class="sr">Avisos</span></th><th scope="col" class="pvl-liga">Liga</th><th scope="col" class="pvl-min"><button type="button" data-pvord="min" aria-pressed="${estado.pvOrd === "min"}" title="Ordenar pelo minuto">Min${estado.pvOrd === "min" ? " ▾" : ""}</button></th>
+          <th scope="col" class="pvl-casa">Casa</th><th scope="col" class="pvl-placar">Placar</th><th scope="col" class="pvl-fora">Fora</th><th scope="col" class="pvl-odds">Odds pré</th>
+          ${cols.slice(1).map(cab).join("")}<th scope="col"><span class="sr">Abrir</span></th></tr></thead>
+        <tbody>${linhas.map(linha).join("")}</tbody></table></div>
+        <p class="sub nota pvl-nota">Números casa-fora. Fundo colorido: um time com bem mais que o outro (3 ou mais a mais e quase o dobro). AP 10' = ataques perigosos nos últimos 10 minutos (5Dollar). Toque no título de uma coluna para ordenar.</p></div>`;
+    };
+    const modoPv = estado.pvModo === "lista" ? "lista" : "cards";
+    const trocaModo = `<div class="pv-modo" role="group" aria-label="Como mostrar os jogos">${[["cards", "▦ Cards"], ["lista", "☰ Lista"]].map(([k, rot]) => `<button type="button" class="chip" data-pvmodo="${k}" aria-pressed="${modoPv === k}">${rot}</button>`).join("")}</div>`;
     const linhaProx = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">${hora(x.p.d)}</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} × ${h(nomeTime(x.p.a))}</button></li>`;
     const linhaFim = (x) => `<li><button type="button" data-ir="jogo/${x.code}/${x.p.i}"><span class="data">Fim</span>${seloComp(x.code)}${h(nomeTime(x.p.h))} <b>${x.p.fh}×${x.p.fa}</b> ${h(nomeTime(x.p.a))}</button></li>`;
     pintarApp("aovivo", `<section class="painel-vivo">
-      ${avisoFonte()}<div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${todosVivos.length ? `${todosVivos.length} ${todosVivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho` : ""}</span></div>
+      ${avisoFonte()}<div class="pv-cab"><h2>Ao vivo agora</h2><span class="sub">${todosVivos.length ? `${todosVivos.length} ${todosVivos.length === 1 ? "jogo" : "jogos"} · atualiza sozinho` : ""}</span>${todosVivos.length ? trocaModo : ""}</div>
       ${chipsPv ? chipsPv.replace(/<\/div>$/, `<a class="chip chip-link" href="#avisos">⚙ Avisos e notificações</a></div>`) : ""}
-      ${vivos.length ? `<div class="pv-grade">${vivos.map(card).join("")}</div>` : todosVivos.length ? `<div class="painel"><div class="vazio vazio-curto"><strong>Nenhum jogo com esse aviso agora</strong>Os jogos aparecem aqui sozinhos quando o aviso acender.</div></div>` : `<div class="painel"><div class="vazio"><strong>Nenhum jogo rolando agora</strong>Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas.</div></div>`}
+      ${vivos.length ? (modoPv === "lista" ? tabelaPv(vivos) : `<div class="pv-grade">${vivos.map(card).join("")}</div>`) : todosVivos.length ? `<div class="painel"><div class="vazio vazio-curto"><strong>Nenhum jogo com esse aviso agora</strong>Os jogos aparecem aqui sozinhos quando o aviso acender.</div></div>` : `<div class="painel"><div class="vazio"><strong>Nenhum jogo rolando agora</strong>Os jogos aparecem aqui assim que a bola rolar, com placar, minuto, gráfico de pressão e estatísticas.</div></div>`}
       ${proximos.length || encerradosHoje.length ? `<div class="pv-listas">
         ${proximos.length ? `<div class="painel"><div class="painel-cab"><h3>Próximos jogos</h3></div><ul class="lista-simples pv-lista">${proximos.map(linhaProx).join("")}</ul></div>` : ""}
         ${encerradosHoje.length ? `<div class="painel"><div class="painel-cab"><h3>Terminaram há pouco</h3></div><ul class="lista-simples pv-lista">${encerradosHoje.map(linhaFim).join("")}</ul></div>` : ""}
@@ -3479,14 +3546,10 @@
   // Dados novos (tabelas e estatísticas): recarrega quando o app ficou 10 min ou mais fora de vista.
   // ---------- novidades da versão: aparece uma vez na primeira entrada depois da atualização (e no selo "beta" do topo)
   const NOVIDADES = {
-    v: "beta 9",
+    v: "beta 9.1",
     itens: [
-      ["🟥", "Cartão vermelho na lista de jogos", "o cartãozinho aparece ao lado do time na lista, no painel Ao vivo e no radar."],
-      ["👕", "Campinho da provável escalação", "antes da escalação oficial já dá para ver o provável time em campo. E o campinho não embola mais os jogadores."],
-      ["📋", "Avisos com o pré-jogo", "os avisos podem usar os números de antes do jogo (favorito, over 2,5, ambas marcam). Liga e desliga no painel Ao vivo e em Avisos."],
-      ["🔄", "Aviso de atualização", "sempre que sair versão nova o site avisa, e mostra este resumo do que mudou."],
-      ["⚡", "App mais leve", "o app aberto por muito tempo no PC não vai mais acumulando memória."],
-      ["🛠️", "Correção de bugs", "substituições que apareciam repetidas no jogo ao vivo e lances que às vezes apareciam duas vezes no lance a lance."],
+      ["☰", "Ao vivo em lista", "no painel Ao vivo, o botão Lista mostra todos os jogos numa tabela: placar, odds pré-jogo, chutes, no gol, escanteios, ataques perigosos (total e últimos 10 min), posse e pressão. Quem domina fica destacado, e dá para ordenar tocando no título da coluna."],
+      ["🛠️", "Correção de bugs", "minutos dos jogadores que às vezes não apareciam nas escalações."],
     ],
   };
   function mostrarNovidades(forcar) {

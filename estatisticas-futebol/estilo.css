@@ -1380,3 +1380,54 @@ html.modo-radar, .modo-radar body { height: 100%; margin: 0; overflow: hidden; b
 .novidades .nov-ok { width: 100%; justify-content: center; }
 .aviso-versao.aviso-ok { padding: 10px 16px; }
 .novidades li b { display: block; }
+
+/* ---------- painel Ao vivo em LISTA (uma linha por jogo) */
+.pv-cab .pv-modo { margin-left: auto; display: inline-flex; gap: 4px; }
+.pvl-caixa { padding: 0 !important; overflow: hidden; }
+.pvl-rola { overflow-x: auto; }
+.pv-tabela { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.pv-tabela th { position: sticky; top: 0; z-index: 1; padding: 8px 6px; background: var(--superficie-2); color: var(--tinta-2); font-size: 11.5px; font-weight: 600; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--linha); }
+.pv-tabela th button { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; white-space: nowrap; }
+.pv-tabela th button[aria-pressed="true"] { color: var(--tinta); }
+.pv-tabela td { padding: 6px; border-bottom: 1px solid var(--linha); white-space: nowrap; vertical-align: middle; }
+.pv-tabela tbody tr { cursor: pointer; }
+.pv-tabela tbody tr:hover td { background: var(--superficie-2); }
+.pv-tabela tr.com-aviso td:first-child { box-shadow: inset 3px 0 0 var(--cartao, #F2C230); }
+.pvl-av { width: 44px; font-size: 13px; } .pvl-av span + span { margin-left: 1px; }
+.pvl-liga { max-width: 150px; } .pvl-liga > span { display: inline-block; max-width: 118px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; color: var(--tinta-2); font-size: 12px; margin-left: 5px; }
+.pvl-liga .comp-sigla { width: 16px; height: 16px; vertical-align: middle; }
+.pvl-min { width: 46px; text-align: center !important; }
+.pvl-casa { text-align: right !important; } .pvl-casa > span, .pvl-fora > span { display: inline-flex; align-items: center; gap: 6px; max-width: 190px; }
+.pvl-casa b, .pvl-fora b { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.pvl-casa b { color: var(--casa); } .pvl-fora b { color: var(--fora); }
+.pvl-casa .esc, .pvl-fora .esc, .pvl-casa img, .pvl-fora img { width: 18px; height: 18px; flex: none; }
+.pvl-placar { text-align: center !important; width: 58px; } .pvl-placar b { font: 800 15px/1 var(--fonte-titulo); } .pvl-placar small { display: block; color: var(--tinta-3); font-size: 10.5px; margin-top: 1px; }
+.pvl-odds { color: var(--tinta-2); font-size: 12px; text-align: center !important; } .pvl-odds i, .pvl-n i { font-style: normal; color: var(--tinta-3); margin: 0 3px; }
+.pv-tabela th.pvl-n, .pvl-n { text-align: center !important; }
+.pvl-n b { font-weight: 600; color: var(--tinta-2); } .pvl-n b.c { color: var(--casa); font-weight: 700; } .pvl-n b.f { color: var(--fora); font-weight: 700; }
+.pvl-n.vazio { color: var(--tinta-3); }
+.pvl-n.dom-c { background: color-mix(in srgb, var(--casa) 18%, transparent); } .pvl-n.dom-f { background: color-mix(in srgb, var(--fora) 20%, transparent); }
+.pvl-pm { min-width: 78px; text-align: center !important; } .pvl-pm .pp-barra { display: block; height: 5px; margin: 0 auto 2px; width: 62px; } .pvl-pm small { color: var(--tinta-3); font-size: 10.5px; }
+.pvl-acoes { width: 70px; text-align: right !important; } .pvl-acoes > * { vertical-align: middle; }
+.pvl-nota { margin: 0; padding: 8px 12px; }
+@media (max-width: 640px) {
+  .pv-cab { flex-wrap: wrap; } .pv-cab .pv-modo { margin-left: 0; width: 100%; }
+  .pv-tabela { font-size: 12px; } .pvl-liga > span { display: none; } .pvl-casa > span, .pvl-fora > span { max-width: 120px; }
+}
+.pvl-pm .pp-barra { border-radius: 3px; background: var(--fora); overflow: hidden; } .pvl-pm .pp-barra i { display: block; height: 100%; background: var(--casa); }
+.pv-cab { align-items: center; }
+.pvl-jogo { display: none; }
+@media (max-width: 640px) {
+  /* celular: o jogo vira uma coluna só (minuto, times e placar) que fica parada enquanto os números rolam de lado */
+  .pv-tabela { min-width: 0; }
+  .pv-tabela .pvl-av, .pv-tabela .pvl-liga, .pv-tabela .pvl-min, .pv-tabela .pvl-casa, .pv-tabela .pvl-placar, .pv-tabela .pvl-fora, .pv-tabela .pvl-odds { display: none; }
+  .pv-tabela .pvl-jogo { display: table-cell; position: sticky; left: 0; z-index: 2; background: var(--superficie); min-width: 150px; max-width: 150px; box-shadow: 1px 0 0 var(--linha); }
+  .pv-tabela th.pvl-jogo { background: var(--superficie-2); z-index: 3; }
+  .pvl-jogo .pvl-j-min { display: block; font-size: 11px; margin-bottom: 2px; }
+  .pvl-j-t { display: flex; align-items: center; gap: 5px; line-height: 1.35; }
+  .pvl-j-t b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .pvl-j-t em { font-style: normal; font-weight: 800; font-family: var(--fonte-titulo); }
+  .pvl-j-t .esc, .pvl-j-t img { width: 15px; height: 15px; flex: none; }
+  .pv-tabela td.pvl-n, .pv-tabela th.pvl-n { padding: 6px 7px; }
+  .pv-tabela tbody tr:hover td.pvl-jogo { background: var(--superficie-2); }
+}
